@@ -1,0 +1,52 @@
+{
+  "name": "@cursorflow/orchestrator",
+  "version": "1.0.0",
+  "description": "Git worktree-based parallel AI agent orchestration system for Cursor",
+  "main": "src/cli/index.js",
+  "bin": {
+    "cursorflow": "src/cli/index.js",
+    "cursorflow-setup": "src/cli/setup-commands.js"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "keywords": [
+    "cursor",
+    "cursor-ide",
+    "ai-agent",
+    "orchestration",
+    "git-worktree",
+    "parallel-execution",
+    "code-review",
+    "automation",
+    "devops",
+    "ci-cd"
+  ],
+  "author": "Eugene Jin <eungjin.cigro@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eungjin-cigro/cursorflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eungjin-cigro/cursorflow/issues"
+  },
+  "homepage": "https://github.com/eungjin-cigro/cursorflow#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "peerDependencies": {},
+  "files": [
+    "src/",
+    "scripts/",
+    "commands/",
+    "templates/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}

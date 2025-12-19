@@ -1,0 +1,30 @@
+# Compiled files
+*.log
+.DS_Store
+
+# Test files
+test/
+*.test.js
+*.spec.js
+
+# Development files
+.git/
+.github/
+.vscode/
+.idea/
+
+# Documentation sources (keep compiled docs)
+docs/dev/
+examples/
+
+# Build tools
+tsconfig.json
+.eslintrc.*
+.prettierrc
+jest.config.js
+
+# CI/CD
+.github/
+
+# Source maps
+*.map
