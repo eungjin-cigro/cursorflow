@@ -4,7 +4,7 @@
 새 Feature에 대한 태스크 파일을 준비합니다. Feature 정보를 수집하고 레인별 JSON 파일을 생성합니다.
 
 ## 필수 참조
-- 패키지 문서: `node_modules/@cursorflow/orchestrator/docs/GUIDE.md`
+- 패키지 문서: `node_modules/@litmers/cursorflow-orchestrator/docs/GUIDE.md`
 - 모델 목록: 터미널에서 `cursorflow models --list` 실행
 
 ## Steps

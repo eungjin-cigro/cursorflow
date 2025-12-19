@@ -2,7 +2,7 @@
 
 > Git worktree 기반 병렬 AI 에이전트 오케스트레이션 시스템
 
-[![npm version](https://img.shields.io/npm/v/@cursorflow/orchestrator.svg)](https://www.npmjs.com/package/@cursorflow/orchestrator)
+[![npm version](https://img.shields.io/npm/v/@litmers/cursorflow-orchestrator.svg)](https://www.npmjs.com/package/@litmers/cursorflow-orchestrator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
@@ -25,10 +25,10 @@
 npm install -g @litmers/cursorflow-orchestrator
 
 # pnpm (권장)
-pnpm add -g @cursorflow/orchestrator
+pnpm add -g @litmers/cursorflow-orchestrator
 
 # yarn
-yarn global add @cursorflow/orchestrator
+yarn global add @litmers/cursorflow-orchestrator
 ```
 
 ### 요구사항

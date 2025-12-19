@@ -56,7 +56,7 @@
 ## 📦 패키지 구조 (최종)
 
 ```
-@cursorflow/orchestrator/
+@litmers/cursorflow-orchestrator/
 ├── package.json                  ✅
 ├── README.md                     ✅
 ├── LICENSE                       ✅
@@ -161,7 +161,7 @@ npm pack
 npm publish --tag alpha --access public
 
 # 설치 테스트
-npm install -g @cursorflow/orchestrator@alpha
+npm install -g @litmers/cursorflow-orchestrator
 cursorflow --version
 cursorflow init --example
 ```
