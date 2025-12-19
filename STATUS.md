@@ -239,7 +239,7 @@ cursorflow init --example
 ### 프로젝트 초기화
 ```bash
 cd your-project
-npx @cursorflow/orchestrator@alpha init --example
+npx @litmers/cursorflow-orchestrator init --example
 ```
 
 ### 태스크 준비
