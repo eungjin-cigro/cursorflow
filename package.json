@@ -8,7 +8,6 @@
     "cursorflow-setup": "src/cli/setup-commands.js"
   },
   "scripts": {
-    "test": "node test/run.js",
     "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
