@@ -22,7 +22,7 @@
 
 ```bash
 # npm
-npm install -g @cursorflow/orchestrator
+npm install -g @litmers/cursorflow-orchestrator
 
 # pnpm (권장)
 pnpm add -g @cursorflow/orchestrator

@@ -26,7 +26,7 @@
 
 ## 📦 배포된 패키지 정보
 
-**패키지명**: `@cursorflow/orchestrator`
+**패키지명**: `@litmers/cursorflow-orchestrator`
 **버전**: `v0.1.0`
 **라이센스**: MIT
 **저장소**: https://github.com/eungjin-cigro/cursorflow
@@ -48,7 +48,7 @@ npm login
 npm publish --access public
 
 # 확인
-npm info @cursorflow/orchestrator
+npm info @litmers/cursorflow-orchestrator
 \`\`\`
 
 ---
