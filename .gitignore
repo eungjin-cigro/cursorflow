@@ -30,6 +30,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# NPM credentials
+.npmrc
+
 # Logs
 *.log
 
