@@ -1,11 +1,17 @@
-#!/usr/bin/env node
 /**
  * CursorFlow resume command (stub)
  */
 
-const logger = require('../utils/logger');
+import * as logger from '../utils/logger';
 
-function parseArgs(args) {
+interface ResumeOptions {
+  lane?: string;
+  runDir: string | null;
+  clean: boolean;
+  restart: boolean;
+}
+
+function parseArgs(args: string[]): ResumeOptions {
   return {
     lane: args[0],
     runDir: null,
@@ -14,7 +20,7 @@ function parseArgs(args) {
   };
 }
 
-async function resume(args) {
+async function resume(args: string[]): Promise<void> {
   logger.section('🔁 Resuming Lane');
   
   const options = parseArgs(args);
@@ -28,4 +34,4 @@ async function resume(args) {
   logger.info('This will resume interrupted lanes');
 }
 
-module.exports = resume;
+export = resume;

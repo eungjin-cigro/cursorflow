@@ -1,17 +1,16 @@
-#!/usr/bin/env node
 /**
  * Cursor Agent CLI wrapper and utilities
  */
 
-const { execSync, spawnSync } = require('child_process');
+import { execSync, spawnSync } from 'child_process';
 
 /**
  * Check if cursor-agent CLI is installed
  */
-function checkCursorAgentInstalled() {
+export function checkCursorAgentInstalled(): boolean {
   try {
-    execSync('cursor-agent --version', { stdio: 'pipe' });
-    return true;
+    const result = spawnSync('cursor-agent', ['--version'], { stdio: 'pipe' });
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -20,13 +19,13 @@ function checkCursorAgentInstalled() {
 /**
  * Get cursor-agent version
  */
-function getCursorAgentVersion() {
+export function getCursorAgentVersion(): string | null {
   try {
-    const version = execSync('cursor-agent --version', {
+    const result = spawnSync('cursor-agent', ['--version'], {
       encoding: 'utf8',
       stdio: 'pipe',
-    }).trim();
-    return version;
+    });
+    return result.status === 0 ? result.stdout.trim() : null;
   } catch {
     return null;
   }
@@ -35,7 +34,7 @@ function getCursorAgentVersion() {
 /**
  * Ensure cursor-agent is installed, exit with error message if not
  */
-function ensureCursorAgent() {
+export function ensureCursorAgent(): void {
   if (!checkCursorAgentInstalled()) {
     console.error(`
 ❌ cursor-agent CLI is not installed
@@ -56,7 +55,7 @@ More info: https://docs.cursor.com/agent
 /**
  * Print installation guide
  */
-function printInstallationGuide() {
+export function printInstallationGuide(): void {
   console.log(`
 📦 cursor-agent CLI Installation Guide
 
@@ -83,15 +82,15 @@ After installation, run your command again.
 /**
  * Check if CURSOR_API_KEY is set (for cloud execution)
  */
-function checkCursorApiKey() {
-  return !!process.env.CURSOR_API_KEY;
+export function checkCursorApiKey(): boolean {
+  return !!process.env['CURSOR_API_KEY'];
 }
 
 /**
  * Validate cursor-agent setup for given executor type
  */
-function validateSetup(executor = 'cursor-agent') {
-  const errors = [];
+export function validateSetup(executor = 'cursor-agent'): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
   
   if (executor === 'cursor-agent') {
     if (!checkCursorAgentInstalled()) {
@@ -114,20 +113,18 @@ function validateSetup(executor = 'cursor-agent') {
 /**
  * Get available models (if cursor-agent supports it)
  */
-function getAvailableModels() {
+export function getAvailableModels(): string[] {
   try {
     // This is a placeholder - actual implementation depends on cursor-agent API
-    const result = execSync('cursor-agent --model invalid "test"', {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
+    // execSync('cursor-agent --model invalid "test"', {
+    //   encoding: 'utf8',
+    //   stdio: 'pipe',
+    // });
     
-    // Parse models from error message
-    // This is an example - actual parsing depends on cursor-agent output
     return [];
-  } catch (error) {
+  } catch (error: any) {
     // Parse from error message
-    const output = error.stderr || error.stdout || '';
+    const output = (error.stderr || error.stdout || '').toString();
     // Extract model names from output
     return parseModelsFromOutput(output);
   }
@@ -136,10 +133,10 @@ function getAvailableModels() {
 /**
  * Parse model names from cursor-agent output
  */
-function parseModelsFromOutput(output) {
+export function parseModelsFromOutput(output: string): string[] {
   // This is a placeholder implementation
   // Actual parsing depends on cursor-agent CLI output format
-  const models = [];
+  const models: string[] = [];
   
   // Example parsing logic
   const lines = output.split('\n');
@@ -147,7 +144,7 @@ function parseModelsFromOutput(output) {
     if (line.includes('sonnet') || line.includes('opus') || line.includes('gpt')) {
       const match = line.match(/['"]([^'"]+)['"]/);
       if (match) {
-        models.push(match[1]);
+        models.push(match[1]!);
       }
     }
   }
@@ -158,7 +155,7 @@ function parseModelsFromOutput(output) {
 /**
  * Test cursor-agent with a simple command
  */
-function testCursorAgent() {
+export function testCursorAgent(): { success: boolean; output?: string; error?: string } {
   try {
     const result = spawnSync('cursor-agent', ['--help'], {
       encoding: 'utf8',
@@ -170,7 +167,7 @@ function testCursorAgent() {
       output: result.stdout,
       error: result.stderr,
     };
-  } catch (error) {
+  } catch (error: any) {
     return {
       success: false,
       error: error.message,
@@ -178,10 +175,18 @@ function testCursorAgent() {
   }
 }
 
+export interface AuthCheckResult {
+  authenticated: boolean;
+  message: string;
+  details?: string;
+  help?: string;
+  error?: string;
+}
+
 /**
  * Check cursor-agent authentication
  */
-function checkCursorAuth() {
+export function checkCursorAuth(): AuthCheckResult {
   try {
     const result = spawnSync('cursor-agent', ['create-chat'], {
       encoding: 'utf8',
@@ -196,7 +201,7 @@ function checkCursorAuth() {
       };
     }
     
-    const errorMsg = result.stderr?.trim() || result.stdout?.trim() || '';
+    const errorMsg = (result.stderr?.trim() || result.stdout?.trim() || '').toString();
     
     // Check for authentication errors
     if (errorMsg.includes('not authenticated') || 
@@ -227,7 +232,7 @@ function checkCursorAuth() {
       message: 'Unknown error',
       details: errorMsg,
     };
-  } catch (error) {
+  } catch (error: any) {
     if (error.code === 'ETIMEDOUT') {
       return {
         authenticated: false,
@@ -247,7 +252,7 @@ function checkCursorAuth() {
 /**
  * Print authentication help
  */
-function printAuthHelp() {
+export function printAuthHelp(): void {
   console.log(`
 🔐 Cursor Authentication Required
 
@@ -268,19 +273,5 @@ Common issues:
   • VPN or firewall blocking Cursor API
 
 For more help, visit: https://docs.cursor.com
-
   `);
 }
-
-module.exports = {
-  checkCursorAgentInstalled,
-  getCursorAgentVersion,
-  ensureCursorAgent,
-  printInstallationGuide,
-  checkCursorApiKey,
-  validateSetup,
-  getAvailableModels,
-  testCursorAgent,
-  checkCursorAuth,
-  printAuthHelp,
-};

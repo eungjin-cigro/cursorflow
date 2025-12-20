@@ -1,11 +1,17 @@
-#!/usr/bin/env node
 /**
  * CursorFlow clean command (stub)
  */
 
-const logger = require('../utils/logger');
+import * as logger from '../utils/logger';
 
-function parseArgs(args) {
+interface CleanOptions {
+  type?: string;
+  pattern: string | null;
+  dryRun: boolean;
+  force: boolean;
+}
+
+function parseArgs(args: string[]): CleanOptions {
   return {
     type: args[0], // branches | worktrees | logs | all
     pattern: null,
@@ -14,7 +20,7 @@ function parseArgs(args) {
   };
 }
 
-async function clean(args) {
+async function clean(args: string[]): Promise<void> {
   logger.section('🧹 Cleaning CursorFlow Resources');
   
   const options = parseArgs(args);
@@ -27,4 +33,4 @@ async function clean(args) {
   logger.info('This will clean branches, worktrees, and logs');
 }
 
-module.exports = clean;
+export = clean;

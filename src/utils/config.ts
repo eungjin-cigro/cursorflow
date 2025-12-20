@@ -1,17 +1,18 @@
-#!/usr/bin/env node
 /**
  * Configuration loader for CursorFlow
  * 
  * Finds project root and loads user configuration with defaults
  */
 
-const path = require('path');
-const fs = require('fs');
+import * as path from 'path';
+import * as fs from 'fs';
+import { CursorFlowConfig } from './types';
+export { CursorFlowConfig };
 
 /**
  * Find project root by looking for package.json
  */
-function findProjectRoot(cwd = process.cwd()) {
+export function findProjectRoot(cwd = process.cwd()): string {
   let current = cwd;
   
   while (current !== path.parse(current).root) {
@@ -28,7 +29,7 @@ function findProjectRoot(cwd = process.cwd()) {
 /**
  * Load configuration with defaults
  */
-function loadConfig(projectRoot = null) {
+export function loadConfig(projectRoot: string | null = null): CursorFlowConfig {
   if (!projectRoot) {
     projectRoot = findProjectRoot();
   }
@@ -36,7 +37,7 @@ function loadConfig(projectRoot = null) {
   const configPath = path.join(projectRoot, 'cursorflow.config.js');
   
   // Default configuration
-  const defaults = {
+  const defaults: CursorFlowConfig = {
     // Directories
     tasksDir: '_cursorflow/tasks',
     logsDir: '_cursorflow/logs',
@@ -46,8 +47,8 @@ function loadConfig(projectRoot = null) {
     branchPrefix: 'feature/',
     
     // Execution
-    executor: 'cursor-agent',  // 'cursor-agent' | 'cloud'
-    pollInterval: 60,          // seconds
+    executor: 'cursor-agent',
+    pollInterval: 60,
     
     // Dependencies
     allowDependencyChange: false,
@@ -60,12 +61,12 @@ function loadConfig(projectRoot = null) {
     
     // Lane defaults
     defaultLaneConfig: {
-      devPort: 3001,           // 3000 + laneNumber
+      devPort: 3001,
       autoCreatePr: false,
     },
     
     // Logging
-    logLevel: 'info',          // 'error' | 'warn' | 'info' | 'debug'
+    logLevel: 'info',
     verboseGit: false,
     
     // Advanced
@@ -81,7 +82,7 @@ function loadConfig(projectRoot = null) {
     try {
       const userConfig = require(configPath);
       return { ...defaults, ...userConfig, projectRoot };
-    } catch (error) {
+    } catch (error: any) {
       console.warn(`Warning: Failed to load config from ${configPath}: ${error.message}`);
       console.warn('Using default configuration...');
     }
@@ -93,22 +94,22 @@ function loadConfig(projectRoot = null) {
 /**
  * Get absolute path for tasks directory
  */
-function getTasksDir(config) {
+export function getTasksDir(config: CursorFlowConfig): string {
   return path.join(config.projectRoot, config.tasksDir);
 }
 
 /**
  * Get absolute path for logs directory
  */
-function getLogsDir(config) {
+export function getLogsDir(config: CursorFlowConfig): string {
   return path.join(config.projectRoot, config.logsDir);
 }
 
 /**
  * Validate configuration
  */
-function validateConfig(config) {
-  const errors = [];
+export function validateConfig(config: CursorFlowConfig): boolean {
+  const errors: string[] = [];
   
   if (!config.tasksDir) {
     errors.push('tasksDir is required');
@@ -136,7 +137,7 @@ function validateConfig(config) {
 /**
  * Create default config file
  */
-function createDefaultConfig(projectRoot, force = false) {
+export function createDefaultConfig(projectRoot: string, force = false): string {
   const configPath = path.join(projectRoot, 'cursorflow.config.js');
   
   if (fs.existsSync(configPath) && !force) {
@@ -184,12 +185,3 @@ function createDefaultConfig(projectRoot, force = false) {
   fs.writeFileSync(configPath, template, 'utf8');
   return configPath;
 }
-
-module.exports = {
-  findProjectRoot,
-  loadConfig,
-  getTasksDir,
-  getLogsDir,
-  validateConfig,
-  createDefaultConfig,
-};

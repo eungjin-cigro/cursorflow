@@ -1,18 +1,24 @@
-#!/usr/bin/env node
 /**
  * CursorFlow monitor command
  */
 
-const fs = require('fs');
-const path = require('path');
-const logger = require('../utils/logger');
-const { loadState } = require('../utils/state');
-const { loadConfig } = require('../utils/config');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as logger from '../utils/logger';
+import { loadState } from '../utils/state';
+import { LaneState } from '../utils/types';
+import { loadConfig } from '../utils/config';
 
-function parseArgs(args) {
+interface MonitorOptions {
+  runDir?: string;
+  watch: boolean;
+  interval: number;
+}
+
+function parseArgs(args: string[]): MonitorOptions {
   const watch = args.includes('--watch');
   const intervalIdx = args.indexOf('--interval');
-  const interval = intervalIdx >= 0 ? parseInt(args[intervalIdx + 1]) || 2 : 2;
+  const interval = intervalIdx >= 0 ? parseInt(args[intervalIdx + 1] || '2') || 2 : 2;
   
   // Find run directory (first non-option argument)
   const runDir = args.find(arg => !arg.startsWith('--') && args.indexOf(arg) !== intervalIdx + 1);
@@ -27,7 +33,7 @@ function parseArgs(args) {
 /**
  * Find the latest run directory
  */
-function findLatestRunDir(logsDir) {
+function findLatestRunDir(logsDir: string): string | null {
   const runsDir = path.join(logsDir, 'runs');
   
   if (!fs.existsSync(runsDir)) {
@@ -43,13 +49,13 @@ function findLatestRunDir(logsDir) {
     }))
     .sort((a, b) => b.mtime - a.mtime);
   
-  return runs.length > 0 ? runs[0].path : null;
+  return runs.length > 0 ? runs[0]!.path : null;
 }
 
 /**
  * List all lanes in a run directory
  */
-function listLanes(runDir) {
+function listLanes(runDir: string): { name: string; path: string }[] {
   const lanesDir = path.join(runDir, 'lanes');
   
   if (!fs.existsSync(lanesDir)) {
@@ -70,9 +76,16 @@ function listLanes(runDir) {
 /**
  * Get lane status
  */
-function getLaneStatus(lanePath) {
+function getLaneStatus(lanePath: string): { 
+  status: string; 
+  currentTask: number | string; 
+  totalTasks: number | string; 
+  progress: string; 
+  pipelineBranch?: string; 
+  chatId?: string; 
+} {
   const statePath = path.join(lanePath, 'state.json');
-  const state = loadState(statePath);
+  const state = loadState<LaneState & { chatId?: string }>(statePath);
   
   if (!state) {
     return {
@@ -89,7 +102,7 @@ function getLaneStatus(lanePath) {
   
   return {
     status: state.status || 'unknown',
-    currentTask: state.currentTaskIndex + 1,
+    currentTask: (state.currentTaskIndex || 0) + 1,
     totalTasks: state.totalTasks || '?',
     progress: `${progress}%`,
     pipelineBranch: state.pipelineBranch || '-',
@@ -98,9 +111,24 @@ function getLaneStatus(lanePath) {
 }
 
 /**
+ * Get status icon
+ */
+function getStatusIcon(status: string): string {
+  const icons: Record<string, string> = {
+    'running': '🔄',
+    'completed': '✅',
+    'failed': '❌',
+    'blocked_dependency': '🚫',
+    'no state': '⚪',
+  };
+  
+  return icons[status] || '❓';
+}
+
+/**
  * Display lane status table
  */
-function displayStatus(runDir, lanes) {
+function displayStatus(runDir: string, lanes: { name: string; path: string }[]): void {
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log(`📊 Run: ${path.basename(runDir)}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -132,24 +160,9 @@ function displayStatus(runDir, lanes) {
 }
 
 /**
- * Get status icon
- */
-function getStatusIcon(status) {
-  const icons = {
-    'running': '🔄',
-    'completed': '✅',
-    'failed': '❌',
-    'blocked_dependency': '🚫',
-    'no state': '⚪',
-  };
-  
-  return icons[status] || '❓';
-}
-
-/**
  * Monitor lanes
  */
-async function monitor(args) {
+async function monitor(args: string[]): Promise<void> {
   logger.section('📡 Monitoring Lane Execution');
   
   const options = parseArgs(args);
@@ -159,20 +172,18 @@ async function monitor(args) {
   let runDir = options.runDir;
   
   if (!runDir || runDir === 'latest') {
-    runDir = findLatestRunDir(config.logsDir);
+    runDir = findLatestRunDir(config.logsDir) || undefined;
     
     if (!runDir) {
-      logger.error('No run directories found');
-      logger.info(`Runs directory: ${path.join(config.logsDir, 'runs')}`);
-      process.exit(1);
+      logger.error(`Runs directory: ${path.join(config.logsDir, 'runs')}`);
+      throw new Error('No run directories found');
     }
     
     logger.info(`Using latest run: ${path.basename(runDir)}`);
   }
   
   if (!fs.existsSync(runDir)) {
-    logger.error(`Run directory not found: ${runDir}`);
-    process.exit(1);
+    throw new Error(`Run directory not found: ${runDir}`);
   }
   
   // Watch mode
@@ -187,8 +198,8 @@ async function monitor(args) {
         process.stdout.write('\x1Bc');
       }
       
-      const lanes = listLanes(runDir);
-      displayStatus(runDir, lanes);
+      const lanes = listLanes(runDir!);
+      displayStatus(runDir!, lanes);
       
       iteration++;
     };
@@ -200,10 +211,12 @@ async function monitor(args) {
     const intervalId = setInterval(refresh, options.interval * 1000);
     
     // Handle Ctrl+C
-    process.on('SIGINT', () => {
-      clearInterval(intervalId);
-      console.log('\n👋 Monitoring stopped\n');
-      process.exit(0);
+    return new Promise((_, reject) => {
+      process.on('SIGINT', () => {
+        clearInterval(intervalId);
+        console.log('\n👋 Monitoring stopped\n');
+        process.exit(0);
+      });
     });
     
   } else {
@@ -213,4 +226,4 @@ async function monitor(args) {
   }
 }
 
-module.exports = monitor;
+export = monitor;

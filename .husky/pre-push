@@ -1,0 +1,3 @@
+#!/bin/bash
+./scripts/local-security-gate.sh
+

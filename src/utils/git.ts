@@ -1,24 +1,59 @@
-#!/usr/bin/env node
 /**
  * Git utilities for CursorFlow
  */
 
-const { execSync, spawnSync } = require('child_process');
-const path = require('path');
+import { execSync, spawnSync } from 'child_process';
+
+export interface GitRunOptions {
+  cwd?: string;
+  silent?: boolean;
+}
+
+export interface GitResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  success: boolean;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch?: string;
+  head?: string;
+}
+
+export interface ChangedFile {
+  status: string;
+  file: string;
+}
+
+export interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  author: string;
+  authorEmail: string;
+  timestamp: number;
+  subject: string;
+}
 
 /**
  * Run git command and return output
  */
-function runGit(args, options = {}) {
+export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
   
   try {
-    const result = execSync(`git ${args.join(' ')}`, {
+    const result = spawnSync('git', args, {
       cwd: cwd || process.cwd(),
       encoding: 'utf8',
       stdio: silent ? 'pipe' : 'inherit',
     });
-    return result ? result.trim() : '';
+    
+    if (result.status !== 0 && !silent) {
+      throw new Error(`Git command failed: git ${args.join(' ')}\n${result.stderr || ''}`);
+    }
+    
+    return result.stdout ? result.stdout.trim() : '';
   } catch (error) {
     if (silent) {
       return '';
@@ -30,7 +65,7 @@ function runGit(args, options = {}) {
 /**
  * Run git command and return result object
  */
-function runGitResult(args, options = {}) {
+export function runGitResult(args: string[], options: GitRunOptions = {}): GitResult {
   const { cwd } = options;
   
   const result = spawnSync('git', args, {
@@ -41,8 +76,8 @@ function runGitResult(args, options = {}) {
   
   return {
     exitCode: result.status ?? 1,
-    stdout: (result.stdout || '').trim(),
-    stderr: (result.stderr || '').trim(),
+    stdout: (result.stdout || '').toString().trim(),
+    stderr: (result.stderr || '').toString().trim(),
     success: result.status === 0,
   };
 }
@@ -50,21 +85,21 @@ function runGitResult(args, options = {}) {
 /**
  * Get current branch name
  */
-function getCurrentBranch(cwd) {
+export function getCurrentBranch(cwd?: string): string {
   return runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, silent: true });
 }
 
 /**
  * Get repository root directory
  */
-function getRepoRoot(cwd) {
+export function getRepoRoot(cwd?: string): string {
   return runGit(['rev-parse', '--show-toplevel'], { cwd, silent: true });
 }
 
 /**
  * Check if directory is a git repository
  */
-function isGitRepo(cwd) {
+export function isGitRepo(cwd?: string): boolean {
   const result = runGitResult(['rev-parse', '--git-dir'], { cwd });
   return result.success;
 }
@@ -72,7 +107,7 @@ function isGitRepo(cwd) {
 /**
  * Check if worktree exists
  */
-function worktreeExists(worktreePath, cwd) {
+export function worktreeExists(worktreePath: string, cwd?: string): boolean {
   const result = runGitResult(['worktree', 'list'], { cwd });
   if (!result.success) return false;
   
@@ -82,7 +117,7 @@ function worktreeExists(worktreePath, cwd) {
 /**
  * Create worktree
  */
-function createWorktree(worktreePath, branchName, options = {}) {
+export function createWorktree(worktreePath: string, branchName: string, options: { cwd?: string; baseBranch?: string } = {}): string {
   const { cwd, baseBranch = 'main' } = options;
   
   // Check if branch already exists
@@ -102,7 +137,7 @@ function createWorktree(worktreePath, branchName, options = {}) {
 /**
  * Remove worktree
  */
-function removeWorktree(worktreePath, options = {}) {
+export function removeWorktree(worktreePath: string, options: { cwd?: string; force?: boolean } = {}): void {
   const { cwd, force = false } = options;
   
   const args = ['worktree', 'remove', worktreePath];
@@ -116,18 +151,18 @@ function removeWorktree(worktreePath, options = {}) {
 /**
  * List all worktrees
  */
-function listWorktrees(cwd) {
+export function listWorktrees(cwd?: string): WorktreeInfo[] {
   const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd });
   if (!result.success) return [];
   
-  const worktrees = [];
+  const worktrees: WorktreeInfo[] = [];
   const lines = result.stdout.split('\n');
-  let current = {};
+  let current: Partial<WorktreeInfo> = {};
   
   for (const line of lines) {
     if (line.startsWith('worktree ')) {
       if (current.path) {
-        worktrees.push(current);
+        worktrees.push(current as WorktreeInfo);
       }
       current = { path: line.slice(9) };
     } else if (line.startsWith('branch ')) {
@@ -138,7 +173,7 @@ function listWorktrees(cwd) {
   }
   
   if (current.path) {
-    worktrees.push(current);
+    worktrees.push(current as WorktreeInfo);
   }
   
   return worktrees;
@@ -147,7 +182,7 @@ function listWorktrees(cwd) {
 /**
  * Check if there are uncommitted changes
  */
-function hasUncommittedChanges(cwd) {
+export function hasUncommittedChanges(cwd?: string): boolean {
   const result = runGitResult(['status', '--porcelain'], { cwd });
   return result.success && result.stdout.length > 0;
 }
@@ -155,7 +190,7 @@ function hasUncommittedChanges(cwd) {
 /**
  * Get list of changed files
  */
-function getChangedFiles(cwd) {
+export function getChangedFiles(cwd?: string): ChangedFile[] {
   const result = runGitResult(['status', '--porcelain'], { cwd });
   if (!result.success) return [];
   
@@ -172,7 +207,7 @@ function getChangedFiles(cwd) {
 /**
  * Create commit
  */
-function commit(message, options = {}) {
+export function commit(message: string, options: { cwd?: string; addAll?: boolean } = {}): void {
   const { cwd, addAll = true } = options;
   
   if (addAll) {
@@ -185,7 +220,7 @@ function commit(message, options = {}) {
 /**
  * Push to remote
  */
-function push(branchName, options = {}) {
+export function push(branchName: string, options: { cwd?: string; force?: boolean; setUpstream?: boolean } = {}): void {
   const { cwd, force = false, setUpstream = false } = options;
   
   const args = ['push'];
@@ -206,7 +241,7 @@ function push(branchName, options = {}) {
 /**
  * Fetch from remote
  */
-function fetch(options = {}) {
+export function fetch(options: { cwd?: string; prune?: boolean } = {}): void {
   const { cwd, prune = true } = options;
   
   const args = ['fetch', 'origin'];
@@ -220,7 +255,7 @@ function fetch(options = {}) {
 /**
  * Check if branch exists (local or remote)
  */
-function branchExists(branchName, options = {}) {
+export function branchExists(branchName: string, options: { cwd?: string; remote?: boolean } = {}): boolean {
   const { cwd, remote = false } = options;
   
   if (remote) {
@@ -235,7 +270,7 @@ function branchExists(branchName, options = {}) {
 /**
  * Delete branch
  */
-function deleteBranch(branchName, options = {}) {
+export function deleteBranch(branchName: string, options: { cwd?: string; force?: boolean; remote?: boolean } = {}): void {
   const { cwd, force = false, remote = false } = options;
   
   if (remote) {
@@ -249,7 +284,7 @@ function deleteBranch(branchName, options = {}) {
 /**
  * Merge branch
  */
-function merge(branchName, options = {}) {
+export function merge(branchName: string, options: { cwd?: string; noFf?: boolean; message?: string | null } = {}): void {
   const { cwd, noFf = false, message = null } = options;
   
   const args = ['merge'];
@@ -270,7 +305,7 @@ function merge(branchName, options = {}) {
 /**
  * Get commit info
  */
-function getCommitInfo(commitHash, options = {}) {
+export function getCommitInfo(commitHash: string, options: { cwd?: string } = {}): CommitInfo | null {
   const { cwd } = options;
   
   const format = '--format=%H%n%h%n%an%n%ae%n%at%n%s';
@@ -280,32 +315,11 @@ function getCommitInfo(commitHash, options = {}) {
   
   const lines = result.stdout.split('\n');
   return {
-    hash: lines[0],
-    shortHash: lines[1],
-    author: lines[2],
-    authorEmail: lines[3],
-    timestamp: parseInt(lines[4]),
-    subject: lines[5],
+    hash: lines[0] || '',
+    shortHash: lines[1] || '',
+    author: lines[2] || '',
+    authorEmail: lines[3] || '',
+    timestamp: parseInt(lines[4] || '0'),
+    subject: lines[5] || '',
   };
 }
-
-module.exports = {
-  runGit,
-  runGitResult,
-  getCurrentBranch,
-  getRepoRoot,
-  isGitRepo,
-  worktreeExists,
-  createWorktree,
-  removeWorktree,
-  listWorktrees,
-  hasUncommittedChanges,
-  getChangedFiles,
-  commit,
-  push,
-  fetch,
-  branchExists,
-  deleteBranch,
-  merge,
-  getCommitInfo,
-};

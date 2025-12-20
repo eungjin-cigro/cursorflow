@@ -1,28 +1,45 @@
-#!/usr/bin/env node
 /**
  * Orchestrator - Parallel lane execution with dependency management
  * 
  * Adapted from admin-domains-orchestrator.js
  */
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
+import * as fs from 'fs';
+import * as path from 'path';
+import { spawn, ChildProcess } from 'child_process';
 
-const logger = require('../utils/logger');
-const { loadState, saveState } = require('../utils/state');
-const { runTasks } = require('./runner');
+import * as logger from '../utils/logger';
+import { loadState } from '../utils/state';
+import { LaneState } from '../utils/types';
+
+export interface LaneInfo {
+  name: string;
+  path: string;
+}
+
+export interface SpawnLaneResult {
+  child: ChildProcess;
+  logPath: string;
+}
 
 /**
  * Spawn a lane process
  */
-function spawnLane({ laneName, tasksFile, laneRunDir, executor }) {
+export function spawnLane({ tasksFile, laneRunDir, executor }: { 
+  laneName: string; 
+  tasksFile: string; 
+  laneRunDir: string; 
+  executor: string; 
+}): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
   const logPath = path.join(laneRunDir, 'terminal.log');
   const logFd = fs.openSync(logPath, 'a');
   
+  // Use extension-less resolve to handle both .ts (dev) and .js (dist)
+  const runnerPath = require.resolve('./runner');
+  
   const args = [
-    require.resolve('./runner.js'),
+    runnerPath,
     tasksFile,
     '--run-dir', laneRunDir,
     '--executor', executor,
@@ -46,7 +63,7 @@ function spawnLane({ laneName, tasksFile, laneRunDir, executor }) {
 /**
  * Wait for child process to exit
  */
-function waitChild(proc) {
+export function waitChild(proc: ChildProcess): Promise<number> {
   return new Promise((resolve) => {
     if (proc.exitCode !== null) {
       resolve(proc.exitCode);
@@ -61,7 +78,7 @@ function waitChild(proc) {
 /**
  * List lane task files in directory
  */
-function listLaneFiles(tasksDir) {
+export function listLaneFiles(tasksDir: string): LaneInfo[] {
   if (!fs.existsSync(tasksDir)) {
     return [];
   }
@@ -79,16 +96,19 @@ function listLaneFiles(tasksDir) {
 /**
  * Monitor lane states
  */
-function printLaneStatus(lanes, laneRunDirs) {
+export function printLaneStatus(lanes: LaneInfo[], laneRunDirs: Record<string, string>): void {
   const rows = lanes.map(lane => {
-    const statePath = path.join(laneRunDirs[lane.name], 'state.json');
-    const state = loadState(statePath);
+    const dir = laneRunDirs[lane.name];
+    if (!dir) return { lane: lane.name, status: '(unknown)', task: '-' };
+    
+    const statePath = path.join(dir, 'state.json');
+    const state = loadState<LaneState>(statePath);
     
     if (!state) {
       return { lane: lane.name, status: '(no state)', task: '-' };
     }
     
-    const idx = state.currentTaskIndex + 1;
+    const idx = (state.currentTaskIndex || 0) + 1;
     return {
       lane: lane.name,
       status: state.status || 'unknown',
@@ -105,7 +125,11 @@ function printLaneStatus(lanes, laneRunDirs) {
 /**
  * Run orchestration
  */
-async function orchestrate(tasksDir, options = {}) {
+export async function orchestrate(tasksDir: string, options: { 
+  runDir?: string; 
+  executor?: string; 
+  pollInterval?: number; 
+} = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
   if (lanes.length === 0) {
@@ -115,7 +139,7 @@ async function orchestrate(tasksDir, options = {}) {
   const runRoot = options.runDir || `_cursorflow/logs/runs/run-${Date.now()}`;
   fs.mkdirSync(runRoot, { recursive: true });
   
-  const laneRunDirs = {};
+  const laneRunDirs: Record<string, string> = {};
   for (const lane of lanes) {
     laneRunDirs[lane.name] = path.join(runRoot, 'lanes', lane.name);
   }
@@ -126,13 +150,13 @@ async function orchestrate(tasksDir, options = {}) {
   logger.info(`Lanes: ${lanes.length}`);
   
   // Spawn all lanes
-  const running = [];
+  const running: { lane: string; child: ChildProcess; logPath: string }[] = [];
   
   for (const lane of lanes) {
     const { child, logPath } = spawnLane({
       laneName: lane.name,
       tasksFile: lane.path,
-      laneRunDir: laneRunDirs[lane.name],
+      laneRunDir: laneRunDirs[lane.name]!,
       executor: options.executor || 'cursor-agent',
     });
     
@@ -146,7 +170,7 @@ async function orchestrate(tasksDir, options = {}) {
   }, options.pollInterval || 60000);
   
   // Wait for all lanes
-  const exitCodes = {};
+  const exitCodes: Record<string, number> = {};
   
   for (const r of running) {
     exitCodes[r.lane] = await waitChild(r.child);
@@ -177,9 +201,3 @@ async function orchestrate(tasksDir, options = {}) {
   logger.success('All lanes completed successfully!');
   return { lanes, exitCodes, runRoot };
 }
-
-module.exports = {
-  orchestrate,
-  spawnLane,
-  listLaneFiles,
-};

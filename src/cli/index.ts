@@ -1,11 +1,14 @@
-#!/usr/bin/env node
 /**
  * CursorFlow CLI - Main entry point
  */
 
-const logger = require('../utils/logger');
+import * as logger from '../utils/logger';
 
-const COMMANDS = {
+// Command functions signature
+type CommandFn = (args: string[]) => Promise<void>;
+
+// Lazy load commands to speed up help/version output
+const COMMANDS: Record<string, CommandFn> = {
   init: require('./init'),
   run: require('./run'),
   monitor: require('./monitor'),
@@ -13,7 +16,7 @@ const COMMANDS = {
   resume: require('./resume'),
 };
 
-function printHelp() {
+function printHelp(): void {
   console.log(`
 CursorFlow - Git worktree-based parallel AI agent orchestration
 
@@ -42,38 +45,40 @@ Documentation:
   `);
 }
 
-function printVersion() {
+function printVersion(): void {
   const pkg = require('../../package.json');
   console.log(`CursorFlow v${pkg.version}`);
 }
 
-async function main() {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     printHelp();
-    process.exit(0);
+    return;
   }
   
   if (args.includes('--version') || args.includes('-v')) {
     printVersion();
-    process.exit(0);
+    return;
   }
   
-  const command = args[0];
+  const commandName = args[0]!;
   const commandArgs = args.slice(1);
   
-  if (!COMMANDS[command]) {
-    logger.error(`Unknown command: ${command}`);
+  const command = COMMANDS[commandName];
+  
+  if (!command) {
+    logger.error(`Unknown command: ${commandName}`);
     console.log('\nRun "cursorflow --help" for usage information.');
     process.exit(1);
   }
   
   try {
-    await COMMANDS[command](commandArgs);
-  } catch (error) {
+    await command(commandArgs);
+  } catch (error: any) {
     logger.error(error.message);
-    if (process.env.DEBUG) {
+    if (process.env['DEBUG']) {
       console.error(error.stack);
     }
     process.exit(1);
@@ -83,11 +88,12 @@ async function main() {
 if (require.main === module) {
   main().catch(error => {
     logger.error(`Fatal error: ${error.message}`);
-    if (process.env.DEBUG) {
+    if (process.env['DEBUG']) {
       console.error(error.stack);
     }
     process.exit(1);
   });
 }
 
-module.exports = main;
+export default main;
+export { main };

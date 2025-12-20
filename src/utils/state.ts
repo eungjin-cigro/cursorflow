@@ -1,15 +1,22 @@
-#!/usr/bin/env node
 /**
  * State management utilities for CursorFlow
  */
 
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
+import { 
+  LaneState, 
+  ConversationEntry, 
+  GitLogEntry, 
+  EventEntry, 
+  RunnerConfig 
+} from './types';
+export { LaneState, ConversationEntry, GitLogEntry, EventEntry };
 
 /**
  * Save state to JSON file
  */
-function saveState(statePath, state) {
+export function saveState(statePath: string, state: any): void {
   const stateDir = path.dirname(statePath);
   
   if (!fs.existsSync(stateDir)) {
@@ -22,15 +29,15 @@ function saveState(statePath, state) {
 /**
  * Load state from JSON file
  */
-function loadState(statePath) {
+export function loadState<T = any>(statePath: string): T | null {
   if (!fs.existsSync(statePath)) {
     return null;
   }
   
   try {
     const content = fs.readFileSync(statePath, 'utf8');
-    return JSON.parse(content);
-  } catch (error) {
+    return JSON.parse(content) as T;
+  } catch (error: any) {
     console.warn(`Warning: Failed to parse state file ${statePath}: ${error.message}`);
     return null;
   }
@@ -39,7 +46,7 @@ function loadState(statePath) {
 /**
  * Append to JSONL log file
  */
-function appendLog(logPath, entry) {
+export function appendLog(logPath: string, entry: any): void {
   const logDir = path.dirname(logPath);
   
   if (!fs.existsSync(logDir)) {
@@ -53,7 +60,7 @@ function appendLog(logPath, entry) {
 /**
  * Read JSONL log file
  */
-function readLog(logPath) {
+export function readLog<T = any>(logPath: string): T[] {
   if (!fs.existsSync(logPath)) {
     return [];
   }
@@ -63,8 +70,8 @@ function readLog(logPath) {
     return content
       .split('\n')
       .filter(line => line.trim())
-      .map(line => JSON.parse(line));
-  } catch (error) {
+      .map(line => JSON.parse(line) as T);
+  } catch (error: any) {
     console.warn(`Warning: Failed to parse log file ${logPath}: ${error.message}`);
     return [];
   }
@@ -73,7 +80,7 @@ function readLog(logPath) {
 /**
  * Create initial lane state
  */
-function createLaneState(laneName, config) {
+export function createLaneState(laneName: string, config: RunnerConfig): LaneState {
   return {
     label: laneName,
     status: 'pending',
@@ -91,7 +98,7 @@ function createLaneState(laneName, config) {
 /**
  * Update lane state
  */
-function updateLaneState(state, updates) {
+export function updateLaneState(state: LaneState, updates: Partial<LaneState>): LaneState {
   return {
     ...state,
     ...updates,
@@ -102,10 +109,10 @@ function updateLaneState(state, updates) {
 /**
  * Create conversation log entry
  */
-function createConversationEntry(role, text, options = {}) {
+export function createConversationEntry(role: ConversationEntry['role'], text: string, options: { task?: string; model?: string } = {}): ConversationEntry {
   return {
     timestamp: new Date().toISOString(),
-    role,  // 'user' | 'assistant' | 'reviewer' | 'system'
+    role,
     task: options.task || null,
     fullText: text,
     textLength: text.length,
@@ -116,10 +123,10 @@ function createConversationEntry(role, text, options = {}) {
 /**
  * Create git operation log entry
  */
-function createGitLogEntry(operation, details = {}) {
+export function createGitLogEntry(operation: string, details: any = {}): GitLogEntry {
   return {
     timestamp: new Date().toISOString(),
-    operation,  // 'commit' | 'push' | 'merge' | 'worktree-add' | etc.
+    operation,
     ...details,
   };
 }
@@ -127,7 +134,7 @@ function createGitLogEntry(operation, details = {}) {
 /**
  * Create event log entry
  */
-function createEventEntry(event, data = {}) {
+export function createEventEntry(event: string, data: any = {}): EventEntry {
   return {
     timestamp: new Date().toISOString(),
     event,
@@ -138,7 +145,7 @@ function createEventEntry(event, data = {}) {
 /**
  * Get latest run directory
  */
-function getLatestRunDir(logsDir) {
+export function getLatestRunDir(logsDir: string): string | null {
   if (!fs.existsSync(logsDir)) {
     return null;
   }
@@ -152,13 +159,13 @@ function getLatestRunDir(logsDir) {
     return null;
   }
   
-  return path.join(logsDir, runs[0]);
+  return path.join(logsDir, runs[0]!);
 }
 
 /**
  * List all lanes in a run directory
  */
-function listLanesInRun(runDir) {
+export function listLanesInRun(runDir: string): { name: string; dir: string; statePath: string }[] {
   if (!fs.existsSync(runDir)) {
     return [];
   }
@@ -175,8 +182,8 @@ function listLanesInRun(runDir) {
 /**
  * Get lane state summary
  */
-function getLaneStateSummary(statePath) {
-  const state = loadState(statePath);
+export function getLaneStateSummary(statePath: string): { status: string; progress: string; label?: string; error?: string | null } {
+  const state = loadState<LaneState>(statePath);
   if (!state) {
     return { status: 'unknown', progress: '-' };
   }
@@ -190,18 +197,3 @@ function getLaneStateSummary(statePath) {
     error: state.error,
   };
 }
-
-module.exports = {
-  saveState,
-  loadState,
-  appendLog,
-  readLog,
-  createLaneState,
-  updateLaneState,
-  createConversationEntry,
-  createGitLogEntry,
-  createEventEntry,
-  getLatestRunDir,
-  listLanesInRun,
-  getLaneStateSummary,
-};

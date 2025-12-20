@@ -1,31 +1,43 @@
-#!/usr/bin/env node
 /**
  * Core Runner - Execute tasks sequentially in a lane
  * 
  * Adapted from sequential-agent-runner.js
  */
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync, spawnSync } from 'child_process';
 
-const git = require('../utils/git');
-const logger = require('../utils/logger');
-const { ensureCursorAgent, checkCursorApiKey } = require('../utils/cursor-agent');
-const { saveState, loadState, appendLog, createConversationEntry, createGitLogEntry } = require('../utils/state');
+import * as git from '../utils/git';
+import * as logger from '../utils/logger';
+import { ensureCursorAgent, checkCursorAuth, printAuthHelp } from '../utils/cursor-agent';
+import { saveState, appendLog, createConversationEntry } from '../utils/state';
+import { 
+  RunnerConfig, 
+  Task, 
+  TaskExecutionResult, 
+  AgentSendResult, 
+  DependencyPolicy, 
+  DependencyRequestPlan,
+  LaneState
+} from '../utils/types';
 
 /**
  * Execute cursor-agent command with timeout and better error handling
  */
-function cursorAgentCreateChat() {
-  const { execSync } = require('child_process');
-  
+export function cursorAgentCreateChat(): string {
   try {
-    const out = execSync('cursor-agent create-chat', {
+    const res = spawnSync('cursor-agent', ['create-chat'], {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 30000, // 30 second timeout
     });
+    
+    if (res.error || res.status !== 0) {
+      throw res.error || new Error(res.stderr || 'Failed to create chat');
+    }
+
+    const out = res.stdout;
     const lines = out.split('\n').filter(Boolean);
     const chatId = lines[lines.length - 1] || null;
     
@@ -35,7 +47,7 @@ function cursorAgentCreateChat() {
     
     logger.info(`Created chat session: ${chatId}`);
     return chatId;
-  } catch (error) {
+  } catch (error: any) {
     // Check for common errors
     if (error.message.includes('ENOENT')) {
       throw new Error('cursor-agent CLI not found. Install with: npm install -g @cursor/agent');
@@ -77,14 +89,14 @@ function cursorAgentCreateChat() {
   }
 }
 
-function parseJsonFromStdout(stdout) {
+function parseJsonFromStdout(stdout: string): any {
   const text = String(stdout || '').trim();
   if (!text) return null;
   const lines = text.split('\n').filter(Boolean);
   
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (line.startsWith('{') && line.endsWith('}')) {
+    const line = lines[i]?.trim();
+    if (line?.startsWith('{') && line?.endsWith('}')) {
       try {
         return JSON.parse(line);
       } catch {
@@ -95,9 +107,12 @@ function parseJsonFromStdout(stdout) {
   return null;
 }
 
-function cursorAgentSend({ workspaceDir, chatId, prompt, model }) {
-  const { spawnSync } = require('child_process');
-  
+export function cursorAgentSend({ workspaceDir, chatId, prompt, model }: { 
+  workspaceDir: string; 
+  chatId: string; 
+  prompt: string; 
+  model?: string; 
+}): AgentSendResult {
   const args = [
     '--print',
     '--output-format', 'json',
@@ -117,7 +132,7 @@ function cursorAgentSend({ workspaceDir, chatId, prompt, model }) {
   
   // Check for timeout
   if (res.error) {
-    if (res.error.code === 'ETIMEDOUT') {
+    if ((res.error as any).code === 'ETIMEDOUT') {
       return {
         ok: false,
         exitCode: -1,
@@ -166,14 +181,14 @@ function cursorAgentSend({ workspaceDir, chatId, prompt, model }) {
     
     return {
       ok: false,
-      exitCode: res.status,
+      exitCode: res.status ?? -1,
       error: errorMsg,
     };
   }
   
   return {
     ok: !json.is_error,
-    exitCode: res.status,
+    exitCode: res.status ?? 0,
     sessionId: json.session_id || chatId,
     resultText: json.result || '',
   };
@@ -182,12 +197,12 @@ function cursorAgentSend({ workspaceDir, chatId, prompt, model }) {
 /**
  * Extract dependency change request from agent response
  */
-function extractDependencyRequest(text) {
+export function extractDependencyRequest(text: string): { required: boolean; plan?: DependencyRequestPlan; raw: string } {
   const t = String(text || '');
   const marker = 'DEPENDENCY_CHANGE_REQUIRED';
   
   if (!t.includes(marker)) {
-    return { required: false };
+    return { required: false, raw: t };
   }
   
   const after = t.split(marker).slice(1).join(marker);
@@ -197,7 +212,7 @@ function extractDependencyRequest(text) {
     try {
       return {
         required: true,
-        plan: JSON.parse(match[0]),
+        plan: JSON.parse(match[0]!) as DependencyRequestPlan,
         raw: t,
       };
     } catch {
@@ -211,7 +226,7 @@ function extractDependencyRequest(text) {
 /**
  * Wrap prompt with dependency policy
  */
-function wrapPromptForDependencyPolicy(prompt, policy) {
+export function wrapPromptForDependencyPolicy(prompt: string, policy: DependencyPolicy): string {
   if (policy.allowDependencyChange && !policy.lockfileReadOnly) {
     return prompt;
   }
@@ -243,8 +258,8 @@ ${prompt}`;
 /**
  * Apply file permissions based on dependency policy
  */
-function applyDependencyFilePermissions(worktreeDir, policy) {
-  const targets = [];
+export function applyDependencyFilePermissions(worktreeDir: string, policy: DependencyPolicy): void {
+  const targets: string[] = [];
   
   if (!policy.allowDependencyChange) {
     targets.push('package.json');
@@ -271,16 +286,24 @@ function applyDependencyFilePermissions(worktreeDir, policy) {
 /**
  * Run a single task
  */
-async function runTask({
+export async function runTask({
   task,
   config,
   index,
   worktreeDir,
-  pipelineBranch,
   taskBranch,
   chatId,
   runDir,
-}) {
+}: {
+  task: Task;
+  config: RunnerConfig;
+  index: number;
+  worktreeDir: string;
+  pipelineBranch: string;
+  taskBranch: string;
+  chatId: string;
+  runDir: string;
+}): Promise<TaskExecutionResult> {
   const model = task.model || config.model || 'sonnet-4.5';
   const convoPath = path.join(runDir, 'conversation.jsonl');
   
@@ -310,7 +333,7 @@ async function runTask({
     model,
   });
   
-  appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error, {
+  appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
     task: task.name,
     model,
   }));
@@ -325,7 +348,7 @@ async function runTask({
   }
   
   // Check for dependency request
-  const depReq = extractDependencyRequest(r1.resultText);
+  const depReq = extractDependencyRequest(r1.resultText || '');
   if (depReq.required && !config.dependencyPolicy.allowDependencyChange) {
     return {
       taskName: task.name,
@@ -348,9 +371,7 @@ async function runTask({
 /**
  * Run all tasks in sequence
  */
-async function runTasks(config, runDir) {
-  const { checkCursorAuth, printAuthHelp } = require('../utils/cursor-agent');
-  
+export async function runTasks(config: RunnerConfig, runDir: string): Promise<TaskExecutionResult[]> {
   // Ensure cursor-agent is installed
   ensureCursorAgent();
   
@@ -379,7 +400,7 @@ async function runTasks(config, runDir) {
   logger.success('✓ Cursor authentication OK');
   
   const repoRoot = git.getRepoRoot();
-  const pipelineBranch = config.pipelineBranch || `${config.branchPrefix}${Date.now().toString(36)}`;
+  const pipelineBranch = config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}`;
   const worktreeDir = path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch);
   
   logger.section('🚀 Starting Pipeline');
@@ -398,22 +419,26 @@ async function runTasks(config, runDir) {
   const chatId = cursorAgentCreateChat();
   
   // Save initial state
-  const state = {
+  const state: LaneState = {
     status: 'running',
     pipelineBranch,
     worktreeDir,
-    chatId,
     totalTasks: config.tasks.length,
     currentTaskIndex: 0,
+    label: pipelineBranch,
+    startTime: Date.now(),
+    endTime: null,
+    error: null,
+    dependencyRequest: null,
   };
   
   saveState(path.join(runDir, 'state.json'), state);
   
   // Run tasks
-  const results = [];
+  const results: TaskExecutionResult[] = [];
   
   for (let i = 0; i < config.tasks.length; i++) {
-    const task = config.tasks[i];
+    const task = config.tasks[i]!;
     const taskBranch = `${pipelineBranch}--${String(i + 1).padStart(2, '0')}-${task.name}`;
     
     const result = await runTask({
@@ -435,8 +460,8 @@ async function runTasks(config, runDir) {
     
     // Handle blocked or error
     if (result.status === 'BLOCKED_DEPENDENCY') {
-      state.status = 'blocked_dependency';
-      state.dependencyRequest = result.dependencyRequest;
+      state.status = 'failed'; // Or blocked if we had a blocked status in LaneState
+      state.dependencyRequest = result.dependencyRequest || null;
       saveState(path.join(runDir, 'state.json'), state);
       logger.warn('Task blocked on dependency change');
       process.exit(2);
@@ -444,6 +469,7 @@ async function runTasks(config, runDir) {
     
     if (result.status !== 'FINISHED') {
       state.status = 'failed';
+      state.error = result.error || 'Unknown error';
       saveState(path.join(runDir, 'state.json'), state);
       logger.error(`Task failed: ${result.error}`);
       process.exit(1);
@@ -457,16 +483,12 @@ async function runTasks(config, runDir) {
   
   // Complete
   state.status = 'completed';
+  state.endTime = Date.now();
   saveState(path.join(runDir, 'state.json'), state);
   
   logger.success('All tasks completed!');
   return results;
 }
-
-module.exports = {
-  runTasks,
-  runTask,
-};
 
 /**
  * CLI entry point
@@ -479,12 +501,12 @@ if (require.main === module) {
     process.exit(1);
   }
   
-  const tasksFile = args[0];
+  const tasksFile = args[0]!;
   const runDirIdx = args.indexOf('--run-dir');
-  const executorIdx = args.indexOf('--executor');
+  // const executorIdx = args.indexOf('--executor');
   
-  const runDir = runDirIdx >= 0 ? args[runDirIdx + 1] : '.';
-  const executor = executorIdx >= 0 ? args[executorIdx + 1] : 'cursor-agent';
+  const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
+  // const executor = executorIdx >= 0 ? args[executorIdx + 1] : 'cursor-agent';
   
   if (!fs.existsSync(tasksFile)) {
     console.error(`Tasks file not found: ${tasksFile}`);
@@ -492,10 +514,10 @@ if (require.main === module) {
   }
   
   // Load tasks configuration
-  let config;
+  let config: RunnerConfig;
   try {
-    config = JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
-  } catch (error) {
+    config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
+  } catch (error: any) {
     console.error(`Failed to load tasks file: ${error.message}`);
     process.exit(1);
   }
@@ -513,7 +535,7 @@ if (require.main === module) {
     })
     .catch(error => {
       console.error(`Runner failed: ${error.message}`);
-      if (process.env.DEBUG) {
+      if (process.env['DEBUG']) {
         console.error(error.stack);
       }
       process.exit(1);

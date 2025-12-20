@@ -1,17 +1,22 @@
-#!/usr/bin/env node
 /**
  * Setup Cursor commands
  * 
  * Installs CursorFlow commands to .cursor/commands/cursorflow/
  */
 
-const fs = require('fs');
-const path = require('path');
-const logger = require('../utils/logger');
-const { findProjectRoot } = require('../utils/config');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as logger from '../utils/logger';
+import { findProjectRoot } from '../utils/config';
 
-function parseArgs(args) {
-  const options = {
+interface SetupOptions {
+  force?: boolean;
+  uninstall?: boolean;
+  silent?: boolean;
+}
+
+function parseArgs(args: string[]): SetupOptions {
+  const options: SetupOptions = {
     force: false,
     uninstall: false,
     silent: false,
@@ -39,7 +44,7 @@ function parseArgs(args) {
   return options;
 }
 
-function printHelp() {
+function printHelp(): void {
   console.log(`
 Usage: cursorflow-setup [options]
 
@@ -58,12 +63,12 @@ Examples:
   `);
 }
 
-function getCommandsSourceDir() {
+function getCommandsSourceDir(): string {
   // Commands are in the package directory
   return path.join(__dirname, '..', '..', 'commands');
 }
 
-function setupCommands(options = {}) {
+export function setupCommands(options: SetupOptions = {}): { installed: number; backed: number; skipped: number } {
   const projectRoot = findProjectRoot();
   const targetDir = path.join(projectRoot, '.cursor', 'commands', 'cursorflow');
   const sourceDir = getCommandsSourceDir();
@@ -139,7 +144,7 @@ function setupCommands(options = {}) {
   return { installed, backed, skipped };
 }
 
-function uninstallCommands(options = {}) {
+export function uninstallCommands(options: SetupOptions = {}): { removed: number } {
   const projectRoot = findProjectRoot();
   const targetDir = path.join(projectRoot, '.cursor', 'commands', 'cursorflow');
   
@@ -178,7 +183,7 @@ function uninstallCommands(options = {}) {
   return { removed };
 }
 
-async function main(args) {
+async function main(args: string[]): Promise<any> {
   const options = parseArgs(args);
   
   try {
@@ -187,7 +192,7 @@ async function main(args) {
     } else {
       return setupCommands(options);
     }
-  } catch (error) {
+  } catch (error: any) {
     if (!options.silent) {
       logger.error(error.message);
     }
@@ -198,13 +203,9 @@ async function main(args) {
 if (require.main === module) {
   main(process.argv.slice(2)).catch(error => {
     console.error('❌ Error:', error.message);
-    if (process.env.DEBUG) {
+    if (process.env['DEBUG']) {
       console.error(error.stack);
     }
     process.exit(1);
   });
 }
-
-module.exports = setupCommands;
-module.exports.setupCommands = setupCommands;
-module.exports.uninstallCommands = uninstallCommands;

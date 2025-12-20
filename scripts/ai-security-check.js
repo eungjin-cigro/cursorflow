@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 // 색상 정의
 const colors = {
@@ -29,8 +29,10 @@ if (!OPENAI_API_KEY) {
 function getChangedFiles() {
   try {
     const baseBranch = process.env.GITHUB_BASE_REF || 'main';
-    const diffCommand = `git diff --name-only origin/${baseBranch}...HEAD`;
-    const files = execSync(diffCommand, { encoding: 'utf-8' })
+    const result = spawnSync('git', ['diff', '--name-only', `origin/${baseBranch}...HEAD`], { encoding: 'utf-8' });
+    if (result.status !== 0) throw new Error(result.stderr);
+    
+    const files = result.stdout
       .split('\n')
       .filter(f => f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.tsx'))
       .filter(f => f && fs.existsSync(f));
@@ -38,7 +40,10 @@ function getChangedFiles() {
   } catch (error) {
     // PR이 아닌 경우 최근 커밋의 파일들
     try {
-      const files = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { encoding: 'utf-8' })
+      const result = spawnSync('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], { encoding: 'utf-8' });
+      if (result.status !== 0) return [];
+      
+      const files = result.stdout
         .split('\n')
         .filter(f => f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.tsx'))
         .filter(f => f && fs.existsSync(f));
@@ -71,6 +76,8 @@ Please analyze for:
 8. **Rate limiting or DoS vulnerabilities**
 9. **CSRF/SSRF vulnerabilities**
 10. **Any OWASP Top 10 issues**
+11. **CodeQL-specific patterns** (tainted data flow, improper input validation, dangerous sinks like eval or child_process.exec)
+12. **Code quality issues** that might trigger CodeQL's "Security and Quality" queries
 
 Respond in JSON format:
 {

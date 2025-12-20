@@ -1,18 +1,18 @@
-#!/usr/bin/env node
 /**
  * Reviewer - Code review agent
  * 
  * Adapted from reviewer-agent.js
  */
 
-const logger = require('../utils/logger');
-const { appendLog, createConversationEntry } = require('../utils/state');
-const path = require('path');
+import * as logger from '../utils/logger';
+import { appendLog, createConversationEntry } from '../utils/state';
+import * as path from 'path';
+import { ReviewResult, ReviewIssue, TaskResult, RunnerConfig, AgentSendResult } from '../utils/types';
 
 /**
  * Build review prompt
  */
-function buildReviewPrompt({ taskName, taskBranch, acceptanceCriteria = [] }) {
+export function buildReviewPrompt({ taskName, taskBranch, acceptanceCriteria = [] }: { taskName: string; taskBranch: string; acceptanceCriteria?: string[] }): string {
   const criteriaList = acceptanceCriteria.length > 0
     ? acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')
     : 'Work should be completed properly.';
@@ -61,29 +61,29 @@ IMPORTANT: You MUST respond in the exact JSON format above. "status" must be eit
 /**
  * Parse review result
  */
-function parseReviewResult(text) {
+export function parseReviewResult(text: string): ReviewResult {
   const t = String(text || '');
   
   // Try JSON block
   const jsonMatch = t.match(/```json\n([\s\S]*?)\n```/);
   if (jsonMatch) {
     try {
-      const parsed = JSON.parse(jsonMatch[1]);
+      const parsed = JSON.parse(jsonMatch[1]!);
       return {
         status: parsed.status || 'needs_changes',
         buildSuccess: parsed.buildSuccess !== false,
-        issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+        issues: Array.isArray(parsed.issues) ? (parsed.issues as ReviewIssue[]) : [],
+        suggestions: Array.isArray(parsed.suggestions) ? (parsed.suggestions as string[]) : [],
         summary: parsed.summary || '',
         raw: t,
       };
-    } catch (err) {
+    } catch (err: any) {
       logger.warn(`JSON parse failed: ${err.message}`);
     }
   }
   
   // Fallback parsing
-  const hasApproved = t.toLowerCase().includes('"status": "approved"');
+  const hasApproved = t.toLowerCase().includes('approved');
   const hasIssues = t.toLowerCase().includes('needs_changes') ||
                     t.toLowerCase().includes('error') ||
                     t.toLowerCase().includes('failed');
@@ -101,8 +101,8 @@ function parseReviewResult(text) {
 /**
  * Build feedback prompt
  */
-function buildFeedbackPrompt(review) {
-  const lines = [];
+export function buildFeedbackPrompt(review: ReviewResult): string {
+  const lines: string[] = [];
   lines.push('# Code Review Feedback');
   lines.push('');
   lines.push('The reviewer found the following issues. Please fix them:');
@@ -110,7 +110,7 @@ function buildFeedbackPrompt(review) {
   
   if (!review.buildSuccess) {
     lines.push('## CRITICAL: Build Failed');
-    lines.push('- `pnpm build` failed. Fix build errors first.');
+    lines.push('- \`pnpm build\` failed. Fix build errors first.');
     lines.push('');
   }
   
@@ -132,7 +132,7 @@ function buildFeedbackPrompt(review) {
   
   lines.push('## Requirements');
   lines.push('1. Fix all issues listed above');
-  lines.push('2. Ensure `pnpm build` succeeds');
+  lines.push('2. Ensure \`pnpm build\` succeeds');
   lines.push('3. Commit and push your changes');
   lines.push('');
   lines.push('**Let me know when fixes are complete.**');
@@ -143,7 +143,14 @@ function buildFeedbackPrompt(review) {
 /**
  * Review task
  */
-async function reviewTask({ taskResult, worktreeDir, runDir, config, cursorAgentSend, cursorAgentCreateChat }) {
+export async function reviewTask({ taskResult, worktreeDir, runDir, config, cursorAgentSend, cursorAgentCreateChat }: { 
+  taskResult: TaskResult; 
+  worktreeDir: string; 
+  runDir: string; 
+  config: RunnerConfig; 
+  cursorAgentSend: (options: { workspaceDir: string; chatId: string; prompt: string; model?: string }) => AgentSendResult; 
+  cursorAgentCreateChat: () => string; 
+}): Promise<ReviewResult> {
   const reviewPrompt = buildReviewPrompt({
     taskName: taskResult.taskName,
     taskBranch: taskResult.taskBranch,
@@ -160,11 +167,11 @@ async function reviewTask({ taskResult, worktreeDir, runDir, config, cursorAgent
     model: config.reviewModel || 'sonnet-4.5-thinking',
   });
   
-  const review = parseReviewResult(reviewResult.resultText);
+  const review = parseReviewResult(reviewResult.resultText || '');
   
   // Log review
   const convoPath = path.join(runDir, 'conversation.jsonl');
-  appendLog(convoPath, createConversationEntry('reviewer', reviewResult.resultText, {
+  appendLog(convoPath, createConversationEntry('reviewer', reviewResult.resultText || 'No result', {
     task: taskResult.taskName,
     model: config.reviewModel,
   }));
@@ -177,10 +184,18 @@ async function reviewTask({ taskResult, worktreeDir, runDir, config, cursorAgent
 /**
  * Review loop with feedback
  */
-async function runReviewLoop({ taskResult, worktreeDir, runDir, config, workChatId, cursorAgentSend, cursorAgentCreateChat }) {
+export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, workChatId, cursorAgentSend, cursorAgentCreateChat }: {
+  taskResult: TaskResult;
+  worktreeDir: string;
+  runDir: string;
+  config: RunnerConfig;
+  workChatId: string;
+  cursorAgentSend: (options: { workspaceDir: string; chatId: string; prompt: string; model?: string }) => AgentSendResult;
+  cursorAgentCreateChat: () => string;
+}): Promise<{ approved: boolean; review: ReviewResult; iterations: number; error?: string }> {
   const maxIterations = config.maxReviewIterations || 3;
   let iteration = 0;
-  let currentReview = null;
+  let currentReview: ReviewResult | null = null;
   
   while (iteration < maxIterations) {
     currentReview = await reviewTask({
@@ -221,13 +236,5 @@ async function runReviewLoop({ taskResult, worktreeDir, runDir, config, workChat
     }
   }
   
-  return { approved: false, review: currentReview, iterations: iteration };
+  return { approved: false, review: currentReview!, iterations: iteration };
 }
-
-module.exports = {
-  buildReviewPrompt,
-  parseReviewResult,
-  buildFeedbackPrompt,
-  reviewTask,
-  runReviewLoop,
-};

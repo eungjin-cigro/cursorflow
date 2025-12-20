@@ -1,18 +1,25 @@
-#!/usr/bin/env node
 /**
  * CursorFlow init command
  * 
  * Initialize CursorFlow in a project
  */
 
-const fs = require('fs');
-const path = require('path');
-const logger = require('../utils/logger');
-const { findProjectRoot, createDefaultConfig } = require('../utils/config');
-const { setupCommands } = require('./setup-commands');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as logger from '../utils/logger';
+import { findProjectRoot, createDefaultConfig, CursorFlowConfig } from '../utils/config';
+import { setupCommands } from './setup-commands';
 
-function parseArgs(args) {
-  const options = {
+interface InitOptions {
+  example: boolean;
+  withCommands: boolean;
+  configOnly: boolean;
+  force: boolean;
+  gitignore: boolean;
+}
+
+function parseArgs(args: string[]): InitOptions {
+  const options: InitOptions = {
     example: false,
     withCommands: true,
     configOnly: false,
@@ -53,7 +60,7 @@ function parseArgs(args) {
   return options;
 }
 
-function printHelp() {
+function printHelp(): void {
   console.log(`
 Usage: cursorflow init [options]
 
@@ -76,7 +83,7 @@ Examples:
   `);
 }
 
-function createDirectories(projectRoot, config) {
+function createDirectories(projectRoot: string, config: CursorFlowConfig): void {
   const tasksDir = path.join(projectRoot, config.tasksDir);
   const logsDir = path.join(projectRoot, config.logsDir);
   
@@ -95,7 +102,7 @@ function createDirectories(projectRoot, config) {
   }
 }
 
-function createExampleTasks(projectRoot, config) {
+function createExampleTasks(projectRoot: string, config: CursorFlowConfig): void {
   const exampleDir = path.join(projectRoot, config.tasksDir, 'example');
   
   if (!fs.existsSync(exampleDir)) {
@@ -164,7 +171,7 @@ cursorflow run ${config.tasksDir}/example/
 /**
  * Add _cursorflow to .gitignore
  */
-function updateGitignore(projectRoot) {
+function updateGitignore(projectRoot: string): void {
   const gitignorePath = path.join(projectRoot, '.gitignore');
   const entry = '_cursorflow/';
   
@@ -209,7 +216,7 @@ function updateGitignore(projectRoot) {
   logger.success('Added _cursorflow/ to .gitignore');
 }
 
-async function init(args) {
+async function init(args: string[]): Promise<void> {
   logger.section('🚀 Initializing CursorFlow');
   
   const options = parseArgs(args);
@@ -228,7 +235,7 @@ async function init(args) {
     try {
       createDefaultConfig(projectRoot, options.force);
       logger.success(`Created config file: cursorflow.config.js`);
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('already exists') && !options.force) {
         logger.warn(error.message);
       } else {
@@ -237,7 +244,8 @@ async function init(args) {
     }
   }
   
-  const config = require(configPath);
+  // We need to require the config file after it might have been created
+  const config: CursorFlowConfig = require(configPath);
   
   if (options.configOnly) {
     logger.section('✅ Configuration initialized');
@@ -256,7 +264,7 @@ async function init(args) {
     logger.info('\n📝 Updating .gitignore...');
     try {
       updateGitignore(projectRoot);
-    } catch (error) {
+    } catch (error: any) {
       logger.warn(`Failed to update .gitignore: ${error.message}`);
       logger.info('You can manually add "_cursorflow/" to your .gitignore');
     }
@@ -267,7 +275,7 @@ async function init(args) {
     logger.info('\n📋 Installing Cursor commands...');
     try {
       await setupCommands({ force: options.force, silent: false });
-    } catch (error) {
+    } catch (error: any) {
       logger.warn(`Failed to install Cursor commands: ${error.message}`);
       logger.info('You can install them later with: npx cursorflow-setup');
     }
@@ -297,4 +305,4 @@ async function init(args) {
   console.log('');
 }
 
-module.exports = init;
+export = init;
