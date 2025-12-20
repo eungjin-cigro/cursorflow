@@ -1,13 +1,13 @@
 # CursorFlow Review
 
 ## Overview
-코드 리뷰 기능을 설정하고 리뷰 결과를 확인합니다. AI 기반 자동 리뷰로 코드 품질을 향상시킵니다.
+Configure the code review flow and inspect review results. Use AI-driven automatic reviews to improve code quality.
 
 ## Steps
 
-1. **리뷰 활성화**
-   
-   `cursorflow.config.js` 파일에서 설정:
+1. **Enable reviews**
+
+   Configure `cursorflow.config.js`:
    ```javascript
    module.exports = {
      enableReview: true,
@@ -17,9 +17,9 @@
    };
    ```
 
-2. **Acceptance Criteria 정의**
-   
-   태스크 JSON 파일에 검증 기준 추가:
+2. **Define acceptance criteria**
+
+   Add validation criteria to the task JSON file:
    ```json
    {
      "tasks": [
@@ -27,10 +27,10 @@
          "name": "implement",
          "model": "sonnet-4.5",
          "acceptanceCriteria": [
-           "빌드 에러 없음",
-           "TypeScript 타입 에러 없음",
-           "주요 기능 구현됨",
-           "테스트 통과"
+           "No build errors",
+           "No TypeScript type errors",
+           "Key functionality implemented",
+           "Tests passing"
          ],
          "prompt": "..."
        }
@@ -38,45 +38,45 @@
    }
    ```
 
-3. **리뷰 실행**
-   
-   리뷰는 태스크 완료 후 자동으로 실행됩니다.
+3. **Run reviews**
 
-4. **리뷰 결과 확인**
+   Reviews start automatically after each task completes.
+
+4. **Check review results**
    ```bash
-   # 리뷰 결과 파일 확인
+   # Inspect the review output
    cat _cursorflow/logs/runs/<lane>/review-results.json
    ```
 
-## 리뷰 모델
+## Review models
 
-| 모델 | 특징 | 권장 용도 |
+| Model | Characteristics | Recommended use |
 |------|------|-----------|
-| `sonnet-4.5-thinking` | 추론 강화, 정확한 분석 | 일반 코드 리뷰 (권장) |
-| `opus-4.5-thinking` | 최고 품질, 상세 리뷰 | 중요한 코드, 아키텍처 리뷰 |
-| `sonnet-4.5` | 빠른 리뷰 | 간단한 변경사항 |
+| `sonnet-4.5-thinking` | Strong reasoning, precise analysis | General code reviews (recommended) |
+| `opus-4.5-thinking` | Highest quality, detailed reviews | Critical code or architecture reviews |
+| `sonnet-4.5` | Faster reviews | Simple changes |
 
-## 리뷰 프로세스
+## Review process
 
-1. **태스크 완료**
-   - 코드 구현 완료
-   - 커밋 생성
+1. **Task completion**
+   - Finish implementation
+   - Create a commit
 
-2. **자동 리뷰 시작**
-   - 리뷰 모델로 에이전트 실행
-   - Acceptance Criteria 확인
-   - 빌드 및 타입 검증
+2. **Automatic review**
+   - Run the agent with the selected review model
+   - Verify acceptance criteria
+   - Validate build and types
 
-3. **리뷰 결과**
-   - `approved`: 다음 태스크로 진행
-   - `needs_changes`: 피드백 전달 → 재작업
+3. **Review outcome**
+   - `approved`: proceed to the next task
+   - `needs_changes`: send feedback → rework
 
-4. **피드백 루프**
-   - 수정 사항 구현
-   - 재리뷰
-   - 최대 반복 횟수까지 반복
+4. **Feedback loop**
+   - Apply fixes
+   - Re-run the review
+   - Repeat until the maximum iteration count
 
-## 리뷰 결과 형식
+## Review result format
 
 ```json
 {
@@ -102,9 +102,9 @@
 }
 ```
 
-## 예제
+## Examples
 
-### 기본 리뷰 설정
+### Standard review settings
 ```javascript
 // cursorflow.config.js
 {
@@ -114,7 +114,7 @@
 }
 ```
 
-### 엄격한 리뷰
+### Strict reviews
 ```javascript
 {
   enableReview: true,
@@ -123,7 +123,7 @@
 }
 ```
 
-### 빠른 리뷰
+### Fast reviews
 ```javascript
 {
   enableReview: true,
@@ -132,89 +132,89 @@
 }
 ```
 
-## Acceptance Criteria 작성 가이드
+## Acceptance criteria writing guide
 
-### 좋은 예시
+### Good examples
 ```json
 {
   "acceptanceCriteria": [
-    "빌드 에러 없음 (pnpm build 성공)",
-    "TypeScript 타입 에러 없음 (pnpm type-check)",
-    "모든 기존 테스트 통과",
-    "새 API 엔드포인트 3개 구현됨",
-    "에러 처리 로직 포함됨",
-    "로그 추가됨"
+    "No build errors (pnpm build succeeds)",
+    "No TypeScript type errors (pnpm type-check)",
+    "All existing tests pass",
+    "Three new API endpoints implemented",
+    "Error handling logic included",
+    "Logging added"
   ]
 }
 ```
 
-### 나쁜 예시
+### Poor examples
 ```json
 {
   "acceptanceCriteria": [
-    "잘 작동함",
-    "코드가 좋음"
+    "Works well",
+    "Code looks good"
   ]
 }
 ```
 
-## 리뷰 결과 분석
+## Analyzing review results
 
-### 승인된 경우
+### When approved
 ```bash
-# 다음 태스크 자동 진행
-# 로그에서 확인
+# The next task proceeds automatically
+# Confirm in the logs
 cursorflow monitor
 ```
 
-### 수정 필요 시
+### When changes are needed
 ```bash
-# 피드백이 자동으로 에이전트에 전달됨
-# 재작업 후 자동 재리뷰
-# 로그에서 피드백 확인
+# Feedback is passed back to the agent
+# After rework, the review re-runs automatically
+# View feedback in the logs
 cat _cursorflow/logs/runs/<lane>/conversation.jsonl | \
   jq 'select(.role=="reviewer")'
 ```
 
-### 최대 반복 도달 시
+### When the max iterations are hit
 ```bash
-# 경고 메시지와 함께 진행
-# 수동 리뷰 필요
+# Continue with a warning
+# Manual review is required
 ```
 
 ## Checklist
-- [ ] 리뷰가 활성화되었는가?
-- [ ] 리뷰 모델이 적절한가?
-- [ ] Acceptance Criteria가 명확한가?
-- [ ] 최대 반복 횟수가 적절한가?
-- [ ] 리뷰 결과를 확인했는가?
+- [ ] Is review enabled?
+- [ ] Is the review model appropriate?
+- [ ] Are the acceptance criteria clear?
+- [ ] Is the max iteration count reasonable?
+- [ ] Have you inspected the review results?
 
-## 트러블슈팅
+## Troubleshooting
 
-### 리뷰가 실행되지 않음
-1. `enableReview: true` 확인
-2. 리뷰 모델이 유효한지 확인
-3. 로그에서 에러 확인
+### Reviews are not running
+1. Confirm `enableReview: true`.
+2. Verify the review model name is valid.
+3. Check logs for errors.
 
-### 무한 리뷰 루프
-1. `maxReviewIterations` 설정 확인
-2. Acceptance Criteria가 달성 가능한지 검토
-3. 태스크 프롬프트 개선
+### Infinite review loop
+1. Check the `maxReviewIterations` setting.
+2. Ensure the acceptance criteria are achievable.
+3. Improve the task prompts.
 
-### 리뷰가 너무 엄격함
-1. 리뷰 모델을 더 관대한 것으로 변경
-2. Acceptance Criteria 조정
-3. `maxReviewIterations` 증가
+### Reviews are too strict
+1. Switch to a more lenient review model.
+2. Adjust the acceptance criteria.
+3. Increase `maxReviewIterations`.
 
-## 모범 사례
+## Best practices
 
-1. **명확한 기준**: Acceptance Criteria를 구체적으로 작성
-2. **적절한 모델**: 작업 복잡도에 맞는 리뷰 모델 선택
-3. **점진적 개선**: 첫 반복에서 모든 것을 완벽하게 하려 하지 말기
-4. **피드백 활용**: 리뷰 피드백을 다음 태스크 개선에 활용
+1. **Clear criteria**: Write specific acceptance criteria.
+2. **Right model**: Choose a review model that matches task complexity.
+3. **Iterative improvement**: Don’t aim for perfection on the first pass.
+4. **Use feedback**: Apply review feedback to strengthen future tasks.
 
-## Next Steps
-1. 리뷰 결과 분석
-2. 반복되는 이슈 패턴 파악
-3. 태스크 프롬프트 및 Criteria 개선
-4. 리뷰 모델 조정
+## Next steps
+1. Analyze review results.
+2. Identify recurring issue patterns.
+3. Refine task prompts and acceptance criteria.
+4. Tune the review model as needed.

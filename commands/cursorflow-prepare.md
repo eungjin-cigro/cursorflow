@@ -1,44 +1,44 @@
 # CursorFlow Prepare
 
 ## Overview
-새 Feature에 대한 태스크 파일을 준비합니다. Feature 정보를 수집하고 레인별 JSON 파일을 생성합니다.
+Prepare task files for a new feature by gathering requirements and generating lane-specific JSON files.
 
-## 필수 참조
-- 패키지 문서: `node_modules/@litmers/cursorflow-orchestrator/docs/GUIDE.md`
-- 모델 목록: 터미널에서 `cursorflow models --list` 실행
+## Required references
+- Package docs: `node_modules/@litmers/cursorflow-orchestrator/docs/GUIDE.md`
+- Model list: run `cursorflow models --list` in the terminal
 
 ## Steps
 
-1. **Feature 정보 수집**
-   
-   사용자에게 다음 정보를 확인합니다:
+1. **Collect feature information**
+
+   Confirm the following details with the requester:
    ```
-   📋 태스크 준비 정보
-   ================
-   
-   1. Feature 이름: [예: SchemaUpdate, AdminDashboard]
-   2. 레인 개수: [예: 3]
-   3. 레인별 작업 내용:
-      - Lane 1: [작업 설명]
-      - Lane 2: [작업 설명]
+   📋 Task Preparation Info
+   =======================
+
+   1. Feature name: [e.g., SchemaUpdate, AdminDashboard]
+   2. Number of lanes: [e.g., 3]
+   3. Work per lane:
+      - Lane 1: [description]
+      - Lane 2: [description]
       - ...
-   4. 의존성 변경 필요 여부: [Y/N]
-   5. 참조할 기존 태스크 (선택): [경로 또는 N]
+   4. Need dependency changes? [Y/N]
+   5. Existing task to reference (optional): [path or N]
    ```
 
-2. **태스크 폴더 생성**
+2. **Create the task folder**
    ```bash
-   # 타임스탬프 기반 폴더명 생성 (YYMMDDHHMM - 10자리)
+   # Timestamp-based folder name (YYMMDDHHMM - 10 digits)
    TIMESTAMP=$(date +%y%m%d%H%M)
-   FEATURE_NAME="<사용자 입력>"
+   FEATURE_NAME="<user input>"
    TASK_DIR="_cursorflow/tasks/${TIMESTAMP}_${FEATURE_NAME}"
-   
+
    mkdir -p "$TASK_DIR"
    ```
 
-3. **태스크 JSON 템플릿**
-   
-   각 레인마다 다음 구조의 JSON 파일을 생성합니다:
+3. **Task JSON template**
+
+   Create one JSON file per lane using this structure:
    ```json
    {
      "repository": "https://github.com/org/repo",
@@ -49,20 +49,20 @@
      "allowDependencyChange": false,
      "lockfileReadOnly": true,
      "pollInterval": 60,
-     
+
      "laneNumber": 1,
      "devPort": 3001,
-     
+
      "enableReview": true,
      "reviewModel": "sonnet-4.5-thinking",
      "maxReviewIterations": 3,
-     
+
      "tasks": [
        {
          "name": "plan",
          "model": "opus-4.5-thinking",
          "acceptanceCriteria": [
-           "계획서 파일 생성됨"
+           "Plan document created"
          ],
          "prompt": "..."
        }
@@ -70,65 +70,65 @@
    }
    ```
 
-4. **모델 선택 가이드**
-   
-   | 모델 | 용도 | 비고 |
-   |------|------|------|
-   | `sonnet-4.5` | 일반 구현, 빠른 작업 | 가장 범용적 |
-   | `sonnet-4.5-thinking` | 코드 리뷰, 추론 강화 | Thinking 모델 |
-   | `opus-4.5` | 복잡한 작업, 고품질 | 고급 모델 |
-   | `opus-4.5-thinking` | 아키텍처 설계 | 최고급 |
-   | `gpt-5.2` | 일반 작업용 | OpenAI |
-   | `gpt-5.2-high` | 고급 추론 | 고성능 |
+4. **Model selection guide**
 
-5. **생성 결과 확인**
+   | Model | Purpose | Notes |
+   |------|------|------|
+   | `sonnet-4.5` | General implementation, fast work | Most versatile |
+   | `sonnet-4.5-thinking` | Code review, deeper reasoning | Thinking model |
+   | `opus-4.5` | Complex tasks, high quality | Advanced |
+   | `opus-4.5-thinking` | Architecture design | Premium |
+   | `gpt-5.2` | General tasks | OpenAI |
+   | `gpt-5.2-high` | Advanced reasoning | High performance |
+
+5. **Verify the output**
    ```
-   ✅ 태스크 준비 완료
-   =================
-   
-   폴더: _cursorflow/tasks/<timestamp>_<feature>/
-   생성된 파일:
+   ✅ Task preparation complete
+   ===========================
+
+   Folder: _cursorflow/tasks/<timestamp>_<feature>/
+   Files created:
      - 01-<lane1>.json
      - 02-<lane2>.json
      - ...
      - README.md
-   
-   다음 명령어로 실행:
+
+   Run with:
      cursorflow run _cursorflow/tasks/<timestamp>_<feature>/
    ```
 
-## 예제
+## Examples
 
-### 단일 레인 태스크
+### Single-lane task
 ```bash
 cursorflow prepare MyFeature --lanes 1
 ```
 
-### 멀티 레인 태스크
+### Multi-lane task
 ```bash
 cursorflow prepare AdminDashboard --lanes 5
 ```
 
-### 커스텀 템플릿 사용
+### Using a custom template
 ```bash
 cursorflow prepare MyFeature --template ./my-template.json
 ```
 
 ## Checklist
-- [ ] Feature 이름이 명확한가?
-- [ ] 레인별 작업이 정의되었는가?
-- [ ] 모델 선택이 적절한가?
-- [ ] 의존성 변경 필요 여부를 확인했는가?
-- [ ] Acceptance Criteria가 명확한가?
-- [ ] 생성된 파일들을 검토했는가?
+- [ ] Is the feature name clear?
+- [ ] Is the work for each lane defined?
+- [ ] Is the model selection appropriate?
+- [ ] Have dependency changes been confirmed?
+- [ ] Are the acceptance criteria clear?
+- [ ] Have the generated files been reviewed?
 
-## 주의사항
-1. **모델명**: 유효한 모델만 사용 (models 명령으로 확인)
-2. **경로**: 태스크는 항상 `_cursorflow/tasks/`에 생성
-3. **브랜치 프리픽스**: 충돌하지 않도록 고유하게 설정
-4. **devPort**: 레인마다 고유한 포트 (3001, 3002, ...)
+## Notes
+1. **Model names**: Use only valid models (check with the `models` command).
+2. **Paths**: Always create tasks under `_cursorflow/tasks/`.
+3. **Branch prefix**: Make it unique to avoid collisions.
+4. **devPort**: Use unique ports per lane (3001, 3002, ...).
 
-## Next Steps
-1. 생성된 JSON 파일들을 프로젝트에 맞게 수정
-2. 프롬프트 내용을 상세하게 작성
-3. `cursorflow run`으로 태스크 실행
+## Next steps
+1. Tailor the generated JSON files to the project.
+2. Write detailed prompts.
+3. Run the tasks with `cursorflow run`.

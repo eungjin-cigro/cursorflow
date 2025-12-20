@@ -1,102 +1,102 @@
 # CursorFlow Clean
 
 ## Overview
-브랜치, 워크트리, 로그 등을 정리합니다. 오래된 파일이나 실패한 실행의 잔여물을 제거합니다.
+Clean up branches, worktrees, and logs. Remove stale files or remnants from failed runs.
 
 ## Steps
 
-1. **정리 타입 선택**
-   
-   | 타입 | 설명 |
-   |------|------|
-   | `branches` | Git 브랜치 정리 |
-   | `worktrees` | Git worktree 정리 |
-   | `logs` | 로그 파일 정리 |
-   | `all` | 모두 정리 |
+1. **Choose what to clean**
 
-2. **브랜치 정리**
+   | Type | Description |
+   |------|------|
+   | `branches` | Clean Git branches |
+   | `worktrees` | Clean Git worktrees |
+   | `logs` | Clean log files |
+   | `all` | Clean everything |
+
+2. **Clean branches**
    ```bash
    cursorflow clean branches --pattern "feature/my-*"
    ```
 
-3. **워크트리 정리**
+3. **Clean worktrees**
    ```bash
    cursorflow clean worktrees --all
    ```
 
-4. **로그 정리**
+4. **Clean logs**
    ```bash
    cursorflow clean logs --older-than 30
    ```
 
-5. **Dry run으로 확인**
+5. **Verify with a dry run**
    ```bash
    cursorflow clean all --dry-run
    ```
 
-## 옵션
+## Options
 
-| 옵션 | 설명 |
+| Option | Description |
 |------|------|
-| `--pattern <pattern>` | 패턴 매칭 (예: "feature/*") |
-| `--older-than <days>` | N일 이상 된 항목만 (logs용) |
-| `--dry-run` | 삭제할 항목만 표시 |
-| `--force` | 확인 없이 삭제 |
-| `--local-only` | 로컬만 (브랜치용) |
-| `--remote-only` | 원격만 (브랜치용) |
+| `--pattern <pattern>` | Pattern match (e.g., "feature/*") |
+| `--older-than <days>` | Items older than N days (for logs) |
+| `--dry-run` | Show items to delete without removing |
+| `--force` | Delete without confirmation |
+| `--local-only` | Local only (branches) |
+| `--remote-only` | Remote only (branches) |
 
-## 예제
+## Examples
 
-### 브랜치 정리
+### Branch cleanup
 
-#### 패턴 매칭으로 삭제
+#### Delete by pattern
 ```bash
 cursorflow clean branches --pattern "feature/dashboard-*"
 ```
 
-#### 모든 CursorFlow 브랜치
+#### All CursorFlow branches
 ```bash
 cursorflow clean branches --pattern "feature/*" --dry-run
 ```
 
-#### 로컬 브랜치만
+#### Local branches only
 ```bash
 cursorflow clean branches --pattern "feature/*" --local-only
 ```
 
-### 워크트리 정리
+### Worktree cleanup
 
-#### 모든 워크트리
+#### All worktrees
 ```bash
 cursorflow clean worktrees --all
 ```
 
-#### 특정 패턴
+#### Specific pattern
 ```bash
 cursorflow clean worktrees --pattern "*-dashboard-*"
 ```
 
-### 로그 정리
+### Log cleanup
 
-#### 30일 이상 된 로그
+#### Logs older than 30 days
 ```bash
 cursorflow clean logs --older-than 30
 ```
 
-#### 모든 로그
+#### All logs
 ```bash
 cursorflow clean logs --all --force
 ```
 
-### 전체 정리
+### Full cleanup
 
-#### 모두 확인 후 삭제
+#### Review then delete
 ```bash
 cursorflow clean all --dry-run
 cursorflow clean all --force
 ```
 
-## 정리 결과
+## Sample output
 
 ```
 🧹 Cleaning CursorFlow Resources
@@ -119,44 +119,44 @@ Total: 5 branches, 2 worktrees, 1 log directory
 Proceed? [y/N]
 ```
 
-## 주의사항
+## Notes
 
-1. **백업**: 중요한 작업 중인 브랜치는 백업
-2. **확인**: `--dry-run`으로 먼저 확인
-3. **원격**: 원격 브랜치 삭제는 신중하게
-4. **복구**: 삭제된 항목은 복구 어려움
+1. **Back up**: Save important branches before deleting.
+2. **Confirm**: Start with `--dry-run` to review changes.
+3. **Remote caution**: Be careful when deleting remote branches.
+4. **Irreversible**: Deleted items are hard to recover.
 
 ## Checklist
-- [ ] 정리할 항목을 확인했는가?
-- [ ] 백업이 필요한가?
-- [ ] dry-run으로 먼저 확인했는가?
-- [ ] 다른 사람이 사용 중인 브랜치는 아닌가?
-- [ ] 원격 저장소에서도 삭제할 것인가?
+- [ ] Have you reviewed items to clean?
+- [ ] Do you need backups?
+- [ ] Did you run a dry run first?
+- [ ] Are other teammates using these branches?
+- [ ] Do you also need to delete from the remote?
 
-## 트러블슈팅
+## Troubleshooting
 
-### 브랜치 삭제 실패
+### Branch deletion failed
 ```bash
-# 강제 삭제
+# Force delete
 git branch -D <branch-name>
 git push origin --delete <branch-name>
 ```
 
-### 워크트리 제거 실패
+### Worktree removal failed
 ```bash
-# 강제 제거
+# Force remove
 git worktree remove --force <worktree-path>
 ```
 
-### 로그 디렉토리 권한 문제
+### Log directory permission issues
 ```bash
-# 권한 확인
+# Check permissions
 ls -la _cursorflow/logs/
-# 권한 수정
+# Fix permissions
 chmod -R u+w _cursorflow/logs/
 ```
 
-## Next Steps
-1. 정기적으로 로그 정리 (예: 월 1회)
-2. CI/CD에 자동 정리 스크립트 추가
-3. `.gitignore`에 로그 디렉토리 추가
+## Next steps
+1. Clean logs regularly (e.g., monthly).
+2. Add an automated cleanup script to CI/CD.
+3. Add log directories to `.gitignore`.

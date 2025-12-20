@@ -1,178 +1,178 @@
 # CursorFlow
 
-> Git worktree 기반 병렬 AI 에이전트 오케스트레이션 시스템
+> Parallel AI agent orchestration system built on Git worktrees
 
 [![npm version](https://img.shields.io/npm/v/@litmers/cursorflow-orchestrator.svg)](https://www.npmjs.com/package/@litmers/cursorflow-orchestrator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
-## 주요 기능
+## Key Features
 
-- 🚀 **병렬 실행**: Git worktree를 활용한 여러 레인 동시 실행
-- 🔍 **자동 리뷰**: AI 기반 코드 리뷰 및 피드백 루프
-- 📝 **상세 로깅**: 대화, 커밋, Git 작업 전문 기록
-- 🔀 **의존성 관리**: 자동 dependency gate 및 재개
-- 🎯 **레인별 포트**: 각 레인에 고유한 개발 서버 포트 할당
-- 💻 **Cursor 통합**: 커스텀 커맨드로 IDE 내에서 직접 관리
-- 🛠️ **설정 기반**: 프로젝트별 유연한 설정
+- 🚀 **Parallel execution**: Run multiple lanes concurrently with Git worktrees
+- 🔍 **Automatic review**: AI-powered code review with iterative feedback
+- 📝 **Detailed logging**: Capture conversations, commits, and Git operations
+- 🔀 **Dependency management**: Automatic dependency gating and resume support
+- 🎯 **Per-lane ports**: Unique dev server ports for each lane
+- 💻 **Cursor integration**: Manage workflows directly inside the IDE with custom commands
+- 🛠️ **Config-driven**: Flexible project-specific configuration
 
-## 빠른 시작
+## Quick Start
 
-### 설치
+### Install
 
 ```bash
 # npm
 npm install -g @litmers/cursorflow-orchestrator
 
-# pnpm (권장)
+# pnpm (recommended)
 pnpm add -g @litmers/cursorflow-orchestrator
 
 # yarn
 yarn global add @litmers/cursorflow-orchestrator
 ```
 
-### 요구사항
+### Requirements
 
 - **Node.js** >= 18.0.0
 - **Git** with worktree support
 - **cursor-agent CLI**: `npm install -g @cursor/agent`
 
-### 프로젝트 초기화
+### Initialize a project
 
 ```bash
 cd your-project
 cursorflow init --example
 ```
 
-이 명령은:
-1. `cursorflow.config.js` 설정 파일 생성
-2. `_cursorflow/tasks/` 및 `_cursorflow/logs/` 디렉토리 생성
-3. Cursor IDE 커맨드 설치
-4. 예제 태스크 생성 (--example 옵션 사용 시)
+This command:
+1. Creates the `cursorflow.config.js` config file
+2. Creates `_cursorflow/tasks/` and `_cursorflow/logs/` directories
+3. Installs Cursor IDE commands
+4. Generates example tasks when `--example` is provided
 
-### 예제 실행
+### Run the example
 
 ```bash
-# 예제 태스크 실행
+# Run example tasks
 cursorflow run _cursorflow/tasks/example/
 
-# 다른 터미널에서 모니터링
+# Monitor from another terminal
 cursorflow monitor --watch
 ```
 
-## Cursor IDE 통합
+## Cursor IDE Integration
 
-CursorFlow는 Cursor IDE 내에서 사용할 수 있는 커스텀 커맨드를 제공합니다.
+CursorFlow ships custom commands that are available directly inside Cursor IDE.
 
-### 커맨드 설치
+### Install commands
 
 ```bash
-# 초기화 시 자동 설치
+# Installed automatically during init
 cursorflow init
 
-# 또는 수동 설치
+# Or install manually
 npx cursorflow-setup
 ```
 
-### 사용법
+### Usage
 
-Cursor IDE 채팅에서 `/` 입력 후 다음 커맨드 사용:
+Type `/` in Cursor chat and use:
 
-- `/cursorflow-init` - 프로젝트 초기화
-- `/cursorflow-prepare` - 태스크 준비
-- `/cursorflow-run` - 오케스트레이션 실행
-- `/cursorflow-monitor` - 실행 모니터링
-- `/cursorflow-clean` - 정리 작업
-- `/cursorflow-resume` - 중단된 레인 재개
-- `/cursorflow-review` - 리뷰 설정 및 확인
+- `/cursorflow-init` - initialize a project
+- `/cursorflow-prepare` - prepare tasks
+- `/cursorflow-run` - run orchestration
+- `/cursorflow-monitor` - monitor runs
+- `/cursorflow-clean` - clean resources
+- `/cursorflow-resume` - resume a lane
+- `/cursorflow-review` - configure or check reviews
 
-## CLI 명령어
+## CLI Commands
 
-### 초기화
+### Init
 ```bash
 cursorflow init [options]
-  --example          예제 태스크 생성
-  --with-commands    Cursor 커맨드 설치 (기본: true)
-  --config-only      설정 파일만 생성
+  --example          Create example tasks
+  --with-commands    Install Cursor commands (default: true)
+  --config-only      Generate config file only
 ```
 
-### 태스크 준비
+### Prepare tasks
 ```bash
 cursorflow prepare <feature> [options]
-  --lanes <number>   레인 개수
-  --template <path>  템플릿 파일 경로
+  --lanes <number>   Number of lanes
+  --template <path>  Template file path
 ```
 
-### 실행
+### Run
 ```bash
 cursorflow run <tasks-dir> [options]
-  --dry-run         실행 계획만 확인
+  --dry-run          Show the execution plan only
   --executor <type>  cursor-agent | cloud
 ```
 
-### 모니터링
+### Monitor
 ```bash
 cursorflow monitor [run-dir] [options]
-  --watch           실시간 모니터링
-  --interval <sec>  갱신 간격
+  --watch            Live monitoring
+  --interval <sec>   Refresh interval
 ```
 
-### 정리
+### Clean
 ```bash
 cursorflow clean <type> [options]
-  branches          브랜치 정리
-  worktrees         워크트리 정리
-  logs              로그 정리
-  all               모두 정리
+  branches          Clean branches
+  worktrees         Clean worktrees
+  logs              Clean logs
+  all               Clean everything
 ```
 
-### 재개
+### Resume
 ```bash
 cursorflow resume <lane> [options]
-  --clean           브랜치 정리 후 재시작
-  --restart         처음부터 다시 시작
+  --clean            Clean branches before restart
+  --restart          Restart from the beginning
 ```
 
-## 설정
+## Configuration
 
-### 설정 파일 (cursorflow.config.js)
+### Config file (cursorflow.config.js)
 
 ```javascript
 module.exports = {
-  // 디렉토리 설정
+  // Directories
   tasksDir: '_cursorflow/tasks',
   logsDir: '_cursorflow/logs',
-  
-  // Git 설정
+
+  // Git settings
   baseBranch: 'main',
   branchPrefix: 'feature/',
-  
-  // 실행 설정
-  executor: 'cursor-agent',  // 'cursor-agent' | 'cloud'
+
+  // Run settings
+  executor: 'cursor-agent', // 'cursor-agent' | 'cloud'
   pollInterval: 60,
-  
-  // 의존성 관리
+
+  // Dependency management
   allowDependencyChange: false,
   lockfileReadOnly: true,
-  
-  // 리뷰 설정
+
+  // Review settings
   enableReview: true,
   reviewModel: 'sonnet-4.5-thinking',
   maxReviewIterations: 3,
-  
-  // 레인 기본 설정
+
+  // Default lane settings
   defaultLaneConfig: {
     devPort: 3001,
     autoCreatePr: false,
   },
-  
-  // 로깅
+
+  // Logging
   logLevel: 'info',
   verboseGit: false,
 };
 ```
 
-### 태스크 파일 (JSON)
+### Task file (JSON)
 
 ```json
 {
@@ -188,50 +188,50 @@ module.exports = {
       "name": "implement",
       "model": "sonnet-4.5",
       "acceptanceCriteria": [
-        "빌드 에러 없음",
-        "주요 기능 구현됨"
+        "No build errors",
+        "Key features implemented"
       ],
-      "prompt": "구현 지시사항..."
+      "prompt": "Implementation instructions..."
     }
   ]
 }
 ```
 
-## 사용 예시
+## Usage Examples
 
-### 단일 기능 개발
+### Single feature development
 
 ```bash
-# 1. 태스크 준비
+# 1. Prepare tasks
 cursorflow prepare AddUserAuth --lanes 1
 
-# 2. 태스크 JSON 편집
+# 2. Edit the task JSON
 # _cursorflow/tasks/2512191830_AddUserAuth/01-task.json
 
-# 3. 실행
+# 3. Run
 cursorflow run _cursorflow/tasks/2512191830_AddUserAuth/
 
-# 4. 모니터링
+# 4. Monitor
 cursorflow monitor --watch
 ```
 
-### 멀티 도메인 병렬 개발
+### Multi-domain parallel development
 
 ```bash
-# 1. 태스크 준비 (5개 레인)
+# 1. Prepare tasks (5 lanes)
 cursorflow prepare AdminDashboard --lanes 5
 
-# 2. 각 레인 설정
+# 2. Configure each lane
 # 01-dashboard.json, 02-clients.json, ...
 
-# 3. 병렬 실행
+# 3. Run in parallel
 cursorflow run _cursorflow/tasks/2512191830_AdminDashboard/
 
-# 4. 실시간 모니터링
+# 4. Live monitor
 cursorflow monitor --watch --interval 5
 ```
 
-## 아키텍처
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -265,29 +265,28 @@ cursorflow monitor --watch --interval 5
                      └─────────┘
 ```
 
-## 문서
+## Documentation
 
-- [📖 사용 가이드](docs/GUIDE.md) - 상세한 사용 방법
-- [📋 API 레퍼런스](docs/API.md) - CLI 및 설정 API
-- [🎨 커맨드 가이드](docs/COMMANDS.md) - Cursor 커맨드 사용법
-- [🏗️ 아키텍처](docs/ARCHITECTURE.md) - 시스템 구조
-- [🔧 트러블슈팅](docs/TROUBLESHOOTING.md) - 문제 해결
-- [📦 예제 모음](examples/) - 실전 예제
+- [📖 User Guide](docs/GUIDE.md) - Detailed usage instructions
+- [📋 API Reference](docs/API.md) - CLI and config API
+- [🎨 Command Guide](docs/COMMANDS.md) - Cursor command usage
+- [🏗️ Architecture](docs/ARCHITECTURE.md) - System structure
+- [🔧 Troubleshooting](docs/TROUBLESHOOTING.md) - Issue resolution
+- [📦 Examples](examples/) - Practical examples
 
-## 로드맵
+## Roadmap
 
-- [ ] v1.0: 핵심 기능 및 기본 문서
-- [ ] v1.1: 향상된 리뷰 시스템
-- [ ] v1.2: 클라우드 실행 개선
-- [ ] v1.3: 플러그인 시스템
-- [ ] v2.0: GUI 도구
+- [ ] v1.0: Core features and base docs
+- [ ] v1.1: Enhanced review system
+- [ ] v1.2: Improved cloud execution
+- [ ] v1.3: Plugin system
+- [ ] v2.0: GUI tool
 
-## 기여하기
+## Contributing
 
-기여는 환영합니다! [CONTRIBUTING.md](CONTRIBUTING.md)를 참조해주세요.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### 개발 환경 설정
-
+### Set up dev environment
 ```bash
 git clone https://github.com/eungjin-cigro/cursorflow.git
 cd cursorflow
@@ -295,11 +294,11 @@ pnpm install
 pnpm test
 ```
 
-## 라이선스
+## License
 
 MIT © Eugene Jin
 
-## 지원
+## Support
 
 - 🐛 [Issue Tracker](https://github.com/eungjin-cigro/cursorflow/issues)
 - 💬 [Discussions](https://github.com/eungjin-cigro/cursorflow/discussions)
