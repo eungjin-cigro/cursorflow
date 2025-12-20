@@ -14,7 +14,11 @@
     "release": "scripts/release.sh",
     "release:patch": "scripts/release.sh patch",
     "release:minor": "scripts/release.sh minor",
-    "release:major": "scripts/release.sh major"
+    "release:major": "scripts/release.sh major",
+    "security:check": "npm audit && node scripts/ai-security-check.js",
+    "security:audit": "npm audit",
+    "security:audit:fix": "npm audit fix",
+    "security:setup": "scripts/setup-security.sh"
   },
   "keywords": [
     "cursor",
@@ -49,6 +53,7 @@
     "scripts/",
     "commands/",
     "templates/",
+    "examples/",
     "docs/",
     "README.md",
     "LICENSE",

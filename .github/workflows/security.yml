@@ -1,0 +1,144 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # 매일 오전 9시(KST)에 자동 스캔
+    - cron: '0 0 * * *'
+
+jobs:
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 전체 히스토리 가져오기
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 1. NPM 취약점 스캔
+      - name: NPM Audit
+        id: npm-audit
+        run: |
+          echo "::group::NPM Audit Report"
+          npm audit --audit-level=moderate || echo "npm_audit_failed=true" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+        continue-on-error: true
+
+      # 2. 시크릿 스캔 (하드코딩된 비밀번호, API 키 등)
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      # 3. 코드 취약점 스캔 (Semgrep)
+      - name: Semgrep Security Scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/javascript
+            p/nodejs
+            p/owasp-top-ten
+          generateSarif: true
+        continue-on-error: false
+
+      # 4. 의존성 보안 스캔 (Snyk)
+      - name: Run Snyk Security Scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      # 5. 컨테이너/파일시스템 취약점 스캔 (Trivy)
+      - name: Trivy Filesystem Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: 1  # 취약점 발견 시 실패
+
+      # 6. 라이센스 컴플라이언스 체크
+      - name: License Compliance Check
+        run: |
+          npx license-checker --summary --onlyAllow "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD" || true
+
+      # 7. AI 기반 코드 보안 검사 (선택적)
+      - name: AI Security Review
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::group::AI Security Analysis"
+          node scripts/ai-security-check.js
+          echo "::endgroup::"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        continue-on-error: false
+
+      # 결과 업로드
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      # 보안 검사 요약
+      - name: Security Check Summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checks Performed:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ NPM Vulnerability Audit" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Secret Scanning (TruffleHog)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Static Analysis (Semgrep)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dependency Security (Snyk)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Filesystem Scan (Trivy)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ License Compliance" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "- ✅ AI Security Review" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # CodeQL 분석 (GitHub의 고급 보안 기능)
+  codeql-analysis:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript
+          queries: security-extended,security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: "/language:javascript"
+

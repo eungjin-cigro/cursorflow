@@ -7,7 +7,49 @@ on:
   workflow_dispatch:  # 수동 실행 가능
 
 jobs:
+  # 보안 검사 (배포 전 필수)
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # NPM 취약점 검사 (critical/high 차단)
+      - name: NPM Security Audit
+        run: |
+          echo "🔒 Running npm security audit..."
+          npm audit --audit-level=high
+        continue-on-error: false
+
+      # 시크릿 스캔
+      - name: Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      # 코드 보안 검사
+      - name: Code Security Scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/security-audit
+        continue-on-error: false
+
   test:
+    needs: security-gate  # 보안 검사 통과 후에만 테스트
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -27,7 +69,7 @@ jobs:
         continue-on-error: true
 
   publish:
-    needs: test
+    needs: [security-gate, test]  # 보안 검사와 테스트 모두 통과 필요
     runs-on: ubuntu-latest
     permissions:
       contents: read

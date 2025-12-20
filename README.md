@@ -4,6 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@litmers/cursorflow-orchestrator.svg)](https://www.npmjs.com/package/@litmers/cursorflow-orchestrator)
 [![CI](https://github.com/eungjin-cigro/cursorflow/actions/workflows/ci.yml/badge.svg)](https://github.com/eungjin-cigro/cursorflow/actions/workflows/ci.yml)
+[![Security Scan](https://github.com/eungjin-cigro/cursorflow/actions/workflows/security.yml/badge.svg)](https://github.com/eungjin-cigro/cursorflow/actions/workflows/security.yml)
 [![Publish to NPM](https://github.com/eungjin-cigro/cursorflow/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/eungjin-cigro/cursorflow/actions/workflows/npm-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
@@ -17,6 +18,7 @@
 - 🎯 **Per-lane ports**: Unique dev server ports for each lane
 - 💻 **Cursor integration**: Manage workflows directly inside the IDE with custom commands
 - 🛠️ **Config-driven**: Flexible project-specific configuration
+- 🔒 **Security-first**: Multi-layer automated security scanning before deployment
 
 ## Quick Start
 
@@ -93,6 +95,36 @@ A complete demo project is included for testing with real LLM execution.
 Each task runs ~1-2 minutes, demonstrating the full CursorFlow workflow.
 
 **See**: `test-projects/demo-project/README.md` for detailed documentation.
+
+## 📚 Examples
+
+Ready-to-use examples are included in the `examples/` directory.
+
+### Demo Project
+
+A complete example demonstrating CursorFlow's core features:
+
+```bash
+# Copy example tasks to your project
+cd your-project
+cursorflow init
+cp -r /path/to/cursorflow/examples/demo-project/_cursorflow/tasks/demo-test _cursorflow/tasks/
+
+# Run the demo
+cursorflow run _cursorflow/tasks/demo-test/
+
+# Monitor in real-time
+cursorflow monitor --watch
+```
+
+**Includes:**
+- 2 parallel tasks with real LLM execution
+- Complete documentation and setup instructions
+- Expected results and troubleshooting guide
+
+**See**: `examples/demo-project/README.md` for detailed instructions.
+
+**Browse more examples**: `examples/README.md`
 
 ## Cursor IDE Integration
 
