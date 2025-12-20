@@ -150,6 +150,8 @@ Type `/` in Cursor chat and use:
 - `/cursorflow-monitor` - monitor runs
 - `/cursorflow-clean` - clean resources
 - `/cursorflow-resume` - resume a lane
+- `/cursorflow-doctor` - verify environment
+- `/cursorflow-signal` - intervene in a lane
 - `/cursorflow-review` - configure or check reviews
 
 ## CLI Commands
@@ -195,9 +197,38 @@ cursorflow clean <type> [options]
 ### Resume
 ```bash
 cursorflow resume <lane> [options]
-  --clean            Clean branches before restart
-  --restart          Restart from the beginning
+  --run-dir <path>   Specify run directory
+  --restart          Restart from task 1
 ```
+
+### Doctor
+```bash
+cursorflow doctor [options]
+  --tasks-dir <path> Validate specific lane tasks
+  --json             Output in JSON format
+```
+
+### Signal (Intervention)
+```bash
+cursorflow signal <lane> <message>
+  --run-dir <path>   Specify run directory
+```
+
+## 🚀 Deployment & Updates
+
+### For Maintainers
+To release a new version to NPM:
+1. Ensure your working directory is clean on the `main` branch.
+2. Run the release script:
+   ```bash
+   ./scripts/release.sh [patch|minor|major]
+   ```
+3. The script will bump the version, update CHANGELOG, and push a tag to trigger GitHub Actions.
+
+### For Users
+To update to the latest version and refresh IDE commands:
+1. Update the package: `npm install -g @litmers/cursorflow-orchestrator`
+2. Refresh Cursor commands: `cursorflow-setup --force`
 
 ## Configuration
 

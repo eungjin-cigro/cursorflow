@@ -6,12 +6,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as logger from '../utils/logger';
 import { orchestrate } from '../core/orchestrator';
-import { loadConfig } from '../utils/config';
+import { getLogsDir, loadConfig } from '../utils/config';
+import { runDoctor } from '../utils/doctor';
+import { areCommandsInstalled, setupCommands } from './setup-commands';
 
 interface RunOptions {
   tasksDir?: string;
   dryRun: boolean;
   executor: string | null;
+  skipDoctor: boolean;
 }
 
 function parseArgs(args: string[]): RunOptions {
@@ -22,28 +25,80 @@ function parseArgs(args: string[]): RunOptions {
     tasksDir,
     dryRun: args.includes('--dry-run'),
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
+    skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
   };
 }
 
 async function run(args: string[]): Promise<void> {
   const options = parseArgs(args);
   
+  // Auto-setup Cursor commands if missing or outdated
+  if (!areCommandsInstalled()) {
+    logger.info('Installing missing or outdated Cursor IDE commands...');
+    try {
+      setupCommands({ silent: true });
+    } catch (e) {
+      // Non-blocking
+    }
+  }
+
   if (!options.tasksDir) {
     console.log('\nUsage: cursorflow run <tasks-dir> [options]');
     throw new Error('Tasks directory required');
   }
   
-  if (!fs.existsSync(options.tasksDir)) {
-    throw new Error(`Tasks directory not found: ${options.tasksDir}`);
+  const config = loadConfig();
+  const logsDir = getLogsDir(config);
+
+  // Resolve tasks dir:
+  // - Prefer the exact path if it exists relative to cwd
+  // - Otherwise, fall back to projectRoot-relative path for better ergonomics
+  const tasksDir =
+    path.isAbsolute(options.tasksDir)
+      ? options.tasksDir
+      : (fs.existsSync(options.tasksDir)
+        ? path.resolve(process.cwd(), options.tasksDir)
+        : path.join(config.projectRoot, options.tasksDir));
+
+  if (!fs.existsSync(tasksDir)) {
+    throw new Error(`Tasks directory not found: ${tasksDir}`);
+  }
+
+  // Preflight checks (doctor)
+  if (!options.skipDoctor) {
+    const report = runDoctor({
+      cwd: process.cwd(),
+      tasksDir,
+      executor: options.executor || config.executor,
+      includeCursorAgentChecks: true,
+    });
+
+    if (!report.ok) {
+      logger.section('🛑 Pre-flight check failed');
+      for (const issue of report.issues) {
+        const header = `${issue.title} (${issue.id})`;
+        if (issue.severity === 'error') {
+          logger.error(header, '❌');
+        } else {
+          logger.warn(header, '⚠️');
+        }
+        console.log(`   ${issue.message}`);
+        if (issue.details) console.log(`   Details: ${issue.details}`);
+        if (issue.fixes?.length) {
+          console.log('   Fix:');
+          for (const fix of issue.fixes) console.log(`     - ${fix}`);
+        }
+        console.log('');
+      }
+      throw new Error('Pre-flight checks failed. Run `cursorflow doctor` for details.');
+    }
   }
   
-  const config = loadConfig();
-  
   try {
-    await orchestrate(options.tasksDir, {
+    await orchestrate(tasksDir, {
       executor: options.executor || config.executor,
       pollInterval: config.pollInterval * 1000,
-      runDir: path.join(config.logsDir, 'runs', `run-${Date.now()}`),
+      runDir: path.join(logsDir, 'runs', `run-${Date.now()}`),
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

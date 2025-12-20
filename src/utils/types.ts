@@ -108,6 +108,7 @@ export interface LaneState {
   error: string | null;
   dependencyRequest: DependencyRequestPlan | null;
   updatedAt?: number;
+  tasksFile?: string; // Original tasks file path
 }
 
 export interface ConversationEntry {

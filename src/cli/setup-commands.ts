@@ -183,6 +183,25 @@ export function uninstallCommands(options: SetupOptions = {}): { removed: number
   return { removed };
 }
 
+/**
+ * Check if commands are already installed
+ */
+export function areCommandsInstalled(): boolean {
+  const projectRoot = findProjectRoot();
+  const targetDir = path.join(projectRoot, '.cursor', 'commands', 'cursorflow');
+  const sourceDir = getCommandsSourceDir();
+  
+  if (!fs.existsSync(targetDir) || !fs.existsSync(sourceDir)) {
+    return false;
+  }
+  
+  const sourceFiles = fs.readdirSync(sourceDir).filter(f => f.endsWith('.md'));
+  const targetFiles = fs.readdirSync(targetDir).filter(f => f.endsWith('.md'));
+  
+  // Basic check: do we have all the files from source in target?
+  return sourceFiles.every(f => targetFiles.includes(f));
+}
+
 async function main(args: string[]): Promise<any> {
   const options = parseArgs(args);
   

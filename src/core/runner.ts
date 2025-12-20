@@ -371,7 +371,9 @@ export async function runTask({
 /**
  * Run all tasks in sequence
  */
-export async function runTasks(config: RunnerConfig, runDir: string): Promise<TaskExecutionResult[]> {
+export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number } = {}): Promise<TaskExecutionResult[]> {
+  const startIndex = options.startIndex || 0;
+  
   // Ensure cursor-agent is installed
   ensureCursorAgent();
   
@@ -400,44 +402,67 @@ export async function runTasks(config: RunnerConfig, runDir: string): Promise<Ta
   logger.success('✓ Cursor authentication OK');
   
   const repoRoot = git.getRepoRoot();
-  const pipelineBranch = config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}`;
-  const worktreeDir = path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch);
   
-  logger.section('🚀 Starting Pipeline');
+  // Load existing state if resuming
+  const statePath = path.join(runDir, 'state.json');
+  let state: LaneState | null = null;
+  
+  if (startIndex > 0 && fs.existsSync(statePath)) {
+    state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  }
+  
+  const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}`;
+  const worktreeDir = state?.worktreeDir || path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch);
+  
+  if (startIndex === 0) {
+    logger.section('🚀 Starting Pipeline');
+  } else {
+    logger.section(`🔁 Resuming Pipeline from task ${startIndex + 1}`);
+  }
+  
   logger.info(`Pipeline Branch: ${pipelineBranch}`);
   logger.info(`Worktree: ${worktreeDir}`);
   logger.info(`Tasks: ${config.tasks.length}`);
   
-  // Create worktree
-  git.createWorktree(worktreeDir, pipelineBranch, {
-    baseBranch: config.baseBranch || 'main',
-    cwd: repoRoot,
-  });
+  // Create worktree only if starting fresh
+  if (startIndex === 0 || !fs.existsSync(worktreeDir)) {
+    git.createWorktree(worktreeDir, pipelineBranch, {
+      baseBranch: config.baseBranch || 'main',
+      cwd: repoRoot,
+    });
+  }
   
   // Create chat
   logger.info('Creating chat session...');
   const chatId = cursorAgentCreateChat();
   
-  // Save initial state
-  const state: LaneState = {
-    status: 'running',
-    pipelineBranch,
-    worktreeDir,
-    totalTasks: config.tasks.length,
-    currentTaskIndex: 0,
-    label: pipelineBranch,
-    startTime: Date.now(),
-    endTime: null,
-    error: null,
-    dependencyRequest: null,
-  };
+  // Initialize state if not loaded
+  if (!state) {
+    state = {
+      status: 'running',
+      pipelineBranch,
+      worktreeDir,
+      totalTasks: config.tasks.length,
+      currentTaskIndex: 0,
+      label: pipelineBranch,
+      startTime: Date.now(),
+      endTime: null,
+      error: null,
+      dependencyRequest: null,
+      tasksFile, // Store tasks file for resume
+    };
+  } else {
+    state.status = 'running';
+    state.error = null;
+    state.dependencyRequest = null;
+  }
   
-  saveState(path.join(runDir, 'state.json'), state);
+  saveState(statePath, state);
   
   // Run tasks
   const results: TaskExecutionResult[] = [];
   
-  for (let i = 0; i < config.tasks.length; i++) {
+  for (let i = startIndex; i < config.tasks.length; i++) {
     const task = config.tasks[i]!;
     const taskBranch = `${pipelineBranch}--${String(i + 1).padStart(2, '0')}-${task.name}`;
     
@@ -456,13 +481,13 @@ export async function runTasks(config: RunnerConfig, runDir: string): Promise<Ta
     
     // Update state
     state.currentTaskIndex = i + 1;
-    saveState(path.join(runDir, 'state.json'), state);
+    saveState(statePath, state);
     
     // Handle blocked or error
     if (result.status === 'BLOCKED_DEPENDENCY') {
-      state.status = 'failed'; // Or blocked if we had a blocked status in LaneState
+      state.status = 'failed';
       state.dependencyRequest = result.dependencyRequest || null;
-      saveState(path.join(runDir, 'state.json'), state);
+      saveState(statePath, state);
       logger.warn('Task blocked on dependency change');
       process.exit(2);
     }
@@ -470,7 +495,7 @@ export async function runTasks(config: RunnerConfig, runDir: string): Promise<Ta
     if (result.status !== 'FINISHED') {
       state.status = 'failed';
       state.error = result.error || 'Unknown error';
-      saveState(path.join(runDir, 'state.json'), state);
+      saveState(statePath, state);
       logger.error(`Task failed: ${result.error}`);
       process.exit(1);
     }
@@ -484,7 +509,7 @@ export async function runTasks(config: RunnerConfig, runDir: string): Promise<Ta
   // Complete
   state.status = 'completed';
   state.endTime = Date.now();
-  saveState(path.join(runDir, 'state.json'), state);
+  saveState(statePath, state);
   
   logger.success('All tasks completed!');
   return results;
@@ -503,9 +528,11 @@ if (require.main === module) {
   
   const tasksFile = args[0]!;
   const runDirIdx = args.indexOf('--run-dir');
+  const startIdxIdx = args.indexOf('--start-index');
   // const executorIdx = args.indexOf('--executor');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
+  const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
   // const executor = executorIdx >= 0 ? args[executorIdx + 1] : 'cursor-agent';
   
   if (!fs.existsSync(tasksFile)) {
@@ -529,7 +556,7 @@ if (require.main === module) {
   };
   
   // Run tasks
-  runTasks(config, runDir)
+  runTasks(tasksFile, config, runDir, { startIndex })
     .then(() => {
       process.exit(0);
     })

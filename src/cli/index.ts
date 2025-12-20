@@ -14,6 +14,8 @@ const COMMANDS: Record<string, CommandFn> = {
   monitor: require('./monitor'),
   clean: require('./clean'),
   resume: require('./resume'),
+  doctor: require('./doctor'),
+  signal: require('./signal'),
 };
 
 function printHelp(): void {
@@ -28,6 +30,8 @@ Commands:
   monitor [run-dir] [options] Monitor lane execution
   clean <type> [options]      Clean branches/worktrees/logs
   resume <lane> [options]     Resume interrupted lane
+  doctor [options]            Check environment and preflight
+  signal <lane> <msg>         Directly intervene in a running lane
 
 Global Options:
   --config <path>             Config file path
@@ -39,6 +43,7 @@ Examples:
   cursorflow run _cursorflow/tasks/MyFeature/
   cursorflow monitor --watch
   cursorflow clean branches --all
+  cursorflow doctor
 
 Documentation:
   https://github.com/eungjin-cigro/cursorflow#readme
