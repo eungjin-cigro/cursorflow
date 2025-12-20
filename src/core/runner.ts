@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync, spawnSync } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 
 import * as git from '../utils/git';
 import * as logger from '../utils/logger';
@@ -107,12 +107,16 @@ function parseJsonFromStdout(stdout: string): any {
   return null;
 }
 
-export function cursorAgentSend({ workspaceDir, chatId, prompt, model }: { 
+/**
+ * Execute cursor-agent command with streaming and better error handling
+ */
+export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir }: { 
   workspaceDir: string; 
   chatId: string; 
   prompt: string; 
   model?: string; 
-}): AgentSendResult {
+  signalDir?: string;
+}): Promise<AgentSendResult> {
   const args = [
     '--print',
     '--output-format', 'json',
@@ -124,74 +128,100 @@ export function cursorAgentSend({ workspaceDir, chatId, prompt, model }: {
   
   logger.info('Executing cursor-agent...');
   
-  const res = spawnSync('cursor-agent', args, {
-    encoding: 'utf8',
-    stdio: 'pipe',
-    timeout: 300000, // 5 minute timeout for LLM response
-  });
-  
-  // Check for timeout
-  if (res.error) {
-    if ((res.error as any).code === 'ETIMEDOUT') {
-      return {
+  return new Promise((resolve) => {
+    const child = spawn('cursor-agent', args, {
+      stdio: ['pipe', 'pipe', 'pipe'], // Enable stdin piping
+      env: process.env,
+    });
+
+    let fullStdout = '';
+    let fullStderr = '';
+
+    // Watch for "intervention.txt" signal file if any
+    const interventionPath = signalDir ? path.join(signalDir, 'intervention.txt') : null;
+    let interventionWatcher: fs.FSWatcher | null = null;
+
+    if (interventionPath && fs.existsSync(path.dirname(interventionPath))) {
+      interventionWatcher = fs.watch(path.dirname(interventionPath), (event, filename) => {
+        if (filename === 'intervention.txt' && fs.existsSync(interventionPath)) {
+          try {
+            const message = fs.readFileSync(interventionPath, 'utf8').trim();
+            if (message) {
+              logger.info(`Injecting intervention: ${message}`);
+              child.stdin.write(message + '\n');
+              fs.unlinkSync(interventionPath); // Clear it
+            }
+          } catch (e) {
+            logger.warn('Failed to read intervention file');
+          }
+        }
+      });
+    }
+
+    child.stdout.on('data', (data) => {
+      const str = data.toString();
+      fullStdout += str;
+      // Also pipe to our own stdout so it goes to terminal.log
+      process.stdout.write(data);
+    });
+
+    child.stderr.on('data', (data) => {
+      fullStderr += data.toString();
+      // Pipe to our own stderr so it goes to terminal.log
+      process.stderr.write(data);
+    });
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve({
         ok: false,
         exitCode: -1,
         error: 'cursor-agent timed out after 5 minutes. The LLM request may be taking too long or there may be network issues.',
-      };
-    }
-    
-    return {
-      ok: false,
-      exitCode: -1,
-      error: `cursor-agent error: ${res.error.message}`,
-    };
-  }
-  
-  const json = parseJsonFromStdout(res.stdout);
-  
-  if (res.status !== 0 || !json || json.type !== 'result') {
-    let errorMsg = res.stderr?.trim() || res.stdout?.trim() || `exit=${res.status}`;
-    
-    // Check for authentication errors
-    if (errorMsg.includes('not authenticated') || 
-        errorMsg.includes('login') || 
-        errorMsg.includes('auth')) {
-      errorMsg = 'Authentication error. Please:\n' +
-        '  1. Open Cursor IDE\n' +
-        '  2. Sign in to your account\n' +
-        '  3. Verify AI features are working\n' +
-        '  4. Try again\n\n' +
-        `Details: ${errorMsg}`;
-    }
-    
-    // Check for rate limit errors
-    if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
-      errorMsg = 'API rate limit or quota exceeded. Please:\n' +
-        '  1. Check your Cursor subscription\n' +
-        '  2. Wait a few minutes and try again\n\n' +
-        `Details: ${errorMsg}`;
-    }
-    
-    // Check for model errors
-    if (errorMsg.includes('model')) {
-      errorMsg = `Model error (requested: ${model || 'default'}). ` +
-        'Please check if the model is available in your Cursor subscription.\n\n' +
-        `Details: ${errorMsg}`;
-    }
-    
-    return {
-      ok: false,
-      exitCode: res.status ?? -1,
-      error: errorMsg,
-    };
-  }
-  
-  return {
-    ok: !json.is_error,
-    exitCode: res.status ?? 0,
-    sessionId: json.session_id || chatId,
-    resultText: json.result || '',
-  };
+      });
+    }, 300000);
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (interventionWatcher) interventionWatcher.close();
+      
+      const json = parseJsonFromStdout(fullStdout);
+      
+      if (code !== 0 || !json || json.type !== 'result') {
+        let errorMsg = fullStderr.trim() || fullStdout.trim() || `exit=${code}`;
+        
+        // Check for common errors
+        if (errorMsg.includes('not authenticated') || errorMsg.includes('login') || errorMsg.includes('auth')) {
+          errorMsg = 'Authentication error. Please sign in to Cursor IDE.';
+        } else if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
+          errorMsg = 'API rate limit or quota exceeded.';
+        } else if (errorMsg.includes('model')) {
+          errorMsg = `Model error (requested: ${model || 'default'}). Check your subscription.`;
+        }
+        
+        resolve({
+          ok: false,
+          exitCode: code ?? -1,
+          error: errorMsg,
+        });
+      } else {
+        resolve({
+          ok: !json.is_error,
+          exitCode: code ?? 0,
+          sessionId: json.session_id || chatId,
+          resultText: json.result || '',
+        });
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      resolve({
+        ok: false,
+        exitCode: -1,
+        error: `Failed to start cursor-agent: ${err.message}`,
+      });
+    });
+  });
 }
 
 /**
@@ -326,11 +356,12 @@ export async function runTask({
   }));
   
   logger.info('Sending prompt to agent...');
-  const r1 = cursorAgentSend({
+  const r1 = await cursorAgentSend({
     workspaceDir: worktreeDir,
     chatId,
     prompt: prompt1,
     model,
+    signalDir: runDir
   });
   
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
@@ -426,7 +457,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   // Create worktree only if starting fresh
   if (startIndex === 0 || !fs.existsSync(worktreeDir)) {
-    git.createWorktree(worktreeDir, pipelineBranch, {
+    git.createWorktree(worktreeDir, pipelineBranch, { 
       baseBranch: config.baseBranch || 'main',
       cwd: repoRoot,
     });
@@ -450,14 +481,60 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       error: null,
       dependencyRequest: null,
       tasksFile, // Store tasks file for resume
+      dependsOn: config.dependsOn || [],
     };
   } else {
     state.status = 'running';
     state.error = null;
     state.dependencyRequest = null;
+    state.dependsOn = config.dependsOn || [];
   }
   
   saveState(statePath, state);
+  
+  // Merge dependencies if any
+  if (startIndex === 0 && config.dependsOn && config.dependsOn.length > 0) {
+    logger.section('🔗 Merging Dependencies');
+    
+    // The runDir for the lane is passed in. Dependencies are in ../<depName> relative to this runDir
+    const lanesRoot = path.dirname(runDir);
+    
+    for (const depName of config.dependsOn) {
+      const depRunDir = path.join(lanesRoot, depName);
+      const depStatePath = path.join(depRunDir, 'state.json');
+      
+      if (!fs.existsSync(depStatePath)) {
+        logger.warn(`Dependency state not found for ${depName} at ${depStatePath}`);
+        continue;
+      }
+      
+      try {
+        const depState = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
+        if (depState.status !== 'completed') {
+          logger.warn(`Dependency ${depName} is in status ${depState.status}, merge might be incomplete`);
+        }
+        
+        if (depState.pipelineBranch) {
+          logger.info(`Merging dependency branch: ${depState.pipelineBranch} (${depName})`);
+          
+          // Fetch first to ensure we have the branch
+          git.runGit(['fetch', 'origin', depState.pipelineBranch], { cwd: worktreeDir, silent: true });
+          
+          // Merge
+          git.merge(depState.pipelineBranch, { 
+            cwd: worktreeDir, 
+            noFf: true, 
+            message: `chore: merge dependency ${depName} (${depState.pipelineBranch})` 
+          });
+        }
+      } catch (e) {
+        logger.error(`Failed to merge dependency ${depName}: ${e}`);
+      }
+    }
+    
+    // Push the merged state
+    git.push(pipelineBranch, { cwd: worktreeDir });
+  }
   
   // Run tasks
   const results: TaskExecutionResult[] = [];

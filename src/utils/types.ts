@@ -40,6 +40,7 @@ export interface Task {
 
 export interface RunnerConfig {
   tasks: Task[];
+  dependsOn?: string[];
   pipelineBranch?: string;
   branchPrefix?: string;
   worktreeRoot?: string;
@@ -109,6 +110,7 @@ export interface LaneState {
   dependencyRequest: DependencyRequestPlan | null;
   updatedAt?: number;
   tasksFile?: string; // Original tasks file path
+  dependsOn?: string[];
 }
 
 export interface ConversationEntry {

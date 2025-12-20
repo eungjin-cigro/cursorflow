@@ -99,6 +99,7 @@ async function run(args: string[]): Promise<void> {
       executor: options.executor || config.executor,
       pollInterval: config.pollInterval * 1000,
       runDir: path.join(logsDir, 'runs', `run-${Date.now()}`),
+      maxConcurrentLanes: config.maxConcurrentLanes,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point
