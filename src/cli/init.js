@@ -17,6 +17,7 @@ function parseArgs(args) {
     withCommands: true,
     configOnly: false,
     force: false,
+    gitignore: true,
   };
   
   for (let i = 0; i < args.length; i++) {
@@ -37,6 +38,9 @@ function parseArgs(args) {
         break;
       case '--force':
         options.force = true;
+        break;
+      case '--no-gitignore':
+        options.gitignore = false;
         break;
       case '--help':
       case '-h':
@@ -59,6 +63,7 @@ Options:
   --example           Create example tasks
   --with-commands     Install Cursor commands (default: true)
   --no-commands       Skip Cursor commands installation
+  --no-gitignore      Skip adding _cursorflow to .gitignore
   --config-only       Only create config file
   --force             Overwrite existing files
   --help, -h          Show help
@@ -67,6 +72,7 @@ Examples:
   cursorflow init
   cursorflow init --example
   cursorflow init --config-only
+  cursorflow init --no-gitignore
   `);
 }
 
@@ -155,6 +161,54 @@ cursorflow run ${config.tasksDir}/example/
   logger.success(`Created example README: ${path.relative(projectRoot, readmePath)}`);
 }
 
+/**
+ * Add _cursorflow to .gitignore
+ */
+function updateGitignore(projectRoot) {
+  const gitignorePath = path.join(projectRoot, '.gitignore');
+  const entry = '_cursorflow/';
+  
+  // Check if .gitignore exists
+  if (!fs.existsSync(gitignorePath)) {
+    // Create new .gitignore
+    fs.writeFileSync(gitignorePath, `# CursorFlow\n${entry}\n`, 'utf8');
+    logger.success('Created .gitignore with _cursorflow/');
+    return;
+  }
+  
+  // Read existing .gitignore
+  const content = fs.readFileSync(gitignorePath, 'utf8');
+  
+  // Check if already included
+  const lines = content.split('\n');
+  const hasEntry = lines.some(line => {
+    const trimmed = line.trim();
+    return trimmed === '_cursorflow' || 
+           trimmed === '_cursorflow/' || 
+           trimmed === '/_cursorflow' ||
+           trimmed === '/_cursorflow/';
+  });
+  
+  if (hasEntry) {
+    logger.info('_cursorflow/ already in .gitignore');
+    return;
+  }
+  
+  // Add entry
+  let newContent = content;
+  
+  // Add newline if file doesn't end with one
+  if (!content.endsWith('\n')) {
+    newContent += '\n';
+  }
+  
+  // Add section header and entry
+  newContent += `\n# CursorFlow\n${entry}\n`;
+  
+  fs.writeFileSync(gitignorePath, newContent, 'utf8');
+  logger.success('Added _cursorflow/ to .gitignore');
+}
+
 async function init(args) {
   logger.section('🚀 Initializing CursorFlow');
   
@@ -172,7 +226,7 @@ async function init(args) {
     logger.info('Use --force to overwrite');
   } else {
     try {
-      createDefaultConfig(projectRoot);
+      createDefaultConfig(projectRoot, options.force);
       logger.success(`Created config file: cursorflow.config.js`);
     } catch (error) {
       if (error.message.includes('already exists') && !options.force) {
@@ -197,7 +251,18 @@ async function init(args) {
   logger.info('\n📁 Creating directories...');
   createDirectories(projectRoot, config);
   
-  // 3. Install Cursor commands
+  // 3. Update .gitignore
+  if (options.gitignore) {
+    logger.info('\n📝 Updating .gitignore...');
+    try {
+      updateGitignore(projectRoot);
+    } catch (error) {
+      logger.warn(`Failed to update .gitignore: ${error.message}`);
+      logger.info('You can manually add "_cursorflow/" to your .gitignore');
+    }
+  }
+  
+  // 4. Install Cursor commands
   if (options.withCommands) {
     logger.info('\n📋 Installing Cursor commands...');
     try {
@@ -208,13 +273,13 @@ async function init(args) {
     }
   }
   
-  // 4. Create example tasks
+  // 5. Create example tasks
   if (options.example) {
     logger.info('\n📝 Creating example tasks...');
     createExampleTasks(projectRoot, config);
   }
   
-  // 5. Summary
+  // 6. Summary
   logger.section('✅ CursorFlow initialized successfully!');
   
   console.log('\n📚 Next steps:\n');

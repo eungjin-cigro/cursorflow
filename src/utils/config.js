@@ -136,10 +136,10 @@ function validateConfig(config) {
 /**
  * Create default config file
  */
-function createDefaultConfig(projectRoot) {
+function createDefaultConfig(projectRoot, force = false) {
   const configPath = path.join(projectRoot, 'cursorflow.config.js');
   
-  if (fs.existsSync(configPath)) {
+  if (fs.existsSync(configPath) && !force) {
     throw new Error(`Config file already exists: ${configPath}`);
   }
   

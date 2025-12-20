@@ -54,7 +54,6 @@
     "commands/",
     "templates/",
     "examples/",
-    "docs/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

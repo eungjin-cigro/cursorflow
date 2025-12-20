@@ -15,16 +15,66 @@ const { ensureCursorAgent, checkCursorApiKey } = require('../utils/cursor-agent'
 const { saveState, loadState, appendLog, createConversationEntry, createGitLogEntry } = require('../utils/state');
 
 /**
- * Execute cursor-agent command
+ * Execute cursor-agent command with timeout and better error handling
  */
 function cursorAgentCreateChat() {
   const { execSync } = require('child_process');
-  const out = execSync('cursor-agent create-chat', {
-    encoding: 'utf8',
-    stdio: 'pipe',
-  });
-  const lines = out.split('\n').filter(Boolean);
-  return lines[lines.length - 1] || null;
+  
+  try {
+    const out = execSync('cursor-agent create-chat', {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 30000, // 30 second timeout
+    });
+    const lines = out.split('\n').filter(Boolean);
+    const chatId = lines[lines.length - 1] || null;
+    
+    if (!chatId) {
+      throw new Error('Failed to get chat ID from cursor-agent');
+    }
+    
+    logger.info(`Created chat session: ${chatId}`);
+    return chatId;
+  } catch (error) {
+    // Check for common errors
+    if (error.message.includes('ENOENT')) {
+      throw new Error('cursor-agent CLI not found. Install with: npm install -g @cursor/agent');
+    }
+    
+    if (error.message.includes('ETIMEDOUT') || error.killed) {
+      throw new Error('cursor-agent timed out. Check your internet connection and Cursor authentication.');
+    }
+    
+    if (error.stderr) {
+      const stderr = error.stderr.toString();
+      
+      // Check for authentication errors
+      if (stderr.includes('not authenticated') || 
+          stderr.includes('login') || 
+          stderr.includes('auth')) {
+        throw new Error(
+          'Cursor authentication failed. Please:\n' +
+          '  1. Open Cursor IDE\n' +
+          '  2. Sign in to your account\n' +
+          '  3. Verify you can use AI features\n' +
+          '  4. Try running cursorflow again\n\n' +
+          `Original error: ${stderr.trim()}`
+        );
+      }
+      
+      // Check for API key errors
+      if (stderr.includes('api key') || stderr.includes('API_KEY')) {
+        throw new Error(
+          'Cursor API key error. Please check your Cursor account and subscription.\n' +
+          `Error: ${stderr.trim()}`
+        );
+      }
+      
+      throw new Error(`cursor-agent error: ${stderr.trim()}`);
+    }
+    
+    throw new Error(`Failed to create chat: ${error.message}`);
+  }
 }
 
 function parseJsonFromStdout(stdout) {
@@ -57,19 +107,67 @@ function cursorAgentSend({ workspaceDir, chatId, prompt, model }) {
     prompt,
   ];
   
+  logger.info('Executing cursor-agent...');
+  
   const res = spawnSync('cursor-agent', args, {
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: 300000, // 5 minute timeout for LLM response
   });
+  
+  // Check for timeout
+  if (res.error) {
+    if (res.error.code === 'ETIMEDOUT') {
+      return {
+        ok: false,
+        exitCode: -1,
+        error: 'cursor-agent timed out after 5 minutes. The LLM request may be taking too long or there may be network issues.',
+      };
+    }
+    
+    return {
+      ok: false,
+      exitCode: -1,
+      error: `cursor-agent error: ${res.error.message}`,
+    };
+  }
   
   const json = parseJsonFromStdout(res.stdout);
   
   if (res.status !== 0 || !json || json.type !== 'result') {
-    const msg = res.stderr?.trim() || res.stdout?.trim() || `exit=${res.status}`;
+    let errorMsg = res.stderr?.trim() || res.stdout?.trim() || `exit=${res.status}`;
+    
+    // Check for authentication errors
+    if (errorMsg.includes('not authenticated') || 
+        errorMsg.includes('login') || 
+        errorMsg.includes('auth')) {
+      errorMsg = 'Authentication error. Please:\n' +
+        '  1. Open Cursor IDE\n' +
+        '  2. Sign in to your account\n' +
+        '  3. Verify AI features are working\n' +
+        '  4. Try again\n\n' +
+        `Details: ${errorMsg}`;
+    }
+    
+    // Check for rate limit errors
+    if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
+      errorMsg = 'API rate limit or quota exceeded. Please:\n' +
+        '  1. Check your Cursor subscription\n' +
+        '  2. Wait a few minutes and try again\n\n' +
+        `Details: ${errorMsg}`;
+    }
+    
+    // Check for model errors
+    if (errorMsg.includes('model')) {
+      errorMsg = `Model error (requested: ${model || 'default'}). ` +
+        'Please check if the model is available in your Cursor subscription.\n\n' +
+        `Details: ${errorMsg}`;
+    }
+    
     return {
       ok: false,
       exitCode: res.status,
-      error: msg,
+      error: errorMsg,
     };
   }
   
@@ -251,7 +349,34 @@ async function runTask({
  * Run all tasks in sequence
  */
 async function runTasks(config, runDir) {
+  const { checkCursorAuth, printAuthHelp } = require('../utils/cursor-agent');
+  
+  // Ensure cursor-agent is installed
   ensureCursorAgent();
+  
+  // Check authentication before starting
+  logger.info('Checking Cursor authentication...');
+  const authStatus = checkCursorAuth();
+  
+  if (!authStatus.authenticated) {
+    logger.error('❌ Cursor authentication failed');
+    logger.error(`   ${authStatus.message}`);
+    
+    if (authStatus.details) {
+      logger.error(`   Details: ${authStatus.details}`);
+    }
+    
+    if (authStatus.help) {
+      logger.error(`   ${authStatus.help}`);
+    }
+    
+    console.log('');
+    printAuthHelp();
+    
+    throw new Error('Cursor authentication required. Please authenticate and try again.');
+  }
+  
+  logger.success('✓ Cursor authentication OK');
   
   const repoRoot = git.getRepoRoot();
   const pipelineBranch = config.pipelineBranch || `${config.branchPrefix}${Date.now().toString(36)}`;
@@ -269,6 +394,7 @@ async function runTasks(config, runDir) {
   });
   
   // Create chat
+  logger.info('Creating chat session...');
   const chatId = cursorAgentCreateChat();
   
   // Save initial state
@@ -341,3 +467,55 @@ module.exports = {
   runTasks,
   runTask,
 };
+
+/**
+ * CLI entry point
+ */
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  
+  if (args.length < 1) {
+    console.error('Usage: node runner.js <tasks-file> --run-dir <dir> --executor <executor>');
+    process.exit(1);
+  }
+  
+  const tasksFile = args[0];
+  const runDirIdx = args.indexOf('--run-dir');
+  const executorIdx = args.indexOf('--executor');
+  
+  const runDir = runDirIdx >= 0 ? args[runDirIdx + 1] : '.';
+  const executor = executorIdx >= 0 ? args[executorIdx + 1] : 'cursor-agent';
+  
+  if (!fs.existsSync(tasksFile)) {
+    console.error(`Tasks file not found: ${tasksFile}`);
+    process.exit(1);
+  }
+  
+  // Load tasks configuration
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
+  } catch (error) {
+    console.error(`Failed to load tasks file: ${error.message}`);
+    process.exit(1);
+  }
+  
+  // Add dependency policy defaults
+  config.dependencyPolicy = config.dependencyPolicy || {
+    allowDependencyChange: false,
+    lockfileReadOnly: true,
+  };
+  
+  // Run tasks
+  runTasks(config, runDir)
+    .then(() => {
+      process.exit(0);
+    })
+    .catch(error => {
+      console.error(`Runner failed: ${error.message}`);
+      if (process.env.DEBUG) {
+        console.error(error.stack);
+      }
+      process.exit(1);
+    });
+}

@@ -178,6 +178,100 @@ function testCursorAgent() {
   }
 }
 
+/**
+ * Check cursor-agent authentication
+ */
+function checkCursorAuth() {
+  try {
+    const result = spawnSync('cursor-agent', ['create-chat'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 10000, // 10 second timeout
+    });
+    
+    if (result.status === 0 && result.stdout.trim()) {
+      return {
+        authenticated: true,
+        message: 'Cursor authentication OK',
+      };
+    }
+    
+    const errorMsg = result.stderr?.trim() || result.stdout?.trim() || '';
+    
+    // Check for authentication errors
+    if (errorMsg.includes('not authenticated') || 
+        errorMsg.includes('login') || 
+        errorMsg.includes('auth')) {
+      return {
+        authenticated: false,
+        message: 'Not authenticated with Cursor',
+        details: errorMsg,
+        help: 'Please open Cursor IDE and sign in to your account',
+      };
+    }
+    
+    // Check for network errors
+    if (errorMsg.includes('network') || 
+        errorMsg.includes('connection') ||
+        errorMsg.includes('timeout')) {
+      return {
+        authenticated: false,
+        message: 'Network error',
+        details: errorMsg,
+        help: 'Check your internet connection',
+      };
+    }
+    
+    return {
+      authenticated: false,
+      message: 'Unknown error',
+      details: errorMsg,
+    };
+  } catch (error) {
+    if (error.code === 'ETIMEDOUT') {
+      return {
+        authenticated: false,
+        message: 'Connection timeout',
+        help: 'Check your internet connection',
+      };
+    }
+    
+    return {
+      authenticated: false,
+      message: 'Failed to check authentication',
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Print authentication help
+ */
+function printAuthHelp() {
+  console.log(`
+🔐 Cursor Authentication Required
+
+CursorFlow requires an authenticated Cursor session to use AI features.
+
+Steps to authenticate:
+
+  1. Open Cursor IDE
+  2. Sign in to your Cursor account (if not already)
+  3. Verify AI features work in the IDE
+  4. Run your CursorFlow command again
+
+Common issues:
+
+  • Not signed in to Cursor
+  • Subscription expired or inactive
+  • Network connectivity issues
+  • VPN or firewall blocking Cursor API
+
+For more help, visit: https://docs.cursor.com
+
+  `);
+}
+
 module.exports = {
   checkCursorAgentInstalled,
   getCursorAgentVersion,
@@ -187,4 +281,6 @@ module.exports = {
   validateSetup,
   getAvailableModels,
   testCursorAgent,
+  checkCursorAuth,
+  printAuthHelp,
 };

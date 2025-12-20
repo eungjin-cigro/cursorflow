@@ -40,3 +40,9 @@ Thumbs.db
 .tmp/
 temp/
 *.tmp
+
+# Test projects
+test-projects/
+
+# Private deployment docs (for maintainer only)
+docs/
