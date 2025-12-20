@@ -82,7 +82,7 @@ A complete demo project is included for testing with real LLM execution.
 
 - ✅ Task orchestration with 2 parallel lanes
 - ✅ Git worktree creation and management
-- ✅ Real LLM execution (Claude 3.5 Sonnet via cursor-agent)
+- ✅ Real LLM execution (Claude Sonnet 4.5 via cursor-agent)
 - ✅ Branch creation and commits
 - ✅ Real-time monitoring with status updates
 - ✅ Complete log capture (conversation + terminal)
