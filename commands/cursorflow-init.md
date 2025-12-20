@@ -1,67 +1,67 @@
 # CursorFlow Init
 
 ## Overview
-프로젝트에 CursorFlow를 초기화합니다. 설정 파일과 디렉토리 구조를 생성하고, 선택적으로 Cursor 커맨드와 예제 태스크를 설치합니다.
+Initialize CursorFlow in your project. Create the config file and directory structure, and optionally install Cursor commands and example tasks.
 
 ## Steps
 
-1. **초기화 실행**
+1. **Run initialization**
    ```bash
    cursorflow init
    ```
 
-2. **옵션 선택**
-   - `--example`: 예제 태스크 생성
-   - `--config-only`: 설정 파일만 생성
-   - `--no-commands`: Cursor 커맨드 설치 건너뛰기
-   - `--force`: 기존 파일 덮어쓰기
+2. **Choose options**
+   - `--example`: create example tasks
+   - `--config-only`: create only the config file
+   - `--no-commands`: skip installing Cursor commands
+   - `--force`: overwrite existing files
 
-3. **생성 확인**
-   - `cursorflow.config.js` 파일 생성됨
-   - `_cursorflow/tasks/` 디렉토리 생성됨
-   - `_cursorflow/logs/` 디렉토리 생성됨
-   - `.cursor/commands/cursorflow/` 커맨드 설치됨 (선택)
+3. **Verify created files**
+   - `cursorflow.config.js` created
+   - `_cursorflow/tasks/` directory created
+   - `_cursorflow/logs/` directory created
+   - `.cursor/commands/cursorflow/` commands installed (optional)
 
-4. **설정 파일 검토**
+4. **Review the config file**
    ```javascript
    // cursorflow.config.js
    module.exports = {
      tasksDir: '_cursorflow/tasks',
      logsDir: '_cursorflow/logs',
      baseBranch: 'main',
-     // ... 기타 설정
+     // ... other settings
    };
    ```
 
-## 예제
+## Examples
 
-### 기본 초기화
+### Basic initialization
 ```bash
 cursorflow init
 ```
 
-### 예제 태스크 포함
+### Include example tasks
 ```bash
 cursorflow init --example
 ```
 
-### 설정 파일만 생성
+### Generate only the config
 ```bash
 cursorflow init --config-only
 ```
 
-### 기존 파일 덮어쓰기
+### Overwrite existing files
 ```bash
 cursorflow init --force
 ```
 
 ## Checklist
-- [ ] 설정 파일이 프로젝트 루트에 생성되었는가?
-- [ ] 필요한 디렉토리가 생성되었는가?
-- [ ] Cursor 커맨드가 설치되었는가?
-- [ ] 설정 내용이 프로젝트에 맞게 조정되었는가?
+- [ ] Was the config file created at the project root?
+- [ ] Were the required directories created?
+- [ ] Were Cursor commands installed?
+- [ ] Is the configuration adjusted for the project?
 
-## Next Steps
-1. `cursorflow.config.js` 파일을 프로젝트에 맞게 수정
-2. Cursor IDE에서 `/` 입력하여 커맨드 확인
-3. `cursorflow prepare MyFeature`로 태스크 생성 시작
+## Next steps
+1. Update `cursorflow.config.js` for your project.
+2. In Cursor IDE, type `/` to confirm the commands are available.
+3. Start generating tasks with `cursorflow prepare MyFeature`.
