@@ -1,85 +1,85 @@
 # CursorFlow Resume
 
 ## Overview
-중단되거나 실패한 레인을 재개합니다. 상태를 복구하거나 처음부터 다시 시작할 수 있습니다.
+Resume lanes that were interrupted or failed. You can restore the previous state or restart from scratch.
 
 ## Steps
 
-1. **레인 상태 확인**
+1. **Check lane status**
    ```bash
    cursorflow monitor
    ```
 
-2. **레인 재개**
+2. **Resume a lane**
    ```bash
    cursorflow resume <lane-name>
    ```
 
-3. **브랜치 정리 후 재시작**
+3. **Clean branches before resuming**
    ```bash
    cursorflow resume <lane-name> --clean
    ```
 
-4. **처음부터 다시 시작**
+4. **Restart from the beginning**
    ```bash
    cursorflow resume <lane-name> --restart
    ```
 
-## 옵션
+## Options
 
-| 옵션 | 설명 |
+| Option | Description |
 |------|------|
-| `--run-dir <path>` | 특정 run 디렉토리 지정 |
-| `--clean` | 브랜치 정리 후 재시작 |
-| `--restart` | 처음부터 다시 시작 |
-| `--force` | 확인 없이 진행 |
+| `--run-dir <path>` | Use a specific run directory |
+| `--clean` | Clean branches before restarting |
+| `--restart` | Start over from the beginning |
+| `--force` | Continue without confirmation |
 
-## 예제
+## Examples
 
-### 기본 재개
+### Resume the latest run
 ```bash
-# 최신 run에서 해당 레인 재개
+# Resume the lane from the latest run
 cursorflow resume 01-dashboard
 ```
 
-### 특정 run에서 재개
+### Resume from a specific run
 ```bash
 cursorflow resume --run-dir _cursorflow/logs/runs/my-run/ 01-dashboard
 ```
 
-### 브랜치 충돌 해결 후 재개
+### Resolve branch conflicts then resume
 ```bash
-# 기존 브랜치 정리 후 재시작
+# Clean up existing branches before restarting
 cursorflow resume 01-dashboard --clean
 ```
 
-### 완전히 새로 시작
+### Start completely fresh
 ```bash
-# 모든 상태 초기화 후 재시작
+# Reset all state before restarting
 cursorflow resume 01-dashboard --restart
 ```
 
-## 재개 프로세스
+## Resume process
 
-1. **상태 확인**
-   - `state.json` 파일 로드
-   - 마지막 태스크 위치 확인
-   - Worktree 상태 확인
+1. **Check state**
+   - Load `state.json`
+   - Locate the last task index
+   - Inspect the worktree state
 
-2. **환경 복구**
-   - Worktree 접근 가능 여부 확인
-   - 브랜치 체크아웃
-   - 미커밋 변경사항 확인
+2. **Restore the environment**
+   - Verify worktree accessibility
+   - Check out the branch
+   - Check for uncommitted changes
 
-3. **실행 재개**
-   - 중단된 태스크부터 계속
-   - 또는 새로 시작 (--restart)
+3. **Resume execution**
+   - Continue from the interrupted task
+   - Or restart from the beginning (`--restart`)
 
-4. **완료**
-   - 남은 태스크 모두 수행
-   - 변경사항 커밋 및 푸시
+4. **Complete**
+   - Finish remaining tasks
+   - Commit and push changes
 
-## 상태 파일 예시
+## Sample state file
 
 ```json
 {
@@ -96,86 +96,86 @@ cursorflow resume 01-dashboard --restart
 ```
 
 ## Checklist
-- [ ] 레인이 실제로 중단되었는가?
-- [ ] 상태 파일이 존재하는가?
-- [ ] 브랜치 충돌은 없는가?
-- [ ] Worktree가 존재하는가?
-- [ ] 미커밋 변경사항이 있는가?
+- [ ] Was the lane actually interrupted?
+- [ ] Does the state file exist?
+- [ ] Are there any branch conflicts?
+- [ ] Does the worktree still exist?
+- [ ] Are there uncommitted changes?
 
-## 트러블슈팅
+## Troubleshooting
 
-### 상태 파일이 없는 경우
+### State file missing
 ```bash
-# 최신 run 디렉토리 확인
+# Check the latest run directory
 ls -lt _cursorflow/logs/runs/
 
-# 특정 run 지정
+# Specify a run explicitly
 cursorflow resume --run-dir _cursorflow/logs/runs/latest/ 01-dashboard
 ```
 
-### 브랜치 충돌
+### Branch conflicts
 ```bash
-# 기존 브랜치 확인
+# Inspect existing branches
 git branch | grep dashboard
 
-# 정리 후 재개
+# Clean up and resume
 cursorflow resume 01-dashboard --clean
 ```
 
-### Worktree 문제
+### Worktree issues
 ```bash
-# Worktree 목록 확인
+# List worktrees
 git worktree list
 
-# 문제 있는 worktree 제거
+# Remove problematic worktree
 git worktree remove <path> --force
 
-# 재개
+# Resume
 cursorflow resume 01-dashboard --restart
 ```
 
-### 의존성 블록
+### Dependency blocks
 ```bash
-# 의존성이 해결되었는지 확인
+# Verify dependencies are resolved
 cursorflow monitor
 
-# 의존성 해결 후 재개
+# Resume after resolving
 cursorflow resume 01-dashboard
 ```
 
-## 재개 시나리오
+## Resume scenarios
 
-### 시나리오 1: 네트워크 오류로 중단
+### Scenario 1: Interrupted by network errors
 ```bash
-# 단순 재개 (같은 위치부터 계속)
+# Simply resume from the same position
 cursorflow resume 01-dashboard
 ```
 
-### 시나리오 2: 빌드 에러로 실패
+### Scenario 2: Failed due to build errors
 ```bash
-# 코드 수정 후
+# After fixing code
 cd .cursorflow/logs/worktrees/01-dashboard-xxx/
-# ... 코드 수정 ...
+# ... apply fixes ...
 git add -A
 git commit -m "fix: build error"
 
-# 다음 태스크부터 계속
+# Continue from the next task
 cursorflow resume 01-dashboard
 ```
 
-### 시나리오 3: 브랜치 충돌
+### Scenario 3: Branch conflicts
 ```bash
-# 브랜치 정리 후 새로 시작
+# Clean branches then restart
 cursorflow resume 01-dashboard --clean
 ```
 
-### 시나리오 4: 처음부터 다시
+### Scenario 4: Start over
 ```bash
-# 모든 상태 초기화
+# Reset all state
 cursorflow resume 01-dashboard --restart
 ```
 
-## Next Steps
-1. 재개 후 `cursorflow monitor --watch`로 모니터링
-2. 완료 시 PR 확인
-3. 반복 실패 시 태스크 설정 검토
+## Next steps
+1. After resuming, monitor with `cursorflow monitor --watch`.
+2. Check the PR when the run finishes.
+3. If failures repeat, review the task configuration.

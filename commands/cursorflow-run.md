@@ -1,129 +1,129 @@
 # CursorFlow Run
 
 ## Overview
-준비된 태스크를 실행합니다. 단일 레인 또는 멀티 레인 오케스트레이션을 수행합니다.
+Execute prepared tasks with single-lane or multi-lane orchestration.
 
 ## Steps
 
-1. **태스크 디렉토리 확인**
+1. **Check the task directory**
    ```bash
    ls _cursorflow/tasks/
    ```
 
-2. **멀티 레인 실행**
+2. **Run multiple lanes**
    ```bash
    cursorflow run _cursorflow/tasks/MyFeature/
    ```
 
-3. **단일 레인 실행**
+3. **Run a single lane**
    ```bash
    cursorflow lane _cursorflow/tasks/MyFeature/01-task.json
    ```
 
-4. **Dry run (실행 계획 확인)**
+4. **Dry run (preview the plan)**
    ```bash
    cursorflow run _cursorflow/tasks/MyFeature/ --dry-run
    ```
 
-5. **실행 모니터링**
-   
-   실행 중에는 다른 터미널에서 모니터링:
+5. **Monitor execution**
+
+   Watch progress from another terminal while the run is in progress:
    ```bash
    cursorflow monitor --watch
    ```
 
-## 옵션
+## Options
 
-| 옵션 | 설명 |
+| Option | Description |
 |------|------|
-| `--dry-run` | 실제 실행 없이 계획만 확인 |
-| `--executor <type>` | 실행 방식 (cursor-agent \| cloud) |
-| `--no-review` | 코드 리뷰 비활성화 |
-| `--config <path>` | 커스텀 설정 파일 경로 |
+| `--dry-run` | Preview the plan without executing |
+| `--executor <type>` | Execution mode (`cursor-agent` \| `cloud`) |
+| `--no-review` | Disable code review |
+| `--config <path>` | Use a custom config file |
 
-## 예제
+## Examples
 
-### 기본 실행
+### Standard run
 ```bash
 cursorflow run _cursorflow/tasks/2512191700_MyFeature/
 ```
 
-### Cloud 실행 (API 키 필요)
+### Cloud run (requires API key)
 ```bash
 export CURSOR_API_KEY=your_key
 cursorflow run _cursorflow/tasks/MyFeature/ --executor cloud
 ```
 
-### 리뷰 없이 빠른 실행
+### Fast run without review
 ```bash
 cursorflow run _cursorflow/tasks/MyFeature/ --no-review
 ```
 
-## 실행 프로세스
+## Execution process
 
-1. **초기화**
-   - 설정 로드
-   - cursor-agent CLI 확인
-   - Git 저장소 확인
+1. **Initialization**
+   - Load configuration
+   - Verify the `cursor-agent` CLI
+   - Confirm Git repository status
 
-2. **레인 준비**
-   - Worktree 생성
-   - 브랜치 체크아웃
-   - 환경 설정
+2. **Prepare lanes**
+   - Create worktrees
+   - Check out branches
+   - Configure the environment
 
-3. **태스크 실행**
-   - 순차적으로 태스크 수행
-   - 각 태스크 완료 후 커밋
-   - 리뷰 활성화 시 자동 리뷰
+3. **Run tasks**
+   - Execute tasks sequentially
+   - Commit after each task
+   - Trigger automatic review when enabled
 
-4. **완료**
-   - 변경사항 푸시
-   - PR 생성 (설정에 따라)
-   - 로그 저장
+4. **Complete**
+   - Push changes
+   - Create a PR (depending on settings)
+   - Store logs
 
-## 로그 위치
+## Log location
 
-실행 로그는 `_cursorflow/logs/runs/` 에 저장됩니다:
+Run logs are stored in `_cursorflow/logs/runs/`:
 
 ```
 _cursorflow/logs/runs/<lane>-<timestamp>/
-├── state.json              # 레인 상태
-├── results.json            # 태스크 결과
-├── conversation.jsonl      # 에이전트 대화
-├── git-operations.jsonl    # Git 작업 로그
-└── events.jsonl            # 이벤트 로그
+├── state.json              # Lane status
+├── results.json            # Task results
+├── conversation.jsonl      # Agent conversation
+├── git-operations.jsonl    # Git activity log
+└── events.jsonl            # Event log
 ```
 
 ## Checklist
-- [ ] cursor-agent CLI가 설치되어 있는가?
-- [ ] Git worktree가 사용 가능한가?
-- [ ] 태스크 파일이 올바른가?
-- [ ] 브랜치 이름이 충돌하지 않는가?
-- [ ] 필요한 환경 변수가 설정되었는가? (Cloud 실행 시)
+- [ ] Is the `cursor-agent` CLI installed?
+- [ ] Are Git worktrees available?
+- [ ] Are the task files valid?
+- [ ] Do branch names avoid collisions?
+- [ ] Are required environment variables set? (for cloud runs)
 
-## 트러블슈팅
+## Troubleshooting
 
-### 브랜치 충돌
+### Branch conflicts
 ```bash
-# 기존 브랜치 정리
+# Clean up existing branches
 cursorflow clean branches --pattern "feature/my-*"
 ```
 
-### Worktree 충돌
+### Worktree conflicts
 ```bash
-# 기존 worktree 정리
+# Clean up existing worktrees
 cursorflow clean worktrees --all
 ```
 
-### 실행 실패
+### Run failures
 ```bash
-# 로그 확인
+# Inspect logs
 cursorflow monitor
-# 또는
+# or
 cat _cursorflow/logs/runs/latest/*/state.json
 ```
 
-## Next Steps
-1. `cursorflow monitor --watch`로 진행 상황 모니터링
-2. 완료 후 PR 확인 및 리뷰
-3. 실패 시 `cursorflow resume <lane>`로 재개
+## Next steps
+1. Monitor progress with `cursorflow monitor --watch`.
+2. Review the PR when the run completes.
+3. If a run fails, resume with `cursorflow resume <lane>`.
