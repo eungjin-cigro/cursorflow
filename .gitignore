@@ -41,6 +41,11 @@ Thumbs.db
 temp/
 *.tmp
 
+# Cursor
+.cursorrules
+.cursor/
+_cursorflow/
+
 # Test projects
 test-projects/
 
