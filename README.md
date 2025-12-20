@@ -3,6 +3,8 @@
 > Parallel AI agent orchestration system built on Git worktrees
 
 [![npm version](https://img.shields.io/npm/v/@litmers/cursorflow-orchestrator.svg)](https://www.npmjs.com/package/@litmers/cursorflow-orchestrator)
+[![CI](https://github.com/eungjin-cigro/cursorflow/actions/workflows/ci.yml/badge.svg)](https://github.com/eungjin-cigro/cursorflow/actions/workflows/ci.yml)
+[![Publish to NPM](https://github.com/eungjin-cigro/cursorflow/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/eungjin-cigro/cursorflow/actions/workflows/npm-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
@@ -59,6 +61,38 @@ cursorflow run _cursorflow/tasks/example/
 # Monitor from another terminal
 cursorflow monitor --watch
 ```
+
+## 🧪 Testing CursorFlow
+
+A complete demo project is included for testing with real LLM execution.
+
+### Quick Test
+
+```bash
+# From the CursorFlow repository root
+./test-cursorflow.sh setup   # Verify prerequisites
+./test-cursorflow.sh run     # Run demo with LLM
+./test-cursorflow.sh watch   # Monitor in real-time
+./test-cursorflow.sh clean   # Clean up after test
+```
+
+### What Gets Tested
+
+- ✅ Task orchestration with 2 parallel lanes
+- ✅ Git worktree creation and management
+- ✅ Real LLM execution (Claude 3.5 Sonnet via cursor-agent)
+- ✅ Branch creation and commits
+- ✅ Real-time monitoring with status updates
+- ✅ Complete log capture (conversation + terminal)
+
+### Demo Tasks
+
+1. **create-utils**: Creates `src/utils.js` with utility functions
+2. **add-tests**: Creates `src/utils.test.js` with simple tests
+
+Each task runs ~1-2 minutes, demonstrating the full CursorFlow workflow.
+
+**See**: `test-projects/demo-project/README.md` for detailed documentation.
 
 ## Cursor IDE Integration
 

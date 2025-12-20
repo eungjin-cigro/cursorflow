@@ -8,7 +8,13 @@
     "cursorflow-setup": "src/cli/setup-commands.js"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "prepublishOnly": "npm run validate",
+    "validate": "npm pack --dry-run",
+    "release": "scripts/release.sh",
+    "release:patch": "scripts/release.sh patch",
+    "release:minor": "scripts/release.sh minor",
+    "release:major": "scripts/release.sh major"
   },
   "keywords": [
     "cursor",
