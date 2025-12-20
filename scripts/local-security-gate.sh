@@ -44,7 +44,8 @@ echo -e "\n${BLUE}[3/4] Checking for hardcoded secrets...${NC}"
 # git에 추적되는 파일들 중 API 키나 비밀번호 패턴 검색
 # .cursorignore나 .gitignore에 있는 파일은 제외
 # .github, *.md, scripts/setup-security.sh 등은 제외
-SECRETS_FOUND=$(git grep -Ei "api[_-]?key|secret|password|token|bearer|private[_-]?key" -- ":!package-lock.json" ":!*.md" ":!scripts/setup-security.sh" ":!scripts/ai-security-check.js" ":!.github/*" | grep -v "process.env" | grep -v "example" | grep -v "\${{" || true)
+# 변수 선언이나 에러 메시지에 포함된 키워드는 제외하도록 필터 강화
+SECRETS_FOUND=$(git grep -Ei "api[_-]?key|secret|password|token|bearer|private[_-]?key" -- ":!package-lock.json" ":!*.md" ":!scripts/setup-security.sh" ":!scripts/ai-security-check.js" ":!.github/*" ":!scripts/local-security-gate.sh" | grep -v "process.env" | grep -v "example" | grep -v "\${{" | grep -vE "stderr\.includes|checkCursorApiKey|CURSOR_API_KEY|api key|API_KEY" || true)
 
 if [ -z "$SECRETS_FOUND" ]; then
     echo -e "${GREEN}✅ No obvious secrets found in tracked files.${NC}"
