@@ -1,162 +1,51 @@
 # CursorFlow Clean
 
 ## Overview
-Clean up branches, worktrees, and logs. Remove stale files or remnants from failed runs.
+Clean up temporary resources created by CursorFlow, including Git worktrees, feature branches, and log files.
 
-## Steps
+## Usage
 
-1. **Choose what to clean**
+```bash
+cursorflow clean <type> [options]
+```
 
-   | Type | Description |
-   |------|------|
-   | `branches` | Clean Git branches |
-   | `worktrees` | Clean Git worktrees |
-   | `logs` | Clean log files |
-   | `all` | Clean everything |
+## Clean Types
 
-2. **Clean branches**
-   ```bash
-   cursorflow clean branches --pattern "feature/my-*"
-   ```
-
-3. **Clean worktrees**
-   ```bash
-   cursorflow clean worktrees --all
-   ```
-
-4. **Clean logs**
-   ```bash
-   cursorflow clean logs --older-than 30
-   ```
-
-5. **Verify with a dry run**
-   ```bash
-   cursorflow clean all --dry-run
-   ```
+| Type | Description |
+|------|------|
+| `branches` | Remove local feature branches created by CursorFlow |
+| `worktrees` | Remove temporary Git worktrees |
+| `logs` | Clear all run and terminal logs |
+| `all` | Clean everything (branches, worktrees, and logs) |
 
 ## Options
 
 | Option | Description |
 |------|------|
-| `--pattern <pattern>` | Pattern match (e.g., "feature/*") |
-| `--older-than <days>` | Items older than N days (for logs) |
-| `--dry-run` | Show items to delete without removing |
-| `--force` | Delete without confirmation |
-| `--local-only` | Local only (branches) |
-| `--remote-only` | Remote only (branches) |
+| `--dry-run` | Show what would be removed without actually deleting anything |
+| `--force` | Force removal (ignore uncommitted changes in worktrees) |
+| `--help`, `-h` | Show help |
 
 ## Examples
 
-### Branch cleanup
-
-#### Delete by pattern
-```bash
-cursorflow clean branches --pattern "feature/dashboard-*"
-```
-
-#### All CursorFlow branches
-```bash
-cursorflow clean branches --pattern "feature/*" --dry-run
-```
-
-#### Local branches only
-```bash
-cursorflow clean branches --pattern "feature/*" --local-only
-```
-
-### Worktree cleanup
-
-#### All worktrees
-```bash
-cursorflow clean worktrees --all
-```
-
-#### Specific pattern
-```bash
-cursorflow clean worktrees --pattern "*-dashboard-*"
-```
-
-### Log cleanup
-
-#### Logs older than 30 days
-```bash
-cursorflow clean logs --older-than 30
-```
-
-#### All logs
-```bash
-cursorflow clean logs --all --force
-```
-
-### Full cleanup
-
-#### Review then delete
+### Review before deleting
 ```bash
 cursorflow clean all --dry-run
+```
+
+### Clean only worktrees
+```bash
+cursorflow clean worktrees
+```
+
+### Force clean everything
+```bash
 cursorflow clean all --force
-```
-
-## Sample output
-
-```
-🧹 Cleaning CursorFlow Resources
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Branches to delete:
-  - feature/dashboard-pipeline-abc123 (local)
-  - feature/dashboard-pipeline-abc123 (remote)
-  - feature/client-pipeline-def456 (local)
-
-Worktrees to remove:
-  - .cursorflow/logs/worktrees/01-dashboard-pipeline-abc123
-  - .cursorflow/logs/worktrees/02-client-pipeline-def456
-
-Logs to delete:
-  - _cursorflow/logs/runs/01-dashboard-2025-12-10T10-00-00 (9 days old)
-
-Total: 5 branches, 2 worktrees, 1 log directory
-
-Proceed? [y/N]
 ```
 
 ## Notes
 
-1. **Back up**: Save important branches before deleting.
-2. **Confirm**: Start with `--dry-run` to review changes.
-3. **Remote caution**: Be careful when deleting remote branches.
-4. **Irreversible**: Deleted items are hard to recover.
-
-## Checklist
-- [ ] Have you reviewed items to clean?
-- [ ] Do you need backups?
-- [ ] Did you run a dry run first?
-- [ ] Are other teammates using these branches?
-- [ ] Do you also need to delete from the remote?
-
-## Troubleshooting
-
-### Branch deletion failed
-```bash
-# Force delete
-git branch -D <branch-name>
-git push origin --delete <branch-name>
-```
-
-### Worktree removal failed
-```bash
-# Force remove
-git worktree remove --force <worktree-path>
-```
-
-### Log directory permission issues
-```bash
-# Check permissions
-ls -la _cursorflow/logs/
-# Fix permissions
-chmod -R u+w _cursorflow/logs/
-```
-
-## Next steps
-1. Clean logs regularly (e.g., monthly).
-2. Add an automated cleanup script to CI/CD.
-3. Add log directories to `.gitignore`.
+1. **Safety**: It is highly recommended to run with `--dry-run` first to see exactly what will be deleted.
+2. **Worktrees**: The command identifies CursorFlow worktrees by their location (usually in `_cursorflow/worktrees/`) or their prefix.
+3. **Branches**: Only branches starting with the configured `branchPrefix` (default: `cursorflow/`) are targeted.
+4. **Irreversible**: Once logs are deleted, they cannot be recovered.

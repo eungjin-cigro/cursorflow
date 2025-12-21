@@ -9,12 +9,14 @@ import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
 import { loadState } from '../utils/state';
 import { LaneState } from '../utils/types';
+import { runDoctor } from '../utils/doctor';
 
 interface ResumeOptions {
   lane: string | null;
   runDir: string | null;
   clean: boolean;
   restart: boolean;
+  skipDoctor: boolean;
   help: boolean;
 }
 
@@ -29,6 +31,7 @@ Options:
   --run-dir <path>       Use a specific run directory (default: latest)
   --clean                Clean up existing worktree before resuming
   --restart              Restart from the first task (index 0)
+  --skip-doctor          Skip environment/branch checks (not recommended)
   --help, -h             Show help
   `);
 }
@@ -41,6 +44,7 @@ function parseArgs(args: string[]): ResumeOptions {
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
     clean: args.includes('--clean'),
     restart: args.includes('--restart'),
+    skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -98,6 +102,45 @@ async function resume(args: string[]): Promise<void> {
   
   if (!state.tasksFile || !fs.existsSync(state.tasksFile)) {
     throw new Error(`Original tasks file not found: ${state.tasksFile}. Resume impossible without task definition.`);
+  }
+  
+  // Run doctor check before resuming (check branches, etc.)
+  if (!options.skipDoctor) {
+    const tasksDir = path.dirname(state.tasksFile);
+    logger.info('Running pre-flight checks...');
+    
+    const report = runDoctor({
+      cwd: process.cwd(),
+      tasksDir,
+      includeCursorAgentChecks: false, // Skip agent checks for resume
+    });
+    
+    // Only show blocking errors for resume
+    const blockingIssues = report.issues.filter(i => 
+      i.severity === 'error' && 
+      (i.id.startsWith('branch.') || i.id.startsWith('git.'))
+    );
+    
+    if (blockingIssues.length > 0) {
+      logger.section('🛑 Pre-resume check found issues');
+      for (const issue of blockingIssues) {
+        logger.error(`${issue.title} (${issue.id})`, '❌');
+        console.log(`   ${issue.message}`);
+        if (issue.details) console.log(`   Details: ${issue.details}`);
+        if (issue.fixes?.length) {
+          console.log('   Fix:');
+          for (const fix of issue.fixes) console.log(`     - ${fix}`);
+        }
+        console.log('');
+      }
+      throw new Error('Pre-resume checks failed. Use --skip-doctor to bypass (not recommended).');
+    }
+    
+    // Show warnings but don't block
+    const warnings = report.issues.filter(i => i.severity === 'warn' && i.id.startsWith('branch.'));
+    if (warnings.length > 0) {
+      logger.warn(`${warnings.length} warning(s) found. Run 'cursorflow doctor' for details.`);
+    }
   }
   
   logger.section(`🔁 Resuming Lane: ${options.lane}`);

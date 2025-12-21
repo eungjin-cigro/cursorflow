@@ -1,67 +1,50 @@
 # CursorFlow Init
 
 ## Overview
-Initialize CursorFlow in your project. Create the config file and directory structure, and optionally install Cursor commands and example tasks.
+Initialize CursorFlow in your project. This command creates the default configuration file, sets up the required directory structure, and prepares the environment for parallel AI orchestration.
 
-## Steps
+## Usage
 
-1. **Run initialization**
-   ```bash
-   cursorflow init
-   ```
-
-2. **Choose options**
-   - `--example`: create example tasks
-   - `--config-only`: create only the config file
-   - `--no-commands`: skip installing Cursor commands
-   - `--force`: overwrite existing files
-
-3. **Verify created files**
-   - `cursorflow.config.js` created
-   - `_cursorflow/tasks/` directory created
-   - `_cursorflow/logs/` directory created
-   - `.cursor/commands/cursorflow/` commands installed (optional)
-
-4. **Review the config file**
-   ```javascript
-   // cursorflow.config.js
-   module.exports = {
-     tasksDir: '_cursorflow/tasks',
-     logsDir: '_cursorflow/logs',
-     baseBranch: 'main',
-     // ... other settings
-   };
-   ```
-
-## Examples
-
-### Basic initialization
 ```bash
-cursorflow init
+cursorflow init [options]
 ```
 
-### Include example tasks
+## Options
+
+| Option | Description |
+|------|------|
+| `--example` | Create an example task to help you get started |
+| `--config-only` | Only create the `cursorflow.config.js` file |
+| `--no-commands` | Skip installing Cursor IDE custom commands |
+| `--no-gitignore` | Skip adding `_cursorflow/` to your `.gitignore` |
+| `--force` | Overwrite existing configuration or directories |
+
+## What's Created?
+
+1. **`cursorflow.config.js`**: Central configuration for the project.
+2. **`_cursorflow/tasks/`**: Directory where you define your task JSON files.
+3. **`_cursorflow/logs/`**: Directory for run logs and terminal outputs.
+4. **`.cursor/commands/cursorflow/`**: (Optional) Integrated Cursor IDE commands.
+5. **`.gitignore` update**: Adds `_cursorflow/` to prevent committing logs.
+
+## Example
+
 ```bash
+# Standard initialization with an example task
 cursorflow init --example
+
+# Minimal initialization
+cursorflow init --no-commands --no-gitignore
 ```
 
-### Generate only the config
-```bash
-cursorflow init --config-only
-```
+## Next Steps
 
-### Overwrite existing files
-```bash
-cursorflow init --force
-```
-
-## Checklist
-- [ ] Was the config file created at the project root?
-- [ ] Were the required directories created?
-- [ ] Were Cursor commands installed?
-- [ ] Is the configuration adjusted for the project?
-
-## Next steps
-1. Update `cursorflow.config.js` for your project.
-2. In Cursor IDE, type `/` to confirm the commands are available.
-3. Start generating tasks with `cursorflow prepare MyFeature`.
+1. **Configure**: Review `cursorflow.config.js` and adjust settings like `baseBranch` or `maxConcurrentLanes`.
+2. **Explore**: If you used `--example`, run it with:
+   ```bash
+   cursorflow run _cursorflow/tasks/example/
+   ```
+3. **Create**: Start your own feature tasks with:
+   ```bash
+   cursorflow prepare MyFeature
+   ```

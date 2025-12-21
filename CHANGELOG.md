@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2025-12-21
+
+### Added
+- **Preset Templates**: Three built-in task templates for common patterns:
+  - `--preset complex`: plan → implement → test (saves plan to `_cursorflow/PLAN_lane-{N}.md`)
+  - `--preset simple`: implement → test
+  - `--preset merge`: merge → test (auto-applied for dependent lanes)
+- **Plan Document Integration**: Complex preset saves implementation plans to dedicated files, which are referenced by subsequent tasks
+- **Single Task Mode**: Create simple tasks with just `--prompt` without specifying a preset
+- **Branch Validation in Doctor**: 
+  - Detects branch prefix collisions between lanes
+  - Warns about existing branches that may conflict
+  - Suggests consistent naming conventions
+- **Pre-resume Validation**: `cursorflow resume` now runs doctor checks before resuming (use `--skip-doctor` to bypass)
+- **Models Command**: `cursorflow models` to list available AI models
+- **Incremental Lane/Task Addition**: 
+  - `--add-lane` to add new lanes to existing task directories
+  - `--add-task` to append tasks to existing lane files
+
+### Changed
+- All documentation updated to English
+- Improved task generation with better prompts and acceptance criteria
+- Enhanced error messages for branch and dependency issues
+
 ## [0.1.9] - 2025-12-21
 
 ### Added

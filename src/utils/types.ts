@@ -36,6 +36,8 @@ export interface Task {
   name: string;
   prompt: string;
   model?: string;
+  /** Acceptance criteria for the AI reviewer to validate */
+  acceptanceCriteria?: string[];
 }
 
 export interface RunnerConfig {

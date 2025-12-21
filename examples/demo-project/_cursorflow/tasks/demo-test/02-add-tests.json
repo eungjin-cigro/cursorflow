@@ -1,18 +1,29 @@
 {
   "baseBranch": "main",
-  "branchPrefix": "cursorflow/demo-",
-  "executor": "cursor-agent",
-  "autoCreatePr": false,
-  "pollInterval": 10,
+  "branchPrefix": "cursorflow/demo-tests-",
+  "timeout": 300000,
+  "enableIntervention": false,
   "dependencyPolicy": {
     "allowDependencyChange": false,
     "lockfileReadOnly": true
   },
+  "enableReview": true,
+  "reviewModel": "sonnet-4.5-thinking",
+  "maxReviewIterations": 2,
+  "laneNumber": 2,
+  "devPort": 3002,
   "tasks": [
     {
-      "name": "add-tests",
+      "name": "implement",
       "model": "sonnet-4.5",
-      "prompt": "# Task: Add simple tests for utility functions\n\n## Goal\nCreate a `src/utils.test.js` file with basic tests.\n\n## Requirements\n1. Create `src/utils.test.js`\n2. Add simple manual tests (no testing framework needed)\n3. Test all three utility functions:\n   - Test `capitalize()` with a few examples\n   - Test `sum()` with different arrays\n   - Test `unique()` with arrays containing duplicates\n\n## Steps\n1. Create the test file\n2. Import the utils module\n3. Write simple console.log tests that show expected vs actual\n4. Add a success message at the end if all tests pass\n5. Commit with message: \"test: add basic tests for utils\"\n\n## Example Format\n```javascript\nconst utils = require('./utils');\n\nconsole.log('Testing capitalize...');\nconst result1 = utils.capitalize('hello');\nconsole.log('Expected: Hello, Got:', result1);\nconsole.log(result1 === 'Hello' ? '✓ Pass' : '✗ Fail');\n```\n"
+      "prompt": "# Task: Add simple tests for utility functions\n\n## Goal\nCreate a `src/utils.test.js` file with basic tests.\n\n## Requirements\n1. Create `src/utils.test.js`\n2. Add simple manual tests (no testing framework needed)\n3. Test all three utility functions:\n   - Test `capitalize()` with a few examples\n   - Test `sum()` with different arrays\n   - Test `unique()` with arrays containing duplicates\n\n## Steps\n1. Create the test file\n2. Import the utils module\n3. Write simple console.log tests that show expected vs actual\n4. Add a success message at the end if all tests pass\n5. Commit with message: \"test: add basic tests for utils\"\n\n## Example Format\n```javascript\nconst utils = require('./utils');\n\nconsole.log('Testing capitalize...');\nconst result1 = utils.capitalize('hello');\nconsole.log('Expected: Hello, Got:', result1);\nconsole.log(result1 === 'Hello' ? '✓ Pass' : '✗ Fail');\n```\n\n## Important\n- Double-check all test cases before finishing",
+      "acceptanceCriteria": [
+        "src/utils.test.js file exists",
+        "Tests for capitalize function",
+        "Tests for sum function",
+        "Tests for unique function",
+        "Clear pass/fail output"
+      ]
     }
   ]
 }

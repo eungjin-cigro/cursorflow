@@ -3,87 +3,67 @@
 ## Overview
 The `cursorflow monitor` command provides a powerful, interactive terminal-based dashboard to track the execution status of all lanes in real-time. It allows you to visualize dependencies, stream live terminal output, and intervene in running tasks.
 
-## Steps
+## Usage
 
-1. **Launch the interactive dashboard**
-   ```bash
-   # Monitor the most recent run
-   cursorflow monitor latest
-   ```
+```bash
+# Monitor the most recent run
+cursorflow monitor latest
 
-2. **Dashboard Controls**
-   - **Navigation**: Use `↑` and `↓` to move between lanes.
-   - **Details**: Press `→` or `Enter` to see task progress, conversation history, and more.
-   - **Flow View**: Press `F` (from list view) to see the Directed Acyclic Graph (DAG) of task dependencies.
-   - **Live Terminal**: Press `T` (from lane detail) to stream the real-time output of the AI agent.
-   - **Intervention**: Press `I` (from lane detail) to send a manual prompt to a running agent.
-   - **Kill Process**: Press `K` (from lane detail) to forcefully terminate a stuck agent.
-   - **Back**: Use `←` or `Esc` to navigate back to previous screens.
-   - **Quit**: Press `Q` to exit.
+# Monitor a specific run directory
+cursorflow monitor _cursorflow/logs/runs/run-2025-12-21T10-00-00
+```
 
-3. **Monitor a specific run directory**
-   ```bash
-   cursorflow monitor _cursorflow/logs/runs/run-2025-12-21T10-00-00
-   ```
+## Dashboard Controls
 
-## Key Views
-
-### List View
-Shows an overview of all lanes, their status (pending, running, completed, failed, blocked), progress percentage, elapsed time, and "Next Action" (what it's waiting for or what it unlocks).
-
-### Dependency Flow View
-A visual map of how tasks relate to each other. It shows which lanes must finish before others can start.
+### List View (Main)
+- **Navigation**: Use `↑` and `↓` to move between lanes.
+- **Details**: Press `→` or `Enter` to enter the **Lane Detail View**.
+- **Flow View**: Press `F` to see the task dependency graph (DAG).
+- **Quit**: Press `Q` to exit.
 
 ### Lane Detail View
-Displays:
-- **Status & Progress**: Current task index and total tasks.
-- **PID**: The process ID of the running `cursor-agent`.
-- **Live Terminal (Preview)**: The last few lines of the agent's output.
-- **Conversation History**: A scrollable list of messages between the system and the agent. Select a message to see its full content.
+- **History Browsing**: Use `↑` and `↓` to scroll through conversation history.
+- **Message Detail**: Press `→` or `Enter` on a message to see its full content.
+- **Live Terminal**: Press `T` to enter the **Full Terminal View**.
+- **Intervention**: Press `I` to send a manual prompt to the agent (requires `enableIntervention: true`).
+- **Kill Process**: Press `K` to forcefully terminate a stuck agent process.
+- **Back**: Press `←` or `Esc` to return to the List View.
 
 ### Full Terminal View
-A dedicated view that acts like `tail -f` for the agent's log. You can scroll up/down through the history using `↑` and `↓`.
+- **Scrolling**: Use `↑` and `↓` to scroll through the entire agent output log.
+- **Back**: Press `T`, `←`, or `Esc` to return to the Lane Detail View.
+
+### Intervention View
+- **Typing**: Type your message directly.
+- **Send**: Press `Enter` to send the intervention message.
+- **Cancel**: Press `Esc` to cancel and return.
+
+## Key Concepts
+
+### Lane Statuses
+| Status | Icon | Description |
+|--------|------|-------------|
+| `pending` | ⚪ | Lane is waiting to start |
+| `waiting` | ⏳ | Waiting for parent dependencies to complete |
+| `running` | 🔄 | Agent is currently executing tasks |
+| `reviewing` | 👀 | AI Reviewer is checking the task results |
+| `completed` | ✅ | All tasks and reviews finished successfully |
+| `failed` | ❌ | A task or review failed with an error |
+| `blocked` | 🚫 | Blocked by a failed dependency |
+
+### Dependency Flow View
+A visual representation of the Directed Acyclic Graph (DAG). It shows which lanes must finish before others can start, helping you understand the execution pipeline.
 
 ### Heartbeat Logs
-During execution, CursorFlow outputs heartbeat messages every 30 seconds:
-```
-⏱ Heartbeat: 30s elapsed, 1234 bytes received
-⏱ Heartbeat: 60s elapsed, 5678 bytes received
-```
-
-This helps you:
-- Track progress of long-running tasks
-- Identify stalled or hanging processes (0 bytes received)
-- Estimate completion time
+CursorFlow monitors agent activity and logs status every few seconds. If a lane shows `0 bytes received` for a long period, it may be stuck or thinking deeply.
 
 ## Troubleshooting
 
-### Lane is stuck (Thinking too long)
-1. Enter the lane detail view.
+### Lane is stuck
+1. Enter the **Lane Detail View**.
 2. Check the **PID** to ensure the process is still alive.
-3. Check the **Live Terminal** to see if it's producing output.
-4. If it's truly stuck, press `K` to kill the process and then use `cursorflow resume` to restart it.
+3. Check the **Live Terminal** preview or enter **Full Terminal View (T)**.
+4. If it's truly stuck, press `K` to kill it, then use `cursorflow resume <lane>` to restart.
 
-### Intervention needed
-If the agent is making a mistake or needs clarification:
-
-> ⚠️ **Note**: Intervention requires `enableIntervention: true` in your task configuration!
-
-1. Enter the lane detail view.
-2. Press `I`.
-3. Type your instructions (e.g., "Don't change the package.json, just fix the bug in utils.ts").
-4. Press `Enter` to send.
-
-If `enableIntervention` is enabled in your task JSON, the agent receives this as its next prompt. If not, the message is logged but not injected.
-
-**To enable intervention in your task JSON:**
-```json
-{
-  "enableIntervention": true,
-  "tasks": [...]
-}
-```
-
-## Next steps
-1. Once all lanes reach `completed`, you can review the generated branches.
-2. Use `cursorflow clean` to remove temporary worktrees after you've merged the changes.
+### Sending Instructions
+If the agent is heading in the wrong direction, use the **Intervention (I)** feature to guide it without stopping the run. Note that this requires `enableIntervention: true` in the task's JSON configuration.

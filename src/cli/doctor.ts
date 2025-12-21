@@ -14,12 +14,14 @@
 
 import * as logger from '../utils/logger';
 import { runDoctor, saveDoctorStatus } from '../utils/doctor';
+import { runInteractiveAgentTest } from '../utils/cursor-agent';
 
 interface DoctorCliOptions {
   json: boolean;
   tasksDir: string | null;
   executor: string | null;
   includeCursorAgentChecks: boolean;
+  testAgent: boolean;
 }
 
 function printHelp(): void {
@@ -33,12 +35,13 @@ Options:
   --tasks-dir <path>     Also validate lane files (run preflight)
   --executor <type>      cursor-agent | cloud
   --no-cursor            Skip Cursor Agent install/auth checks
+  --test-agent           Run interactive agent test (to approve MCP/permissions)
   --help, -h             Show help
 
 Examples:
   cursorflow doctor
+  cursorflow doctor --test-agent
   cursorflow doctor --tasks-dir _cursorflow/tasks/demo-test/
-  cursorflow doctor --json
   `);
 }
 
@@ -51,6 +54,7 @@ function parseArgs(args: string[]): DoctorCliOptions {
     tasksDir: tasksDirIdx >= 0 ? (args[tasksDirIdx + 1] || null) : null,
     executor: executorIdx >= 0 ? (args[executorIdx + 1] || null) : null,
     includeCursorAgentChecks: !args.includes('--no-cursor'),
+    testAgent: args.includes('--test-agent'),
   };
 
   if (args.includes('--help') || args.includes('-h')) {
@@ -69,6 +73,8 @@ function printHumanReport(report: ReturnType<typeof runDoctor>): void {
 
   if (report.issues.length === 0) {
     logger.success('All checks passed');
+    console.log('\n💡 Tip: If this is your first run, we recommend running:');
+    console.log('   cursorflow doctor --test-agent\n');
     return;
   }
 
@@ -105,6 +111,11 @@ function printHumanReport(report: ReturnType<typeof runDoctor>): void {
 
 async function doctor(args: string[]): Promise<void> {
   const options = parseArgs(args);
+
+  if (options.testAgent) {
+    const success = runInteractiveAgentTest();
+    process.exit(success ? 0 : 1);
+  }
 
   const report = runDoctor({
     cwd: process.cwd(),

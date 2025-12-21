@@ -114,19 +114,35 @@ export function validateSetup(executor = 'cursor-agent'): { valid: boolean; erro
  * Get available models (if cursor-agent supports it)
  */
 export function getAvailableModels(): string[] {
+  // Known models in the current version of cursor-agent
+  const knownModels = [
+    'sonnet-4.5',
+    'sonnet-4.5-thinking',
+    'opus-4.5',
+    'opus-4.5-thinking',
+    'gpt-5.2',
+    'gpt-5.2-high',
+  ];
+
   try {
-    // This is a placeholder - actual implementation depends on cursor-agent API
-    // execSync('cursor-agent --model invalid "test"', {
-    //   encoding: 'utf8',
-    //   stdio: 'pipe',
-    // });
+    // Try to trigger a model list by using an invalid model with --print
+    // Some versions of cursor-agent output valid models when an invalid one is used.
+    const result = spawnSync('cursor-agent', ['--print', '--model', 'list-available-models', 'test'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 5000,
+    });
     
-    return [];
+    const output = (result.stderr || result.stdout || '').toString();
+    const discoveredModels = parseModelsFromOutput(output);
+    
+    if (discoveredModels.length > 0) {
+      return [...new Set([...knownModels, ...discoveredModels])];
+    }
+    
+    return knownModels;
   } catch (error: any) {
-    // Parse from error message
-    const output = (error.stderr || error.stdout || '').toString();
-    // Extract model names from output
-    return parseModelsFromOutput(output);
+    return knownModels;
   }
 }
 
@@ -172,6 +188,42 @@ export function testCursorAgent(): { success: boolean; output?: string; error?: 
       success: false,
       error: error.message,
     };
+  }
+}
+
+/**
+ * Run interactive agent test to prime permissions (MCP, user approval, etc.)
+ */
+export function runInteractiveAgentTest(): boolean {
+  const { spawnSync } = require('child_process');
+  
+  console.log('\n' + '━'.repeat(60));
+  console.log('🤖 Interactive Agent Priming Test');
+  console.log('━'.repeat(60));
+  console.log('\nThis will start cursor-agent in interactive mode (NOT --print).');
+  console.log('Use this to approve MCP permissions or initial setup requests.\n');
+  console.log('MISSION: Just say hello and confirm MCP connectivity.');
+  console.log('ACTION: Once the agent responds and finishes, you can exit.');
+  console.log('\n' + '─'.repeat(60) + '\n');
+
+  try {
+    // Run WITHOUT --print to allow interactive user input and UI popups
+    const result = spawnSync('cursor-agent', ['Hello, verify MCP and system access.'], {
+      stdio: 'inherit', // Crucial for interactivity
+      env: process.env,
+    });
+
+    console.log('\n' + '─'.repeat(60));
+    if (result.status === 0) {
+      console.log('✅ Interactive test completed successfully!');
+      return true;
+    } else {
+      console.log('❌ Interactive test exited with code: ' + result.status);
+      return false;
+    }
+  } catch (error: any) {
+    console.log('❌ Failed to run interactive test: ' + error.message);
+    return false;
   }
 }
 

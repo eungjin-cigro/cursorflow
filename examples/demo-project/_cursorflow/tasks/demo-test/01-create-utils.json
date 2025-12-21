@@ -1,18 +1,29 @@
 {
   "baseBranch": "main",
-  "branchPrefix": "cursorflow/demo-",
-  "executor": "cursor-agent",
-  "autoCreatePr": false,
-  "pollInterval": 10,
+  "branchPrefix": "cursorflow/demo-utils-",
+  "timeout": 300000,
+  "enableIntervention": false,
   "dependencyPolicy": {
     "allowDependencyChange": false,
     "lockfileReadOnly": true
   },
+  "enableReview": true,
+  "reviewModel": "sonnet-4.5-thinking",
+  "maxReviewIterations": 2,
+  "laneNumber": 1,
+  "devPort": 3001,
   "tasks": [
     {
-      "name": "create-utils",
+      "name": "implement",
       "model": "sonnet-4.5",
-      "prompt": "# Task: Create a simple utility module\n\n## Goal\nCreate a `src/utils.js` file with basic utility functions.\n\n## Requirements\n1. Create `src/` directory if it doesn't exist\n2. Create `src/utils.js` with the following functions:\n   - `capitalize(str)`: Capitalizes the first letter of a string\n   - `sum(arr)`: Returns the sum of an array of numbers\n   - `unique(arr)`: Returns unique elements from an array\n\n## Steps\n1. Create the src directory\n2. Write the utils.js file with proper JSDoc comments\n3. Add module.exports at the end\n4. Commit with message: \"feat: add utility functions\"\n\n## Important\n- Use modern JavaScript (ES6+)\n- Add JSDoc comments for each function\n- Make sure all functions are exported\n"
+      "prompt": "# Task: Create a simple utility module\n\n## Goal\nCreate a `src/utils.js` file with basic utility functions.\n\n## Requirements\n1. Create `src/` directory if it doesn't exist\n2. Create `src/utils.js` with the following functions:\n   - `capitalize(str)`: Capitalizes the first letter of a string\n   - `sum(arr)`: Returns the sum of an array of numbers\n   - `unique(arr)`: Returns unique elements from an array\n\n## Steps\n1. Create the src directory\n2. Write the utils.js file with proper JSDoc comments\n3. Add module.exports at the end\n4. Commit with message: \"feat: add utility functions\"\n\n## Important\n- Use modern JavaScript (ES6+)\n- Add JSDoc comments for each function\n- Make sure all functions are exported\n- Double-check all requirements before finishing",
+      "acceptanceCriteria": [
+        "src/utils.js file exists",
+        "capitalize function works correctly",
+        "sum function works correctly",
+        "unique function works correctly",
+        "All functions are exported"
+      ]
     }
   ]
 }

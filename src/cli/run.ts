@@ -14,6 +14,7 @@ interface RunOptions {
   tasksDir?: string;
   dryRun: boolean;
   executor: string | null;
+  maxConcurrent: number | null;
   skipDoctor: boolean;
   help: boolean;
 }
@@ -37,11 +38,13 @@ Options:
 function parseArgs(args: string[]): RunOptions {
   const tasksDir = args.find(a => !a.startsWith('--'));
   const executorIdx = args.indexOf('--executor');
+  const maxConcurrentIdx = args.indexOf('--max-concurrent');
   
   return {
     tasksDir,
     dryRun: args.includes('--dry-run'),
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
+    maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '0') || null : null,
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
     help: args.includes('--help') || args.includes('-h'),
   };
@@ -130,7 +133,7 @@ async function run(args: string[]): Promise<void> {
       executor: options.executor || config.executor,
       pollInterval: config.pollInterval * 1000,
       runDir: path.join(logsDir, 'runs', `run-${Date.now()}`),
-      maxConcurrentLanes: config.maxConcurrentLanes,
+      maxConcurrentLanes: options.maxConcurrent || config.maxConcurrentLanes,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

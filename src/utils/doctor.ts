@@ -7,6 +7,8 @@
  * - Missing Git worktree support
  * - Missing base branch referenced by lane task files
  * - Missing/invalid tasks directory
+ * - Task validation (name, prompt, structure)
+ * - Circular dependency detection (DAG validation)
  * - Missing Cursor Agent setup (optional)
  */
 
@@ -142,7 +144,7 @@ function branchExists(repoRoot: string, branchName: string): boolean {
   return anyRes.success;
 }
 
-function readLaneJsonFiles(tasksDir: string): { path: string; json: any }[] {
+function readLaneJsonFiles(tasksDir: string): { path: string; json: any; fileName: string }[] {
   const files = fs
     .readdirSync(tasksDir)
     .filter(f => f.endsWith('.json'))
@@ -152,7 +154,7 @@ function readLaneJsonFiles(tasksDir: string): { path: string; json: any }[] {
   return files.map(p => {
     const raw = fs.readFileSync(p, 'utf8');
     const json = JSON.parse(raw);
-    return { path: p, json };
+    return { path: p, json, fileName: path.basename(p, '.json') };
   });
 }
 
@@ -163,6 +165,246 @@ function collectBaseBranchesFromLanes(lanes: { path: string; json: any }[], defa
     if (baseBranch) set.add(baseBranch);
   }
   return Array.from(set);
+}
+
+/**
+ * Validate task structure within a lane
+ */
+function validateTaskStructure(
+  issues: DoctorIssue[],
+  laneFile: string,
+  json: any
+): void {
+  const laneName = path.basename(laneFile, '.json');
+  
+  // Check if tasks array exists
+  if (!json.tasks) {
+    addIssue(issues, {
+      id: `tasks.${laneName}.missing_tasks`,
+      severity: 'error',
+      title: `Missing tasks array in ${laneName}`,
+      message: `Lane "${laneName}" does not have a "tasks" array.`,
+      fixes: ['Add a "tasks" array with at least one task object'],
+    });
+    return;
+  }
+  
+  if (!Array.isArray(json.tasks)) {
+    addIssue(issues, {
+      id: `tasks.${laneName}.invalid_tasks`,
+      severity: 'error',
+      title: `Invalid tasks in ${laneName}`,
+      message: `Lane "${laneName}" has "tasks" but it's not an array.`,
+      fixes: ['Ensure "tasks" is an array of task objects'],
+    });
+    return;
+  }
+  
+  if (json.tasks.length === 0) {
+    addIssue(issues, {
+      id: `tasks.${laneName}.empty_tasks`,
+      severity: 'error',
+      title: `No tasks in ${laneName}`,
+      message: `Lane "${laneName}" has an empty tasks array.`,
+      fixes: ['Add at least one task with "name" and "prompt" fields'],
+    });
+    return;
+  }
+  
+  // Validate each task
+  const taskNamePattern = /^[a-zA-Z0-9_-]+$/;
+  const seenNames = new Set<string>();
+  
+  json.tasks.forEach((task: any, index: number) => {
+    const taskId = task.name || `task[${index}]`;
+    
+    // Check name
+    if (!task.name) {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${index}.missing_name`,
+        severity: 'error',
+        title: `Missing task name in ${laneName}`,
+        message: `Task at index ${index} in "${laneName}" is missing the "name" field.`,
+        fixes: ['Add a "name" field to the task (e.g., "implement", "test")'],
+      });
+    } else if (typeof task.name !== 'string') {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${index}.invalid_name_type`,
+        severity: 'error',
+        title: `Invalid task name type in ${laneName}`,
+        message: `Task at index ${index} in "${laneName}" has a non-string "name" field.`,
+        fixes: ['Ensure "name" is a string'],
+      });
+    } else if (!taskNamePattern.test(task.name)) {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.invalid_name_format`,
+        severity: 'error',
+        title: `Invalid task name format in ${laneName}`,
+        message: `Task "${task.name}" in "${laneName}" has invalid characters. Only alphanumeric, "-", and "_" are allowed.`,
+        fixes: [`Rename task to use only alphanumeric characters, "-", or "_"`],
+      });
+    } else if (seenNames.has(task.name)) {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.duplicate_name`,
+        severity: 'error',
+        title: `Duplicate task name in ${laneName}`,
+        message: `Task name "${task.name}" appears multiple times in "${laneName}".`,
+        fixes: ['Ensure each task has a unique name within the lane'],
+      });
+    } else {
+      seenNames.add(task.name);
+    }
+    
+    // Check prompt
+    if (!task.prompt) {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.missing_prompt`,
+        severity: 'error',
+        title: `Missing task prompt in ${laneName}`,
+        message: `Task "${taskId}" in "${laneName}" is missing the "prompt" field.`,
+        fixes: ['Add a "prompt" field with instructions for the AI'],
+      });
+    } else if (typeof task.prompt !== 'string') {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.invalid_prompt_type`,
+        severity: 'error',
+        title: `Invalid task prompt type in ${laneName}`,
+        message: `Task "${taskId}" in "${laneName}" has a non-string "prompt" field.`,
+        fixes: ['Ensure "prompt" is a string'],
+      });
+    } else if (task.prompt.trim().length < 10) {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.short_prompt`,
+        severity: 'warn',
+        title: `Short task prompt in ${laneName}`,
+        message: `Task "${taskId}" in "${laneName}" has a very short prompt (${task.prompt.trim().length} chars). Consider providing more detailed instructions.`,
+        fixes: ['Provide clearer, more detailed instructions in the prompt'],
+      });
+    }
+    
+    // Check acceptanceCriteria if present
+    if (task.acceptanceCriteria !== undefined) {
+      if (!Array.isArray(task.acceptanceCriteria)) {
+        addIssue(issues, {
+          id: `tasks.${laneName}.${taskId}.invalid_criteria_type`,
+          severity: 'error',
+          title: `Invalid acceptanceCriteria in ${laneName}`,
+          message: `Task "${taskId}" in "${laneName}" has "acceptanceCriteria" but it's not an array.`,
+          fixes: ['Ensure "acceptanceCriteria" is an array of strings'],
+        });
+      } else if (task.acceptanceCriteria.length === 0) {
+        addIssue(issues, {
+          id: `tasks.${laneName}.${taskId}.empty_criteria`,
+          severity: 'warn',
+          title: `Empty acceptanceCriteria in ${laneName}`,
+          message: `Task "${taskId}" in "${laneName}" has an empty "acceptanceCriteria" array.`,
+          fixes: ['Add acceptance criteria or remove the empty array'],
+        });
+      }
+    }
+    
+    // Check model if present
+    if (task.model !== undefined && typeof task.model !== 'string') {
+      addIssue(issues, {
+        id: `tasks.${laneName}.${taskId}.invalid_model_type`,
+        severity: 'error',
+        title: `Invalid model type in ${laneName}`,
+        message: `Task "${taskId}" in "${laneName}" has a non-string "model" field.`,
+        fixes: ['Ensure "model" is a string (e.g., "sonnet-4.5")'],
+      });
+    }
+  });
+}
+
+/**
+ * Detect circular dependencies in the lane dependency graph (DAG validation)
+ */
+function detectCircularDependencies(
+  issues: DoctorIssue[],
+  lanes: { path: string; json: any; fileName: string }[]
+): void {
+  // Build adjacency list
+  const graph = new Map<string, string[]>();
+  const allLaneNames = new Set<string>();
+  
+  for (const lane of lanes) {
+    allLaneNames.add(lane.fileName);
+    const deps = lane.json.dependsOn || [];
+    graph.set(lane.fileName, Array.isArray(deps) ? deps : []);
+  }
+  
+  // Check for unknown dependencies
+  for (const lane of lanes) {
+    const deps = lane.json.dependsOn || [];
+    if (!Array.isArray(deps)) continue;
+    
+    for (const dep of deps) {
+      if (!allLaneNames.has(dep)) {
+        addIssue(issues, {
+          id: `tasks.${lane.fileName}.unknown_dependency`,
+          severity: 'error',
+          title: `Unknown dependency in ${lane.fileName}`,
+          message: `Lane "${lane.fileName}" depends on "${dep}" which does not exist.`,
+          fixes: [
+            `Verify the dependency name matches an existing lane file (without .json extension)`,
+            `Available lanes: ${Array.from(allLaneNames).join(', ')}`,
+          ],
+        });
+      }
+    }
+  }
+  
+  // Detect cycles using DFS
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+  const cyclePath: string[] = [];
+  
+  function hasCycle(node: string, path: string[]): boolean {
+    if (recursionStack.has(node)) {
+      // Found a cycle
+      const cycleStart = path.indexOf(node);
+      cyclePath.push(...path.slice(cycleStart), node);
+      return true;
+    }
+    
+    if (visited.has(node)) {
+      return false;
+    }
+    
+    visited.add(node);
+    recursionStack.add(node);
+    
+    const deps = graph.get(node) || [];
+    for (const dep of deps) {
+      if (hasCycle(dep, [...path, node])) {
+        return true;
+      }
+    }
+    
+    recursionStack.delete(node);
+    return false;
+  }
+  
+  for (const laneName of allLaneNames) {
+    cyclePath.length = 0;
+    visited.clear();
+    recursionStack.clear();
+    
+    if (hasCycle(laneName, [])) {
+      addIssue(issues, {
+        id: 'tasks.circular_dependency',
+        severity: 'error',
+        title: 'Circular dependency detected',
+        message: `Circular dependency found: ${cyclePath.join(' → ')}`,
+        details: 'Lane dependencies must form a DAG (Directed Acyclic Graph). Circular dependencies will cause a deadlock.',
+        fixes: [
+          'Review the "dependsOn" fields in your lane files',
+          'Remove one of the dependencies to break the cycle',
+        ],
+      });
+      return; // Report only one cycle
+    }
+  }
 }
 
 function checkPackageManager(): { name: string; ok: boolean } {
@@ -199,6 +441,128 @@ function checkDiskSpace(dir: string): { ok: boolean; freeBytes?: number; error?:
     return { ok: true, freeBytes: available };
   } catch (e: any) {
     return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Get all local branch names
+ */
+function getAllLocalBranches(repoRoot: string): string[] {
+  const res = git.runGitResult(['branch', '--list', '--format=%(refname:short)'], { cwd: repoRoot });
+  if (!res.success) return [];
+  return res.stdout.split('\n').map(b => b.trim()).filter(b => b);
+}
+
+/**
+ * Get all remote branch names
+ */
+function getAllRemoteBranches(repoRoot: string): string[] {
+  const res = git.runGitResult(['branch', '-r', '--list', '--format=%(refname:short)'], { cwd: repoRoot });
+  if (!res.success) return [];
+  return res.stdout.split('\n')
+    .map(b => b.trim().replace(/^origin\//, ''))
+    .filter(b => b && !b.includes('HEAD'));
+}
+
+/**
+ * Validate branch names for conflicts and issues
+ */
+function validateBranchNames(
+  issues: DoctorIssue[],
+  lanes: { path: string; json: any; fileName: string }[],
+  repoRoot: string
+): void {
+  const localBranches = getAllLocalBranches(repoRoot);
+  const remoteBranches = getAllRemoteBranches(repoRoot);
+  const allExistingBranches = new Set([...localBranches, ...remoteBranches]);
+  
+  // Collect branch prefixes from lanes
+  const branchPrefixes: { laneName: string; prefix: string }[] = [];
+  
+  for (const lane of lanes) {
+    const branchPrefix = lane.json?.branchPrefix;
+    if (branchPrefix) {
+      branchPrefixes.push({ laneName: lane.fileName, prefix: branchPrefix });
+    }
+  }
+  
+  // Check for branch prefix collisions between lanes
+  const prefixMap = new Map<string, string[]>();
+  for (const { laneName, prefix } of branchPrefixes) {
+    const existing = prefixMap.get(prefix) || [];
+    existing.push(laneName);
+    prefixMap.set(prefix, existing);
+  }
+  
+  for (const [prefix, laneNames] of prefixMap) {
+    if (laneNames.length > 1) {
+      addIssue(issues, {
+        id: 'branch.prefix_collision',
+        severity: 'error',
+        title: 'Branch prefix collision',
+        message: `Multiple lanes use the same branchPrefix "${prefix}": ${laneNames.join(', ')}`,
+        details: 'Each lane should have a unique branchPrefix to avoid conflicts.',
+        fixes: [
+          'Update the branchPrefix in each lane JSON file to be unique',
+          'Example: "featurename/lane-1-", "featurename/lane-2-"',
+        ],
+      });
+    }
+  }
+  
+  // Check for existing branches that match lane prefixes
+  for (const { laneName, prefix } of branchPrefixes) {
+    const conflictingBranches: string[] = [];
+    
+    for (const branch of allExistingBranches) {
+      if (branch.startsWith(prefix)) {
+        conflictingBranches.push(branch);
+      }
+    }
+    
+    if (conflictingBranches.length > 0) {
+      addIssue(issues, {
+        id: `branch.existing_conflict.${laneName}`,
+        severity: 'warn',
+        title: `Existing branches may conflict with ${laneName}`,
+        message: `Found ${conflictingBranches.length} existing branch(es) matching prefix "${prefix}": ${conflictingBranches.slice(0, 3).join(', ')}${conflictingBranches.length > 3 ? '...' : ''}`,
+        details: 'These branches may cause issues if the lane tries to create a new branch with the same name.',
+        fixes: [
+          `Delete conflicting branches: git branch -D ${conflictingBranches[0]}`,
+          `Or change the branchPrefix in ${laneName}.json`,
+          'Run: cursorflow clean branches --dry-run to see all CursorFlow branches',
+        ],
+      });
+    }
+  }
+  
+  // Check for duplicate lane file names (which would cause branch issues)
+  const laneFileNames = lanes.map(l => l.fileName);
+  const duplicateNames = laneFileNames.filter((name, index) => laneFileNames.indexOf(name) !== index);
+  
+  if (duplicateNames.length > 0) {
+    addIssue(issues, {
+      id: 'tasks.duplicate_lane_files',
+      severity: 'error',
+      title: 'Duplicate lane file names',
+      message: `Found duplicate lane names: ${[...new Set(duplicateNames)].join(', ')}`,
+      fixes: ['Ensure each lane file has a unique name'],
+    });
+  }
+  
+  // Suggest unique branch naming convention
+  const hasNumericPrefix = branchPrefixes.some(({ prefix }) => /\/lane-\d+-$/.test(prefix));
+  if (!hasNumericPrefix && branchPrefixes.length > 1) {
+    addIssue(issues, {
+      id: 'branch.naming_suggestion',
+      severity: 'warn',
+      title: 'Consider using lane numbers in branch prefix',
+      message: 'Using consistent lane numbers in branch prefixes helps avoid conflicts.',
+      fixes: [
+        'Use pattern: "feature-name/lane-{N}-" where N is the lane number',
+        'Example: "auth-system/lane-1-", "auth-system/lane-2-"',
+      ],
+    });
   }
 }
 
@@ -242,6 +606,8 @@ export function getDoctorStatus(repoRoot: string): { lastRun: number; ok: boolea
  * If `tasksDir` is provided, additional preflight checks are performed:
  * - tasks directory existence and JSON validity
  * - baseBranch referenced by lanes exists locally
+ * - Task structure validation (name, prompt, etc.)
+ * - Circular dependency detection (DAG validation)
  */
 export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   const cwd = options.cwd || process.cwd();
@@ -358,7 +724,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
         details: connectivity.details,
         fixes: [
           'git fetch origin',
-          'Verify your SSH keys or authentication tokens are configured correctly',
+          'Verify your SSH keys or credentials are configured correctly',
         ],
       });
     }
@@ -462,7 +828,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
         ],
       });
     } else {
-      let lanes: { path: string; json: any }[] = [];
+      let lanes: { path: string; json: any; fileName: string }[] = [];
       try {
         lanes = readLaneJsonFiles(tasksDirAbs);
       } catch (error: any) {
@@ -486,6 +852,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
           fixes: ['Ensure the tasks directory contains one or more lane JSON files'],
         });
       } else {
+        // Validate base branches
         const baseBranches = collectBaseBranchesFromLanes(lanes, 'main');
         for (const baseBranch of baseBranches) {
           if (!branchExists(gitCwd, baseBranch)) {
@@ -501,6 +868,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
             });
           }
         }
+        
+        // Validate task structure in each lane
+        for (const lane of lanes) {
+          validateTaskStructure(issues, lane.fileName, lane.json);
+        }
+        
+        // Detect circular dependencies
+        detectCircularDependencies(issues, lanes);
+        
+        // Validate branch names - check for conflicts
+        validateBranchNames(issues, lanes, gitCwd);
       }
     }
   }
@@ -532,6 +910,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
           ],
         });
       }
+
+      // MCP/Permissions potential hang check
+      addIssue(issues, {
+        id: 'cursor_agent.mcp_priming',
+        severity: 'warn',
+        title: 'Agent may require interactive approval',
+        message: 'Non-interactive execution (with --print) can hang if MCP permissions or user approvals are required.',
+        fixes: [
+          'Run once interactively to prime permissions: cursorflow doctor --test-agent',
+        ],
+      });
     }
   }
 
@@ -549,5 +938,3 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   const ok = issues.every(i => i.severity !== 'error');
   return { ok, issues, context };
 }
-
-

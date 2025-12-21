@@ -291,14 +291,16 @@ async function init(args: string[]): Promise<void> {
   logger.section('✅ CursorFlow initialized successfully!');
   
   console.log('\n📚 Next steps:\n');
-  console.log('  1. Review cursorflow.config.js');
-  console.log('  2. Type "/" in Cursor IDE to see available commands');
+  console.log('  1. Review \x1b[32mcursorflow.config.js\x1b[0m');
+  console.log('  2. Type \x1b[33m"/"\x1b[0m in Cursor IDE to see available commands');
   
   if (options.example) {
-    console.log(`  3. Run: cursorflow run ${config.tasksDir}/example/`);
+    console.log(`  3. Run: \x1b[32mcursorflow run ${config.tasksDir}/example/\x1b[0m`);
   } else {
-    console.log('  3. Create tasks with: cursorflow prepare MyFeature');
+    console.log('  3. Create your first task: \x1b[32mcursorflow prepare MyFeature\x1b[0m');
   }
+  
+  console.log('\n💡 Tip: Use \x1b[33mcursorflow models\x1b[0m to see available AI models.');
   
   console.log('\n📖 Documentation:');
   console.log('  https://github.com/eungjin-cigro/cursorflow#readme');

@@ -7,15 +7,21 @@ import * as logger from '../utils/logger';
 // Command functions signature
 type CommandFn = (args: string[]) => Promise<void>;
 
-// Lazy load commands to speed up help/version output
+/**
+ * Command Registry
+ */
 const COMMANDS: Record<string, CommandFn> = {
   init: require('./init'),
+  prepare: require('./prepare'),
   run: require('./run'),
   monitor: require('./monitor'),
   clean: require('./clean'),
   resume: require('./resume'),
   doctor: require('./doctor'),
   signal: require('./signal'),
+  models: require('./models'),
+  setup: require('./setup-commands').main,
+  'setup-commands': require('./setup-commands').main,
 };
 
 function printHelp(): void {
@@ -27,12 +33,14 @@ function printHelp(): void {
 
 \x1b[1mCOMMANDS\x1b[0m
   \x1b[33minit\x1b[0m [options]              Initialize CursorFlow in project
+  \x1b[33mprepare\x1b[0m <feature> [opts]    Prepare task directory and JSON files
   \x1b[33mrun\x1b[0m <tasks-dir> [options]   Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options] \x1b[36mInteractive\x1b[0m lane dashboard
   \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs
   \x1b[33mresume\x1b[0m <lane> [options]     Resume interrupted lane
   \x1b[33mdoctor\x1b[0m [options]            Check environment and preflight
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
+  \x1b[33mmodels\x1b[0m [options]            List available AI models
 
 \x1b[1mGLOBAL OPTIONS\x1b[0m
   --config <path>             Config file path
@@ -41,9 +49,10 @@ function printHelp(): void {
 
 \x1b[1mEXAMPLES\x1b[0m
   $ \x1b[32mcursorflow init --example\x1b[0m
+  $ \x1b[32mcursorflow prepare NewFeature --lanes 3\x1b[0m
   $ \x1b[32mcursorflow run _cursorflow/tasks/MyFeature/\x1b[0m
   $ \x1b[32mcursorflow monitor latest\x1b[0m
-  $ \x1b[32mcursorflow signal lane-1 "Please use pnpm instead of npm"\x1b[0m
+  $ \x1b[32mcursorflow models\x1b[0m
 
 \x1b[1mDOCUMENTATION\x1b[0m
   https://github.com/eungjin-cigro/cursorflow#readme

@@ -13,10 +13,10 @@
 
 - ⚡ **Parallel Execution**: Run multiple AI agents concurrently using isolated Git worktrees.
 - 🔗 **Task Dependencies (DAG)**: Define complex workflows where tasks wait for and merge their dependencies automatically.
+- 📋 **Preset Templates**: Built-in templates for common patterns (complex, simple, merge).
 - 📊 **Interactive Dashboard**: A powerful terminal-based monitor to track all lanes, progress, and dependencies in real-time.
 - 📺 **Live Terminal Streaming**: Watch the AI agent's output as it happens with scrollable history.
-- 🙋 **Human Intervention**: Send direct messages to running agents to guide them or fix issues on the fly (requires `enableIntervention: true`).
-- 🛡️ **PID Control**: Track and manage agent processes directly from the dashboard.
+- 🙋 **Human Intervention**: Send direct messages to running agents to guide them or fix issues on the fly.
 - 🔍 **Automatic Review**: AI-powered code review with iterative feedback loops.
 - 🔀 **Smart Merging**: Automatically merge completed feature branches into subsequent dependent lanes.
 - 🔒 **Security-First**: Automated security scanning and dependency policy enforcement.
@@ -26,25 +26,59 @@
 ### 1. Install
 
 ```bash
-# npm (recommended)
 npm install -g @litmers/cursorflow-orchestrator
 ```
 
-### 2. Initialize
+### 2. Initialize & Prepare Tasks
 
 ```bash
 cd your-project
-cursorflow init --example
+cursorflow init
+
+# Simple task (single implement task)
+cursorflow prepare FixBug --prompt "Fix the login validation bug in auth.ts"
+
+# Complex feature (plan → implement → test)
+cursorflow prepare AuthSystem --preset complex --prompt "Build user authentication with JWT"
+
+# Multiple parallel lanes
+cursorflow prepare FullStack --lanes 3 --sequential --preset complex \
+  --prompt "Build your layer of the full-stack feature"
 ```
 
-### 3. Run & Monitor
+### 3. Validate & Run
 
 ```bash
-# Start orchestration
-cursorflow run _cursorflow/tasks/example/
+# Check for issues before running
+cursorflow doctor --tasks-dir _cursorflow/tasks/2412211530_AuthSystem
 
-# Open the interactive dashboard (highly recommended!)
+# Start orchestration
+cursorflow run _cursorflow/tasks/2412211530_AuthSystem
+
+# Open the interactive dashboard
 cursorflow monitor latest
+```
+
+## 📋 Preset Templates
+
+CursorFlow provides built-in task templates:
+
+| Preset | Tasks | Use Case |
+|--------|-------|----------|
+| `--preset complex` | plan → implement → test | Complex features (saves plan to `_cursorflow/PLAN_lane-{N}.md`) |
+| `--preset simple` | implement → test | Simple changes, bug fixes |
+| `--preset merge` | merge → test | Integration lanes (auto-applied with `--depends-on`) |
+| *(none)* | implement | Quick single task |
+
+```bash
+# Complex: Creates plan document that subsequent tasks reference
+cursorflow prepare Feature --preset complex --prompt "Build user dashboard"
+
+# Simple: Just implement and test
+cursorflow prepare BugFix --preset simple --prompt "Fix null pointer in auth.ts"
+
+# Single task: Just the prompt
+cursorflow prepare QuickFix --prompt "Update README.md"
 ```
 
 ## 🎮 Dashboard Controls
@@ -66,19 +100,18 @@ Within the `cursorflow monitor` dashboard:
 ```json
 {
   "baseBranch": "main",
-  "branchPrefix": "cursorflow/feature-",
-  "model": "sonnet-4.5",
+  "branchPrefix": "feature/lane-1-",
   "timeout": 300000,
   "enableIntervention": false,
-  "dependsOn": ["other-lane"],
-  "dependencyPolicy": {
-    "allowDependencyChange": false,
-    "lockfileReadOnly": true
-  },
+  "dependsOn": ["01-lane-1"],
+  "enableReview": true,
+  "reviewModel": "sonnet-4.5-thinking",
   "tasks": [
     {
-      "name": "implement-feature",
-      "prompt": "Implement the user authentication..."
+      "name": "implement",
+      "model": "sonnet-4.5",
+      "prompt": "Implement the user authentication...",
+      "acceptanceCriteria": ["Code complete", "Tests pass"]
     }
   ]
 }
@@ -88,75 +121,60 @@ Within the `cursorflow monitor` dashboard:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `timeout` | number | 300000 | Task timeout in milliseconds (5 min default) |
+| `timeout` | number | 300000 | Task timeout in milliseconds (5 min) |
 | `enableIntervention` | boolean | false | Enable stdin piping for intervention |
 | `model` | string | "sonnet-4.5" | AI model to use |
 | `dependsOn` | string[] | [] | Lane dependencies |
-
-### Timeout Configuration
-
-Set custom timeouts based on task complexity:
-
-```json
-{
-  "timeout": 60000,
-  "tasks": [{ "name": "simple-task", "prompt": "..." }]
-}
-```
-
-- **Simple tasks**: `60000` (1 minute)
-- **Medium tasks**: `300000` (5 minutes) - default
-- **Complex tasks**: `600000` (10 minutes)
-
-### Task Validation
-
-CursorFlow automatically validates your task configuration before execution:
-
-- ✅ Required `name` and `prompt` fields
-- ✅ Valid task name format (letters, numbers, `-`, `_` only)
-- ✅ Proper timeout values
-- ✅ Helpful error messages with fix suggestions
-
-### Progress Monitoring (Heartbeat)
-
-During execution, CursorFlow logs progress every 30 seconds:
-
-```
-⏱ Heartbeat: 30s elapsed, 1234 bytes received
-⏱ Heartbeat: 60s elapsed, 5678 bytes received
-```
+| `enableReview` | boolean | true | Enable AI code review |
 
 ## 🔗 Task Dependencies
 
-You can define dependencies between lanes in your task JSON files. Dependent lanes will wait for their parents to complete and then automatically merge the parent's work before starting.
-
-```json
-{
-  "name": "api-implementation",
-  "dependsOn": ["database-schema", "common-utils"],
-  "tasks": [ ... ]
-}
-```
-
-## 🧪 Advanced Testing
-
-A complete test suite for dependency orchestration is included.
+Define dependencies between lanes. Dependent lanes wait for parents and auto-merge:
 
 ```bash
-# Run a complex dependency test (6 interdependent lanes)
-cursorflow run test-projects/advanced-orchestration/_cursorflow/tasks/full-stack/
+# Create 3 sequential lanes (1 → 2 → 3)
+cursorflow prepare Pipeline --lanes 3 --sequential --preset complex
 
-# Monitor the flow
-cursorflow monitor latest
+# Add a merge lane that depends on multiple lanes
+cursorflow prepare --add-lane _cursorflow/tasks/2412211530_Pipeline \
+  --depends-on "01-lane-1,02-lane-2"
 ```
 
-## 📚 Documentation
+## 🩺 Pre-flight Checks
 
-- [📖 User Guide](docs/GUIDE.md) - Detailed usage instructions
-- [📋 API Reference](docs/API.md) - CLI and config API
-- [🎨 Command Guide](docs/COMMANDS.md) - Cursor command usage
-- [🏗️ Architecture](docs/ARCHITECTURE.md) - System structure
-- [🔧 Troubleshooting](docs/TROUBLESHOOTING.md) - Issue resolution
+Doctor validates your configuration before running:
+
+```bash
+cursorflow doctor --tasks-dir _cursorflow/tasks/my-feature
+
+# Checks performed:
+# ✓ Git repository and remote
+# ✓ Branch prefix collisions
+# ✓ Task structure validation
+# ✓ Circular dependency detection (DAG)
+# ✓ Existing branch conflicts
+```
+
+## 📚 Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `cursorflow init` | Initialize CursorFlow in project |
+| `cursorflow prepare` | Generate task files (with presets) |
+| `cursorflow doctor` | Validate environment and tasks |
+| `cursorflow run` | Execute task orchestration |
+| `cursorflow monitor` | Interactive dashboard |
+| `cursorflow resume` | Resume interrupted lane |
+| `cursorflow clean` | Clean branches/worktrees |
+| `cursorflow signal` | Send message to running agent |
+| `cursorflow models` | List available AI models |
+
+## 📖 Documentation
+
+- [📋 Prepare Command](commands/cursorflow-prepare.md) - Task generation with presets
+- [🏃 Run Command](commands/cursorflow-run.md) - Execution options
+- [🩺 Doctor Command](commands/cursorflow-doctor.md) - Validation details
+- [📊 Monitor Command](commands/cursorflow-monitor.md) - Dashboard usage
 - [📦 Examples](examples/) - Practical examples
 
 ## 🚀 Deployment & Updates
