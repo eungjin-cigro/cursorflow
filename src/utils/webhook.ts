@@ -56,6 +56,9 @@ async function sendWebhook(config: WebhookConfig, event: CursorFlowEvent) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+      // SECURITY NOTE: Intentionally sending event data to configured webhook URLs.
+      // This is the expected behavior - users explicitly configure webhook endpoints
+      // to receive CursorFlow events. The data is JSON-serialized event metadata.
       const response = await fetch(config.url, {
         method: 'POST',
         headers,

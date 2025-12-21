@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
-import { loadState, listLanesInRun } from '../utils/state';
+import { loadState } from '../utils/state';
 import { LaneState } from '../utils/types';
 import { runDoctor } from '../utils/doctor';
 

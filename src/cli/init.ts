@@ -175,16 +175,19 @@ function updateGitignore(projectRoot: string): void {
   const gitignorePath = path.join(projectRoot, '.gitignore');
   const entry = '_cursorflow/';
   
-  // Check if .gitignore exists
-  if (!fs.existsSync(gitignorePath)) {
-    // Create new .gitignore
-    fs.writeFileSync(gitignorePath, `# CursorFlow\n${entry}\n`, 'utf8');
-    logger.success('Created .gitignore with _cursorflow/');
-    return;
+  // Try to read existing .gitignore (avoid TOCTOU by reading directly)
+  let content: string;
+  try {
+    content = fs.readFileSync(gitignorePath, 'utf8');
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      // File doesn't exist - create new .gitignore
+      fs.writeFileSync(gitignorePath, `# CursorFlow\n${entry}\n`, 'utf8');
+      logger.success('Created .gitignore with _cursorflow/');
+      return;
+    }
+    throw err;
   }
-  
-  // Read existing .gitignore
-  const content = fs.readFileSync(gitignorePath, 'utf8');
   
   // Check if already included
   const lines = content.split('\n');

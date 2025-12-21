@@ -101,6 +101,9 @@ async function analyzeCodeWithAI(code, filename) {
   const prompt = createSecurityPrompt(code, filename);
   
   try {
+    // SECURITY NOTE: Intentionally sending code to OpenAI API for security analysis.
+    // This is the expected behavior - the script's purpose is AI-powered code review.
+    // Code is sent over HTTPS to OpenAI's secure API endpoint.
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {

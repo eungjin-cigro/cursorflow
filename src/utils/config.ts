@@ -158,10 +158,6 @@ export function validateConfig(config: CursorFlowConfig): boolean {
 export function createDefaultConfig(projectRoot: string, force = false): string {
   const configPath = path.join(projectRoot, 'cursorflow.config.js');
   
-  if (fs.existsSync(configPath) && !force) {
-    throw new Error(`Config file already exists: ${configPath}`);
-  }
-  
   const template = `module.exports = {
   // Directory configuration
   tasksDir: '_cursorflow/tasks',
@@ -222,6 +218,15 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
 };
 `;
   
-  fs.writeFileSync(configPath, template, 'utf8');
+  // Use atomic write with wx flag to avoid TOCTOU race condition (unless force is set)
+  try {
+    const writeFlag = force ? 'w' : 'wx';
+    fs.writeFileSync(configPath, template, { encoding: 'utf8', flag: writeFlag });
+  } catch (err: any) {
+    if (err.code === 'EEXIST') {
+      throw new Error(`Config file already exists: ${configPath}`);
+    }
+    throw err;
+  }
   return configPath;
 }

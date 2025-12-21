@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { PassThrough, Transform, TransformCallback } from 'stream';
+import { Transform, TransformCallback } from 'stream';
 import { EnhancedLogConfig } from './types';
 
 // Re-export for backwards compatibility
@@ -873,7 +873,7 @@ export class EnhancedLogManager {
     
     // Skip common progress/spinner patterns
     const noisePatterns = [
-      /^[\s│├└─┌┐┘┴┬┤├]+$/, // Box drawing only
+      /^[\s│├└─┌┐┘┴┬┤]+$/, // Box drawing only (removed duplicate ├)
       /^[.\s]+$/, // Dots only
       /^[=>\s-]+$/, // Progress bar characters
       /^\d+%$/, // Percentage only

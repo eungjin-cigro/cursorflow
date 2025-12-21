@@ -178,7 +178,7 @@ async function cleanBranches(config: any, repoRoot: string, options: CleanOption
 
   const branches = result.stdout
     .split('\n')
-    .map(b => b.replace('*', '').trim())
+    .map(b => b.replace(/\*/g, '').trim())
     .filter(b => b && b !== 'main' && b !== 'master');
 
   const prefix = config.branchPrefix || 'feature/';

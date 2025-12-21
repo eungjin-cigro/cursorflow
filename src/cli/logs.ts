@@ -29,6 +29,13 @@ interface LogsOptions {
   help: boolean;
 }
 
+/**
+ * Escape special regex characters to prevent regex injection
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function printHelp(): void {
   console.log(`
 Usage: cursorflow logs [run-dir] [options]
@@ -164,9 +171,9 @@ function displayTextLogs(
   let content = fs.readFileSync(logFile, 'utf8');
   let lines = content.split('\n');
   
-  // Apply filter
+  // Apply filter (escape to prevent regex injection)
   if (options.filter) {
-    const regex = new RegExp(options.filter, 'i');
+    const regex = new RegExp(escapeRegex(options.filter), 'i');
     lines = lines.filter(line => regex.test(line));
   }
   
@@ -204,9 +211,9 @@ function displayJsonLogs(
     entries = entries.filter(e => e.level === options.level);
   }
   
-  // Apply regex filter
+  // Apply regex filter (escape to prevent regex injection)
   if (options.filter) {
-    const regex = new RegExp(options.filter, 'i');
+    const regex = new RegExp(escapeRegex(options.filter), 'i');
     entries = entries.filter(e => regex.test(e.message) || regex.test(e.task || ''));
   }
   
@@ -326,9 +333,9 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
     entries = entries.filter(e => e.level === options.level);
   }
   
-  // Apply regex filter
+  // Apply regex filter (escape to prevent regex injection)
   if (options.filter) {
-    const regex = new RegExp(options.filter, 'i');
+    const regex = new RegExp(escapeRegex(options.filter), 'i');
     entries = entries.filter(e => 
       regex.test(e.message) || 
       regex.test(e.task || '') ||
@@ -422,9 +429,8 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       const laneDir = path.join(runDir, 'lanes', lane);
       const jsonLogPath = path.join(laneDir, 'terminal.jsonl');
       
-      if (!fs.existsSync(jsonLogPath)) continue;
-      
       try {
+        // Use statSync directly to avoid TOCTOU race condition
         const stats = fs.statSync(jsonLogPath);
         if (stats.size > lastPositions[lane]!) {
           const fd = fs.openSync(jsonLogPath, 'r');
@@ -467,9 +473,9 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       // Apply level filter
       if (options.level && entry.level !== options.level) continue;
       
-      // Apply regex filter
+      // Apply regex filter (escape to prevent regex injection)
       if (options.filter) {
-        const regex = new RegExp(options.filter, 'i');
+        const regex = new RegExp(escapeRegex(options.filter), 'i');
         if (!regex.test(entry.message) && !regex.test(entry.task || '') && !regex.test(entry.laneName)) {
           continue;
         }
@@ -628,7 +634,9 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/'/g, '&#039;')
+    .replace(/`/g, '&#x60;')
+    .replace(/\//g, '&#x2F;');
 }
 
 /**
@@ -657,9 +665,11 @@ function followLogs(laneDir: string, options: LogsOptions): void {
   
   let lastSize = 0;
   try {
-    lastSize = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
+    // Use statSync directly to avoid TOCTOU race condition
+    lastSize = fs.statSync(logFile).size;
   } catch {
-    // Ignore
+    // File doesn't exist yet or other error - start from 0
+    lastSize = 0;
   }
   
   console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
@@ -677,9 +687,9 @@ function followLogs(laneDir: string, options: LogsOptions): void {
         
         let content = buffer.toString();
         
-        // Apply filter
+        // Apply filter (escape to prevent regex injection)
         if (options.filter) {
-          const regex = new RegExp(options.filter, 'i');
+          const regex = new RegExp(escapeRegex(options.filter), 'i');
           const lines = content.split('\n');
           content = lines.filter(line => regex.test(line)).join('\n');
         }

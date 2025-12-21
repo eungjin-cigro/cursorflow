@@ -15,7 +15,6 @@ import { saveState, appendLog, createConversationEntry } from '../utils/state';
 import { events } from '../utils/events';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
-import { stripAnsi } from '../utils/enhanced-logger';
 import { 
   RunnerConfig, 
   Task, 
@@ -232,17 +231,16 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       env: childEnv,
     });
 
-    // Save PID to state if possible
+    // Save PID to state if possible (avoid TOCTOU by reading directly)
     if (child.pid && signalDir) {
       try {
         const statePath = path.join(signalDir, 'state.json');
-        if (fs.existsSync(statePath)) {
-          const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-          state.pid = child.pid;
-          fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-        }
-      } catch (e) {
-        // Best effort
+        // Read directly without existence check to avoid race condition
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        state.pid = child.pid;
+        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+      } catch {
+        // Best effort - file may not exist yet
       }
     }
 

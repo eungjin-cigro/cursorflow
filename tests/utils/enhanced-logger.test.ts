@@ -7,7 +7,6 @@ import * as path from 'path';
 import { 
   stripAnsi, 
   formatTimestamp, 
-  EnhancedLogManager,
   createLogManager,
   readJsonLog,
   exportLogs,

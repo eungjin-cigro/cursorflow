@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { orchestrate } from '../../src/core/orchestrator';
 import { events } from '../../src/utils/events';
-import * as child_process from 'child_process';
 
 // Mock process.exit
 const mockExit = jest.spyOn(process, 'exit').mockImplementation((code) => {

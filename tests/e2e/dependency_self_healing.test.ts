@@ -3,7 +3,6 @@ import * as path from 'path';
 import { orchestrate } from '../../src/core/orchestrator';
 import { events } from '../../src/utils/events';
 import * as child_process from 'child_process';
-import * as git from '../../src/utils/git';
 
 // Mock git utilities
 jest.mock('../../src/utils/git', () => ({

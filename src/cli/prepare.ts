@@ -612,10 +612,6 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   const fileName = `${laneNumber.toString().padStart(2, '0')}-${laneName}.json`;
   const filePath = path.join(taskDir, fileName);
   
-  if (fs.existsSync(filePath) && !options.force) {
-    throw new Error(`Lane file already exists: ${filePath}. Use --force to overwrite.`);
-  }
-  
   const hasDependencies = options.dependsOnLanes.length > 0;
   
   // Build tasks from options (auto-detects merge preset if has dependencies)
@@ -628,7 +624,16 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
     ...(hasDependencies ? { dependsOn: options.dependsOnLanes } : {}),
   };
   
-  fs.writeFileSync(filePath, JSON.stringify(finalConfig, null, 2) + '\n', 'utf8');
+  // Use atomic write with wx flag to avoid TOCTOU race condition (unless force is set)
+  try {
+    const writeFlag = options.force ? 'w' : 'wx';
+    fs.writeFileSync(filePath, JSON.stringify(finalConfig, null, 2) + '\n', { encoding: 'utf8', flag: writeFlag });
+  } catch (err: any) {
+    if (err.code === 'EEXIST') {
+      throw new Error(`Lane file already exists: ${filePath}. Use --force to overwrite.`);
+    }
+    throw err;
+  }
   
   const taskSummary = tasks.map(t => t.name).join(' → ');
   const depsInfo = hasDependencies ? ` (depends: ${options.dependsOnLanes.join(', ')})` : '';
@@ -645,16 +650,20 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
 async function addTaskToLane(options: PrepareOptions): Promise<void> {
   const laneFile = path.resolve(process.cwd(), options.addTask!);
   
-  if (!fs.existsSync(laneFile)) {
-    throw new Error(`Lane file not found: ${laneFile}`);
-  }
-  
   if (options.taskSpecs.length === 0) {
     throw new Error('No task specified. Use --task "name|model|prompt|criteria" to define a task.');
   }
   
-  // Read existing config
-  const existingConfig = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+  // Read existing config - let the error propagate if file doesn't exist (avoids TOCTOU)
+  let existingConfig: any;
+  try {
+    existingConfig = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`Lane file not found: ${laneFile}`);
+    }
+    throw err;
+  }
   
   if (!existingConfig.tasks || !Array.isArray(existingConfig.tasks)) {
     existingConfig.tasks = [];
