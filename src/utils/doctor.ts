@@ -358,7 +358,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
         details: connectivity.details,
         fixes: [
           'git fetch origin',
-          'Verify your SSH keys or personal access tokens are configured correctly',
+          'Verify your SSH keys or authentication tokens are configured correctly',
         ],
       });
     }
