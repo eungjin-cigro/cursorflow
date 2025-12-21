@@ -240,6 +240,7 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
 
     let fullStdout = '';
     let fullStderr = '';
+    let timeoutHandle: NodeJS.Timeout;
 
     // Heartbeat logging to show progress
     let lastHeartbeat = Date.now();
@@ -251,13 +252,15 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     }, HEARTBEAT_INTERVAL_MS);
     const startTime = Date.now();
 
-    // Watch for "intervention.txt" signal file if any
+    // Watch for "intervention.txt" or "timeout.txt" signal files
     const interventionPath = signalDir ? path.join(signalDir, 'intervention.txt') : null;
-    let interventionWatcher: fs.FSWatcher | null = null;
+    const timeoutPath = signalDir ? path.join(signalDir, 'timeout.txt') : null;
+    let signalWatcher: fs.FSWatcher | null = null;
 
-    if (interventionPath && fs.existsSync(path.dirname(interventionPath))) {
-      interventionWatcher = fs.watch(path.dirname(interventionPath), (event, filename) => {
-        if (filename === 'intervention.txt' && fs.existsSync(interventionPath)) {
+    if (signalDir && fs.existsSync(signalDir)) {
+      signalWatcher = fs.watch(signalDir, (event, filename) => {
+        // Handle intervention
+        if (filename === 'intervention.txt' && interventionPath && fs.existsSync(interventionPath)) {
           try {
             const message = fs.readFileSync(interventionPath, 'utf8').trim();
             if (message) {
@@ -272,6 +275,40 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
             }
           } catch (e) {
             logger.warn('Failed to read intervention file');
+          }
+        }
+        
+        // Handle dynamic timeout update
+        if (filename === 'timeout.txt' && timeoutPath && fs.existsSync(timeoutPath)) {
+          try {
+            const newTimeoutStr = fs.readFileSync(timeoutPath, 'utf8').trim();
+            const newTimeoutMs = parseInt(newTimeoutStr);
+            
+            if (!isNaN(newTimeoutMs) && newTimeoutMs > 0) {
+              logger.info(`⏱ Dynamic timeout update: ${Math.round(newTimeoutMs / 1000)}s`);
+              
+              // Clear old timeout
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+              
+              // Set new timeout based on total elapsed time
+              const elapsed = Date.now() - startTime;
+              const remaining = Math.max(1000, newTimeoutMs - elapsed);
+              
+              timeoutHandle = setTimeout(() => {
+                clearInterval(heartbeatInterval);
+                child.kill();
+                const totalSec = Math.round(newTimeoutMs / 1000);
+                resolve({
+                  ok: false,
+                  exitCode: -1,
+                  error: `cursor-agent timed out after updated limit of ${totalSec} seconds.`,
+                });
+              }, remaining);
+              
+              fs.unlinkSync(timeoutPath); // Clear it
+            }
+          } catch (e) {
+            logger.warn('Failed to read timeout update file');
           }
         }
       });
@@ -295,7 +332,7 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       });
     }
 
-    const timeoutHandle = setTimeout(() => {
+    timeoutHandle = setTimeout(() => {
       clearInterval(heartbeatInterval);
       child.kill();
       const timeoutSec = Math.round(timeoutMs / 1000);
@@ -309,7 +346,7 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     child.on('close', (code) => {
       clearTimeout(timeoutHandle);
       clearInterval(heartbeatInterval);
-      if (interventionWatcher) interventionWatcher.close();
+      if (signalWatcher) signalWatcher.close();
       
       const json = parseJsonFromStdout(fullStdout);
       

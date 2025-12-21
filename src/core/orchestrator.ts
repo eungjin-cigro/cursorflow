@@ -189,10 +189,13 @@ export async function orchestrate(tasksDir: string, options: {
       // Check dependencies
       for (const dep of lane.dependsOn) {
         if (failedLanes.has(dep)) {
-          // If a dependency failed, this lane fails too
-          logger.error(`Lane ${lane.name} failed because dependency ${dep} failed`);
+          // If a dependency failed or is blocked, this lane will not start
+          const depCode = exitCodes[dep] || 1;
+          const reason = depCode === 2 ? 'is blocked' : 'failed';
+          logger.error(`Lane ${lane.name} will not start because dependency ${dep} ${reason}`);
+          
           failedLanes.add(lane.name);
-          exitCodes[lane.name] = 1;
+          exitCodes[lane.name] = depCode; // Propagate the specific status
           return false;
         }
         if (!completedLanes.has(dep)) {
@@ -230,7 +233,7 @@ export async function orchestrate(tasksDir: string, options: {
       running.delete(finished.name);
       exitCodes[finished.name] = finished.code;
       
-      if (finished.code === 0 || finished.code === 2) {
+      if (finished.code === 0) {
         completedLanes.add(finished.name);
       } else {
         failedLanes.add(finished.name);

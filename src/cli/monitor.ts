@@ -41,7 +41,8 @@ enum View {
   MESSAGE_DETAIL,
   FLOW,
   TERMINAL,
-  INTERVENE
+  INTERVENE,
+  TIMEOUT
 }
 
 class InteractiveMonitor {
@@ -58,6 +59,7 @@ class InteractiveMonitor {
   private terminalScrollOffset: number = 0;
   private lastTerminalTotalLines: number = 0;
   private interventionInput: string = '';
+  private timeoutInput: string = '';
   private notification: { message: string; type: 'info' | 'error' | 'success'; time: number } | null = null;
 
   constructor(runDir: string, interval: number) {
@@ -96,7 +98,9 @@ class InteractiveMonitor {
         this.handleTerminalKey(keyName);
       } else if (this.view === View.INTERVENE) {
         this.handleInterveneKey(str, key);
-      } else {
+      } else if (this.view === View.TIMEOUT) {
+        this.handleTimeoutKey(str, key);
+      } else if (this.view === View.MESSAGE_DETAIL) {
         this.handleMessageDetailKey(keyName);
       }
     });
@@ -182,9 +186,20 @@ class InteractiveMonitor {
             this.interventionInput = '';
             this.render();
           } else {
-            // Show a temporary message that it's only for running lanes
-            console.log(`\n\x1b[31m  Intervention is only available for RUNNING lanes.\x1b[0m`);
-            setTimeout(() => this.render(), 1500);
+            this.showNotification('Intervention only available for RUNNING lanes', 'error');
+          }
+        }
+        break;
+      case 'o':
+        const timeoutLane = this.lanes.find(l => l.name === this.selectedLaneName);
+        if (timeoutLane) {
+          const status = this.getLaneStatus(timeoutLane.path, timeoutLane.name);
+          if (status.status === 'running') {
+            this.view = View.TIMEOUT;
+            this.timeoutInput = '';
+            this.render();
+          } else {
+            this.showNotification('Timeout update only available for RUNNING lanes', 'error');
           }
         }
         break;
@@ -244,44 +259,60 @@ class InteractiveMonitor {
   }
 
   private handleInterveneKey(str: string, key: any) {
-    if (key.name === 'return' || key.name === 'enter') {
+    if (key && key.name === 'escape') {
+      this.view = View.LANE_DETAIL;
+      this.render();
+      return;
+    }
+
+    if (key && (key.name === 'return' || key.name === 'enter')) {
       if (this.interventionInput.trim()) {
         this.sendIntervention(this.interventionInput.trim());
       }
       this.view = View.LANE_DETAIL;
       this.render();
-    } else if (key.name === 'escape') {
-      this.view = View.LANE_DETAIL;
-      this.render();
-    } else if (key.name === 'backspace') {
+      return;
+    }
+
+    if (key && key.name === 'backspace') {
       this.interventionInput = this.interventionInput.slice(0, -1);
       this.render();
-    } else if (str && str.length === 1) {
+      return;
+    }
+
+    if (str && str.length === 1 && !key.ctrl && !key.meta) {
       this.interventionInput += str;
       this.render();
     }
   }
 
-  private sendIntervention(message: string) {
-    if (!this.selectedLaneName) return;
-    const lane = this.lanes.find(l => l.name === this.selectedLaneName);
-    if (!lane) return;
+  private handleTimeoutKey(str: string, key: any) {
+    if (key && key.name === 'escape') {
+      this.view = View.LANE_DETAIL;
+      this.render();
+      return;
+    }
 
-    // Write to intervention.txt which runner.ts is watching
-    const interventionPath = path.join(path.dirname(lane.path), 'intervention.txt');
-    fs.writeFileSync(interventionPath, message, 'utf8');
+    if (key && (key.name === 'return' || key.name === 'enter')) {
+      if (this.timeoutInput.trim()) {
+        this.sendTimeoutUpdate(this.timeoutInput.trim());
+      }
+      this.view = View.LANE_DETAIL;
+      this.render();
+      return;
+    }
 
-    // Also log it to the conversation
-    const convoPath = path.join(lane.path, 'conversation.jsonl');
-    const entry = {
-      timestamp: new Date().toISOString(),
-      role: 'user',
-      task: 'INTERVENTION',
-      fullText: `[HUMAN INTERVENTION]: ${message}`,
-      textLength: message.length + 20,
-      model: 'manual'
-    };
-    fs.appendFileSync(convoPath, JSON.stringify(entry) + '\n', 'utf8');
+    if (key && key.name === 'backspace') {
+      this.timeoutInput = this.timeoutInput.slice(0, -1);
+      this.render();
+      return;
+    }
+
+    // Only allow numbers
+    if (str && /^\d$/.test(str)) {
+      this.timeoutInput += str;
+      this.render();
+    }
   }
 
   private handleFlowKey(key: string) {
@@ -299,6 +330,54 @@ class InteractiveMonitor {
       case 'q':
         this.stop();
         break;
+    }
+  }
+
+  private sendIntervention(message: string) {
+    if (!this.selectedLaneName) return;
+    const lane = this.lanes.find(l => l.name === this.selectedLaneName);
+    if (!lane) return;
+
+    try {
+      const interventionPath = path.join(lane.path, 'intervention.txt');
+      fs.writeFileSync(interventionPath, message, 'utf8');
+
+      // Also log it to the conversation
+      const convoPath = path.join(lane.path, 'conversation.jsonl');
+      const entry = {
+        timestamp: new Date().toISOString(),
+        role: 'user',
+        task: 'INTERVENTION',
+        fullText: `[HUMAN INTERVENTION]: ${message}`,
+        textLength: message.length + 20,
+        model: 'manual'
+      };
+      fs.appendFileSync(convoPath, JSON.stringify(entry) + '\n', 'utf8');
+      
+      this.showNotification('Intervention message sent', 'success');
+    } catch (e) {
+      this.showNotification('Failed to send intervention', 'error');
+    }
+  }
+
+  private sendTimeoutUpdate(timeoutStr: string) {
+    if (!this.selectedLaneName) return;
+    const lane = this.lanes.find(l => l.name === this.selectedLaneName);
+    if (!lane) return;
+
+    try {
+      const timeoutMs = parseInt(timeoutStr);
+      if (isNaN(timeoutMs) || timeoutMs <= 0) {
+        this.showNotification('Invalid timeout value', 'error');
+        return;
+      }
+
+      const timeoutPath = path.join(lane.path, 'timeout.txt');
+      fs.writeFileSync(timeoutPath, String(timeoutMs), 'utf8');
+      
+      this.showNotification(`Timeout updated to ${Math.round(timeoutMs/1000)}s`, 'success');
+    } catch (e) {
+      this.showNotification('Failed to update timeout', 'error');
     }
   }
 
@@ -377,6 +456,9 @@ class InteractiveMonitor {
         break;
       case View.INTERVENE:
         this.renderIntervene();
+        break;
+      case View.TIMEOUT:
+        this.renderTimeout();
         break;
     }
   }
@@ -460,7 +542,7 @@ class InteractiveMonitor {
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`🔍 Lane: ${lane.name}`);
-    console.log(`🕒 Updated: ${new Date().toLocaleTimeString()} | [↑/↓/→] Browse History [Esc/←] Back`);
+    console.log(`🕒 Updated: ${new Date().toLocaleTimeString()} | [↑/↓] Browse [T] Term [I] Intervene [O] Timeout [Esc] Back`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     process.stdout.write(`  Status:    ${this.getStatusIcon(status.status)} ${status.status}\n`);
@@ -656,6 +738,17 @@ class InteractiveMonitor {
     console.log('\n Type your message to the agent. This will be sent as a direct prompt.');
     console.log(` Press \x1b[1mENTER\x1b[0m to send, \x1b[1mESC\x1b[0m to cancel.\n`);
     console.log(`\x1b[33m > \x1b[0m${this.interventionInput}\x1b[37m█\x1b[0m`);
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+
+  private renderTimeout() {
+    console.clear();
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`⏱ UPDATE TIMEOUT: ${this.selectedLaneName}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('\n Enter new timeout in milliseconds (e.g., 600000 for 10 minutes).');
+    console.log(` Press \x1b[1mENTER\x1b[0m to apply, \x1b[1mESC\x1b[0m to cancel.\n`);
+    console.log(`\x1b[33m > \x1b[0m${this.timeoutInput}\x1b[37m█\x1b[0m`);
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 

@@ -13,6 +13,7 @@ import { appendLog, createConversationEntry } from '../utils/state';
 interface SignalOptions {
   lane: string | null;
   message: string | null;
+  timeout: number | null; // New timeout in milliseconds
   runDir: string | null;
   help: boolean;
 }
@@ -20,12 +21,14 @@ interface SignalOptions {
 function printHelp(): void {
   console.log(`
 Usage: cursorflow signal <lane> "<message>" [options]
+       cursorflow signal <lane> --timeout <ms>
 
-Directly intervene in a running lane by sending a message to the agent.
+Directly intervene in a running lane.
 
 Options:
   <lane>                 Lane name to signal
-  "<message>"            Message text to send
+  "<message>"            Message text to send to the agent
+  --timeout <ms>         Update execution timeout (in milliseconds)
   --run-dir <path>       Use a specific run directory (default: latest)
   --help, -h             Show help
   `);
@@ -33,6 +36,7 @@ Options:
 
 function parseArgs(args: string[]): SignalOptions {
   const runDirIdx = args.indexOf('--run-dir');
+  const timeoutIdx = args.indexOf('--timeout');
   
   // First non-option is lane, second (or rest joined) is message
   const nonOptions = args.filter(a => !a.startsWith('--'));
@@ -40,6 +44,7 @@ function parseArgs(args: string[]): SignalOptions {
   return {
     lane: nonOptions[0] || null,
     message: nonOptions.slice(1).join(' ') || null,
+    timeout: timeoutIdx >= 0 ? parseInt(args[timeoutIdx + 1] || '0') || null : null,
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
     help: args.includes('--help') || args.includes('-h'),
   };
@@ -69,11 +74,7 @@ async function signal(args: string[]): Promise<void> {
   const logsDir = getLogsDir(config);
   
   if (!options.lane) {
-    throw new Error('Lane name required: cursorflow signal <lane> "<message>"');
-  }
-  
-  if (!options.message) {
-    throw new Error('Message required: cursorflow signal <lane> "<message>"');
+    throw new Error('Lane name required: cursorflow signal <lane> ...');
   }
   
   let runDir = options.runDir;
@@ -84,27 +85,42 @@ async function signal(args: string[]): Promise<void> {
   if (!runDir || !fs.existsSync(runDir)) {
     throw new Error(`Run directory not found: ${runDir || 'latest'}`);
   }
-  
-  const convoPath = path.join(runDir, 'lanes', options.lane, 'conversation.jsonl');
-  
-  if (!fs.existsSync(convoPath)) {
-    throw new Error(`Conversation log not found at ${convoPath}. Is the lane running?`);
+
+  const laneDir = path.join(runDir, 'lanes', options.lane);
+  if (!fs.existsSync(laneDir)) {
+    throw new Error(`Lane directory not found: ${laneDir}`);
   }
-  
-  logger.info(`Sending signal to lane: ${options.lane}`);
-  logger.info(`Message: "${options.message}"`);
-  
-  // Append as a "commander" role message
-  // Note: We cast to 'system' or similar if 'commander' isn't in the enum, 
-  // but let's use 'reviewer' or 'system' which agents usually respect, 
-  // or update the type definition.
-  const entry = createConversationEntry('system', `[COMMANDER INTERVENTION]\n${options.message}`, {
-    task: 'DIRECT_SIGNAL'
-  });
-  
-  appendLog(convoPath, entry);
-  
-  logger.success('Signal sent successfully. The agent will see this message in its next turn or via file monitoring.');
+
+  // Case 1: Timeout update
+  if (options.timeout !== null) {
+    const timeoutPath = path.join(laneDir, 'timeout.txt');
+    fs.writeFileSync(timeoutPath, String(options.timeout));
+    logger.success(`Timeout update signal sent to ${options.lane}: ${options.timeout}ms`);
+    return;
+  }
+
+  // Case 2: Intervention message
+  if (options.message) {
+    const interventionPath = path.join(laneDir, 'intervention.txt');
+    const convoPath = path.join(laneDir, 'conversation.jsonl');
+    
+    logger.info(`Sending signal to lane: ${options.lane}`);
+    logger.info(`Message: "${options.message}"`);
+    
+    // 1. Write to intervention.txt for live agents to pick up immediately via stdin
+    fs.writeFileSync(interventionPath, options.message);
+    
+    // 2. Also append to conversation log for visibility and history
+    const entry = createConversationEntry('system', `[COMMANDER INTERVENTION]\n${options.message}`, {
+      task: 'DIRECT_SIGNAL'
+    });
+    appendLog(convoPath, entry);
+    
+    logger.success('Signal sent successfully. The agent will see this message in its current turn or next step.');
+    return;
+  }
+
+  throw new Error('Either a message or --timeout is required.');
 }
 
 export = signal;

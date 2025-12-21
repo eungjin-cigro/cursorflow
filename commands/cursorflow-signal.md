@@ -7,6 +7,7 @@ Directly intervene in a running lane by sending a message to the agent. This is 
 
 ```bash
 cursorflow signal <lane-name> "<message>" [options]
+cursorflow signal <lane-name> --timeout <ms>
 ```
 
 ## Options
@@ -15,24 +16,30 @@ cursorflow signal <lane-name> "<message>" [options]
 |------|------|
 | `<lane-name>` | The name of the lane to signal |
 | `"<message>"` | The text message to send to the agent |
+| `--timeout <ms>` | Update the execution timeout (in milliseconds) |
 | `--run-dir <path>` | Use a specific run directory (default: latest) |
 
 ## How it works
-1. **Logging**: The message is recorded in the lane's conversation history as a system/commander message.
-2. **Injection**: If the lane's task configuration has `enableIntervention: true`, the message is injected into the agent's input stream.
+1. **Logging**: Intervention messages are recorded in the lane's conversation history.
+2. **Injection**: If `enableIntervention: true`, messages are injected into the agent's input stream.
+3. **Dynamic Timeout**: If `--timeout` is used, the active runner receives a signal to reset its internal timer to the new value.
 
-## Example
+## Examples
 
 ```bash
 # Provide a hint to a running agent
 cursorflow signal 01-lane-1 "Make sure to export the new function from index.ts"
+
+# Increase timeout to 10 minutes mid-execution
+cursorflow signal 01-lane-1 --timeout 600000
 ```
 
 ## Dashboard Alternative
 You can also use the interactive monitor to send signals:
 1. Run `cursorflow monitor latest`.
 2. Select a lane and enter details (`→`).
-3. Press `I` to type and send an intervention message.
+3. Press `I` to send an intervention message.
+4. Press `O` to update the execution timeout.
 
 ## Note on Intervention
 For the agent to receive the signal immediately, the task must be configured with:
