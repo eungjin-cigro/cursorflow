@@ -425,10 +425,20 @@ function checkPackageManager(): { name: string; ok: boolean } {
 }
 
 function checkDiskSpace(dir: string): { ok: boolean; freeBytes?: number; error?: string } {
-  const { execSync } = require('child_process');
+  const { spawnSync } = require('child_process');
   try {
+    // Validate and normalize the directory path to prevent command injection
+    const safePath = path.resolve(dir);
+    
+    // Use spawnSync instead of execSync to avoid shell interpolation vulnerabilities
     // df -B1 returns bytes. We look for the line corresponding to our directory.
-    const output = execSync(`df -B1 "${dir}"`, { encoding: 'utf8' });
+    const result = spawnSync('df', ['-B1', safePath], { encoding: 'utf8' });
+    
+    if (result.status !== 0) {
+      return { ok: false, error: result.stderr || 'df command failed' };
+    }
+    
+    const output = result.stdout;
     const lines = output.trim().split('\n');
     if (lines.length < 2) return { ok: false, error: 'Could not parse df output' };
     

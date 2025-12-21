@@ -48,14 +48,15 @@ jobs:
 
       # 3. 코드 취약점 스캔 (Semgrep)
       - name: Semgrep Security Scan
-        uses: returntocorp/semgrep-action@v1
+        uses: semgrep/semgrep-action@v1
         with:
           config: >-
             p/security-audit
             p/javascript
             p/nodejs
             p/owasp-top-ten
-          generateSarif: true
+        env:
+          SEMGREP_RULES: "p/security-audit p/javascript p/nodejs p/owasp-top-ten"
         continue-on-error: false
 
       # 4. 의존성 보안 스캔 (Snyk)
