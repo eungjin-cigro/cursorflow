@@ -1,6 +1,6 @@
 {
   "name": "@litmers/cursorflow-orchestrator",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Git worktree-based parallel AI agent orchestration system for Cursor",
   "main": "dist/cli/index.js",
   "bin": {
@@ -22,7 +22,8 @@
     "security:audit": "npm audit",
     "security:audit:fix": "npm audit fix",
     "security:setup": "scripts/setup-security.sh",
-    "test:lifecycle": "scripts/test-real-cursor-lifecycle.sh",
+    "test:lifecycle": "tests/scripts/test-real-cursor-lifecycle.sh",
+    "test:comprehensive": "tests/scripts/test-comprehensive-lifecycle.sh",
     "prepare": "husky"
   },
   "keywords": [

@@ -191,6 +191,8 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
   const format = outputFormat || 'stream-json';
   const args = [
     '--print',
+    '--force',
+    '--approve-mcps',
     '--output-format', format,
     '--workspace', workspaceDir,
     ...(model ? ['--model', model] : []),
@@ -231,6 +233,8 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       stdio: [stdinMode, 'pipe', 'pipe'],
       env: childEnv,
     });
+
+    logger.info(`Executing cursor-agent... (timeout: ${Math.round(timeoutMs / 1000)}s)`);
 
     // Save PID to state if possible (avoid TOCTOU by reading directly)
     if (child.pid && signalDir) {
@@ -780,8 +784,12 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   const statePath = path.join(runDir, 'state.json');
   let state: LaneState | null = null;
   
-  if (startIndex > 0 && fs.existsSync(statePath)) {
-    state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  if (fs.existsSync(statePath)) {
+    try {
+      state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    } catch (e) {
+      logger.warn(`Failed to load existing state from ${statePath}: ${e}`);
+    }
   }
   
   const randomSuffix = Math.random().toString(36).substring(2, 7);
@@ -801,8 +809,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.info(`Worktree: ${worktreeDir}`);
   logger.info(`Tasks: ${config.tasks.length}`);
   
-  // Create worktree only if starting fresh
-  if (startIndex === 0 || !fs.existsSync(worktreeDir)) {
+  // Create worktree only if starting fresh and worktree doesn't exist
+  if (!fs.existsSync(worktreeDir)) {
     if (noGit) {
       // In noGit mode, just create the directory
       logger.info(`Creating work directory: ${worktreeDir}`);
@@ -812,6 +820,16 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         baseBranch: config.baseBranch || 'main',
         cwd: repoRoot,
       });
+    }
+  } else if (!noGit) {
+    // If it exists but we are in Git mode, ensure it's actually a worktree and on the right branch
+    logger.info(`Reusing existing worktree: ${worktreeDir}`);
+    try {
+      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+    } catch (e) {
+      // If checkout fails, maybe the worktree is in a weird state. 
+      // For now, just log it. In a more robust impl, we might want to repair it.
+      logger.warn(`Failed to checkout branch ${pipelineBranch} in existing worktree: ${e}`);
     }
   }
   
