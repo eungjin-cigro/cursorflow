@@ -45,7 +45,15 @@ echo -e "\n${BLUE}[3/4] Checking for hardcoded secrets...${NC}"
 # .cursorignore나 .gitignore에 있는 파일은 제외
 # .github, *.md, scripts/setup-security.sh 등은 제외
 # 변수 선언이나 에러 메시지에 포함된 키워드는 제외하도록 필터 강화
-SECRETS_FOUND=$(git grep -Ei "api[_-]?key|secret|password|token|bearer|private[_-]?key" -- ":!package-lock.json" ":!*.md" ":!scripts/setup-security.sh" ":!scripts/ai-security-check.js" ":!.github/*" ":!scripts/local-security-gate.sh" | grep -v "process.env" | grep -v "example" | grep -v "\${{" | grep -vE "stderr\.includes|checkCursorApiKey|CURSOR_API_KEY|api key|API_KEY" || true)
+RAW_SECRETS=$(git grep -Ei "api[_-]?key|secret|password|token|bearer|private[_-]?key" -- ":!package-lock.json" ":!*.md" ":!scripts/setup-security.sh" ":!scripts/ai-security-check.js" ":!.github/*" ":!scripts/local-security-gate.sh" | grep -v "process.env" | grep -v "example" | grep -v "\${{" | grep -vE "stderr\.includes|checkCursorApiKey|CURSOR_API_KEY|api key|API_KEY" || true)
+
+# .secretsignore 파일이 있으면 해당 패턴을 제외
+if [ -f .secretsignore ] && [ -n "$RAW_SECRETS" ]; then
+    # grep -v -f를 사용하여 .secretsignore에 있는 패턴이 포함된 줄을 제외
+    SECRETS_FOUND=$(echo "$RAW_SECRETS" | grep -v -f .secretsignore || true)
+else
+    SECRETS_FOUND="$RAW_SECRETS"
+fi
 
 if [ -z "$SECRETS_FOUND" ]; then
     echo -e "${GREEN}✅ No obvious secrets found in tracked files.${NC}"
