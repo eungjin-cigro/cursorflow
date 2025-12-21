@@ -19,6 +19,20 @@ interface LaneWithDeps {
 interface MonitorOptions {
   runDir?: string;
   interval: number;
+  help: boolean;
+}
+
+function printHelp(): void {
+  console.log(`
+Usage: cursorflow monitor [run-dir] [options]
+
+Interactive lane dashboard to track progress and dependencies.
+
+Options:
+  [run-dir]              Run directory to monitor (default: latest)
+  --interval <seconds>   Refresh interval (default: 2)
+  --help, -h             Show help
+  `);
 }
 
 enum View {
@@ -754,6 +768,12 @@ function findLatestRunDir(logsDir: string): string | null {
  * Monitor lanes
  */
 async function monitor(args: string[]): Promise<void> {
+  const help = args.includes('--help') || args.includes('-h');
+  if (help) {
+    printHelp();
+    return;
+  }
+
   const watchIdx = args.indexOf('--watch');
   const intervalIdx = args.indexOf('--interval');
   const interval = intervalIdx >= 0 ? parseInt(args[intervalIdx + 1] || '2') || 2 : 2;

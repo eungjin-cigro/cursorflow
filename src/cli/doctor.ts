@@ -13,7 +13,7 @@
  */
 
 import * as logger from '../utils/logger';
-import { runDoctor } from '../utils/doctor';
+import { runDoctor, saveDoctorStatus } from '../utils/doctor';
 
 interface DoctorCliOptions {
   json: boolean;
@@ -117,6 +117,11 @@ async function doctor(args: string[]): Promise<void> {
     console.log(JSON.stringify(report, null, 2));
   } else {
     printHumanReport(report);
+  }
+
+  // Save successful doctor run status
+  if (report.ok && report.context.repoRoot) {
+    saveDoctorStatus(report.context.repoRoot, report);
   }
 
   process.exit(report.ok ? 0 : 1);

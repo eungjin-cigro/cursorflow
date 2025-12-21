@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as logger from '../utils/logger';
 import { orchestrate } from '../core/orchestrator';
 import { getLogsDir, loadConfig } from '../utils/config';
-import { runDoctor } from '../utils/doctor';
+import { runDoctor, getDoctorStatus } from '../utils/doctor';
 import { areCommandsInstalled, setupCommands } from './setup-commands';
 
 interface RunOptions {
@@ -15,6 +15,23 @@ interface RunOptions {
   dryRun: boolean;
   executor: string | null;
   skipDoctor: boolean;
+  help: boolean;
+}
+
+function printHelp(): void {
+  console.log(`
+Usage: cursorflow run <tasks-dir> [options]
+
+Run task orchestration based on dependency graph.
+
+Options:
+  <tasks-dir>            Directory containing task JSON files
+  --max-concurrent <num> Limit parallel agents (overrides config)
+  --executor <type>      cursor-agent | cloud
+  --skip-doctor          Skip environment checks (not recommended)
+  --dry-run              Show execution plan without starting agents
+  --help, -h             Show help
+  `);
 }
 
 function parseArgs(args: string[]): RunOptions {
@@ -26,12 +43,18 @@ function parseArgs(args: string[]): RunOptions {
     dryRun: args.includes('--dry-run'),
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
+    help: args.includes('--help') || args.includes('-h'),
   };
 }
 
 async function run(args: string[]): Promise<void> {
   const options = parseArgs(args);
   
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
   // Auto-setup Cursor commands if missing or outdated
   if (!areCommandsInstalled()) {
     logger.info('Installing missing or outdated Cursor IDE commands...');
@@ -62,6 +85,14 @@ async function run(args: string[]): Promise<void> {
 
   if (!fs.existsSync(tasksDir)) {
     throw new Error(`Tasks directory not found: ${tasksDir}`);
+  }
+
+  // Check if doctor has been run at least once
+  const doctorStatus = getDoctorStatus(config.projectRoot);
+  if (!doctorStatus) {
+    logger.warn('It looks like you haven\'t run `cursorflow doctor` yet.');
+    logger.warn('Running doctor is highly recommended to catch environment issues early.');
+    console.log('   Run: cursorflow doctor\n');
   }
 
   // Preflight checks (doctor)

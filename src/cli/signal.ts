@@ -14,6 +14,21 @@ interface SignalOptions {
   lane: string | null;
   message: string | null;
   runDir: string | null;
+  help: boolean;
+}
+
+function printHelp(): void {
+  console.log(`
+Usage: cursorflow signal <lane> "<message>" [options]
+
+Directly intervene in a running lane by sending a message to the agent.
+
+Options:
+  <lane>                 Lane name to signal
+  "<message>"            Message text to send
+  --run-dir <path>       Use a specific run directory (default: latest)
+  --help, -h             Show help
+  `);
 }
 
 function parseArgs(args: string[]): SignalOptions {
@@ -26,6 +41,7 @@ function parseArgs(args: string[]): SignalOptions {
     lane: nonOptions[0] || null,
     message: nonOptions.slice(1).join(' ') || null,
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
+    help: args.includes('--help') || args.includes('-h'),
   };
 }
 
@@ -43,6 +59,12 @@ function findLatestRunDir(logsDir: string): string | null {
 
 async function signal(args: string[]): Promise<void> {
   const options = parseArgs(args);
+  
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
   const config = loadConfig();
   const logsDir = getLogsDir(config);
   

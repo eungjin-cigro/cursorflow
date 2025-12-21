@@ -16,6 +16,26 @@ interface CleanOptions {
   dryRun: boolean;
   force: boolean;
   all: boolean;
+  help: boolean;
+}
+
+function printHelp(): void {
+  console.log(`
+Usage: cursorflow clean <type> [options]
+
+Clean up resources created by CursorFlow.
+
+Types:
+  branches               Remove local feature branches
+  worktrees              Remove temporary Git worktrees
+  logs                   Clear log directories
+  all                    Remove all of the above (default)
+
+Options:
+  --dry-run              Show what would be removed without deleting
+  --force                Force removal (ignore uncommitted changes)
+  --help, -h             Show help
+  `);
 }
 
 function parseArgs(args: string[]): CleanOptions {
@@ -25,11 +45,18 @@ function parseArgs(args: string[]): CleanOptions {
     dryRun: args.includes('--dry-run'),
     force: args.includes('--force'),
     all: args.includes('--all'),
+    help: args.includes('--help') || args.includes('-h'),
   };
 }
 
 async function clean(args: string[]): Promise<void> {
   const options = parseArgs(args);
+  
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
   const config = loadConfig();
   const repoRoot = git.getRepoRoot();
 

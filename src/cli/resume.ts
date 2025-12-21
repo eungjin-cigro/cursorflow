@@ -15,6 +15,22 @@ interface ResumeOptions {
   runDir: string | null;
   clean: boolean;
   restart: boolean;
+  help: boolean;
+}
+
+function printHelp(): void {
+  console.log(`
+Usage: cursorflow resume <lane> [options]
+
+Resume an interrupted or failed lane.
+
+Options:
+  <lane>                 Lane name to resume
+  --run-dir <path>       Use a specific run directory (default: latest)
+  --clean                Clean up existing worktree before resuming
+  --restart              Restart from the first task (index 0)
+  --help, -h             Show help
+  `);
 }
 
 function parseArgs(args: string[]): ResumeOptions {
@@ -25,6 +41,7 @@ function parseArgs(args: string[]): ResumeOptions {
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
     clean: args.includes('--clean'),
     restart: args.includes('--restart'),
+    help: args.includes('--help') || args.includes('-h'),
   };
 }
 
@@ -45,6 +62,12 @@ function findLatestRunDir(logsDir: string): string | null {
 
 async function resume(args: string[]): Promise<void> {
   const options = parseArgs(args);
+  
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
   const config = loadConfig();
   const logsDir = getLogsDir(config);
   
