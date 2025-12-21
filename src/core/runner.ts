@@ -15,6 +15,7 @@ import { saveState, appendLog, createConversationEntry } from '../utils/state';
 import { events } from '../utils/events';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
+import { runReviewLoop } from './reviewer';
 import { 
   RunnerConfig, 
   Task, 
@@ -483,6 +484,82 @@ export function applyDependencyFilePermissions(worktreeDir: string, policy: Depe
 }
 
 /**
+ * Wait for task-level dependencies to be completed by other lanes
+ */
+export async function waitForTaskDependencies(deps: string[], runDir: string): Promise<void> {
+  if (!deps || deps.length === 0) return;
+
+  const lanesRoot = path.dirname(runDir);
+  const pendingDeps = new Set(deps);
+
+  logger.info(`Waiting for task dependencies: ${deps.join(', ')}`);
+
+  while (pendingDeps.size > 0) {
+    for (const dep of pendingDeps) {
+      const [laneName, taskName] = dep.split(':');
+      if (!laneName || !taskName) {
+        logger.warn(`Invalid dependency format: ${dep}. Expected "lane:task"`);
+        pendingDeps.delete(dep);
+        continue;
+      }
+
+      const depStatePath = path.join(lanesRoot, laneName, 'state.json');
+      if (fs.existsSync(depStatePath)) {
+        try {
+          const state = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
+          if (state.completedTasks && state.completedTasks.includes(taskName)) {
+            logger.info(`✓ Dependency met: ${dep}`);
+            pendingDeps.delete(dep);
+          } else if (state.status === 'failed') {
+            throw new Error(`Dependency failed: ${dep} (Lane ${laneName} failed)`);
+          }
+        } catch (e: any) {
+          if (e.message.includes('Dependency failed')) throw e;
+          // Ignore parse errors, file might be being written
+        }
+      }
+    }
+
+    if (pendingDeps.size > 0) {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Poll every 5 seconds
+    }
+  }
+}
+
+/**
+ * Merge branches from dependency lanes
+ */
+export async function mergeDependencyBranches(deps: string[], runDir: string, worktreeDir: string): Promise<void> {
+  if (!deps || deps.length === 0) return;
+
+  const lanesRoot = path.dirname(runDir);
+  const lanesToMerge = new Set(deps.map(d => d.split(':')[0]!));
+
+  for (const laneName of lanesToMerge) {
+    const depStatePath = path.join(lanesRoot, laneName, 'state.json');
+    if (!fs.existsSync(depStatePath)) continue;
+
+    try {
+      const state = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
+      if (state.pipelineBranch) {
+        logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
+        
+        // Ensure we have the latest
+        git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
+        
+        git.merge(state.pipelineBranch, {
+          cwd: worktreeDir,
+          noFf: true,
+          message: `chore: merge task dependency from ${laneName}`
+        });
+      }
+    } catch (e) {
+      logger.error(`Failed to merge branch from ${laneName}: ${e}`);
+    }
+  }
+}
+
+/**
  * Run a single task
  */
 export async function runTask({
@@ -507,6 +584,7 @@ export async function runTask({
   noGit?: boolean;
 }): Promise<TaskExecutionResult> {
   const model = task.model || config.model || 'sonnet-4.5';
+  const timeout = task.timeout || config.timeout;
   const convoPath = path.join(runDir, 'conversation.jsonl');
   
   logger.section(`[${index + 1}/${config.tasks.length}] ${task.name}`);
@@ -553,7 +631,7 @@ export async function runTask({
     prompt: prompt1,
     model,
     signalDir: runDir,
-    timeout: config.timeout,
+    timeout,
     enableIntervention: config.enableIntervention,
     outputFormat: config.agentOutputFormat,
   });
@@ -600,6 +678,37 @@ export async function runTask({
   // Push task branch (skip in noGit mode)
   if (!noGit) {
     git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
+  }
+
+  // Automatic Review
+  const reviewEnabled = config.reviewAllTasks || task.acceptanceCriteria?.length || config.enableReview;
+  
+  if (reviewEnabled) {
+    logger.section(`🔍 Reviewing Task: ${task.name}`);
+    const reviewResult = await runReviewLoop({
+      taskResult: {
+        taskName: task.name,
+        taskBranch: taskBranch,
+        acceptanceCriteria: task.acceptanceCriteria,
+      },
+      worktreeDir,
+      runDir,
+      config,
+      workChatId: chatId,
+      model, // Use the same model as requested
+      cursorAgentSend,
+      cursorAgentCreateChat,
+    });
+
+    if (!reviewResult.approved) {
+      logger.error(`❌ Task review failed after ${reviewResult.iterations} iterations`);
+      return {
+        taskName: task.name,
+        taskBranch,
+        status: 'ERROR',
+        error: reviewResult.error || 'Task failed to pass review criteria',
+      };
+    }
   }
   
   events.emit('task.completed', {
@@ -675,7 +784,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   }
   
-  const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}`;
+  const randomSuffix = Math.random().toString(36).substring(2, 7);
+  const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}-${randomSuffix}`;
   // In noGit mode, use a simple local directory instead of worktree
   const worktreeDir = state?.worktreeDir || (noGit 
     ? path.join(repoRoot, config.worktreeRoot || '_cursorflow/workdir', pipelineBranch.replace(/\//g, '-'))
@@ -724,12 +834,14 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       dependencyRequest: null,
       tasksFile, // Store tasks file for resume
       dependsOn: config.dependsOn || [],
+      completedTasks: [],
     };
   } else {
     state.status = 'running';
     state.error = null;
     state.dependencyRequest = null;
     state.dependsOn = config.dependsOn || [];
+    state.completedTasks = state.completedTasks || [];
   }
   
   saveState(statePath, state);
@@ -834,6 +946,32 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   for (let i = startIndex; i < config.tasks.length; i++) {
     const task = config.tasks[i]!;
     const taskBranch = `${pipelineBranch}--${String(i + 1).padStart(2, '0')}-${task.name}`;
+
+    // Handle task-level dependencies
+    if (task.dependsOn && task.dependsOn.length > 0) {
+      state.status = 'waiting';
+      state.waitingFor = task.dependsOn;
+      saveState(statePath, state);
+
+      try {
+        await waitForTaskDependencies(task.dependsOn, runDir);
+        
+        if (!noGit) {
+          await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir);
+        }
+        
+        state.status = 'running';
+        state.waitingFor = [];
+        saveState(statePath, state);
+      } catch (e: any) {
+        state.status = 'failed';
+        state.waitingFor = [];
+        state.error = e.message;
+        saveState(statePath, state);
+        logger.error(`Task dependency wait/merge failed: ${e.message}`);
+        process.exit(1);
+      }
+    }
     
     const result = await runTask({
       task,
@@ -851,6 +989,10 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     
     // Update state
     state.currentTaskIndex = i + 1;
+    state.completedTasks = state.completedTasks || [];
+    if (!state.completedTasks.includes(task.name)) {
+      state.completedTasks.push(task.name);
+    }
     saveState(statePath, state);
     
     // Handle blocked or error

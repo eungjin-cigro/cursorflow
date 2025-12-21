@@ -144,24 +144,25 @@ export function buildFeedbackPrompt(review: ReviewResult): string {
 /**
  * Review task
  */
-export async function reviewTask({ taskResult, worktreeDir, runDir, config, cursorAgentSend, cursorAgentCreateChat }: { 
+export async function reviewTask({ taskResult, worktreeDir, runDir, config, model, cursorAgentSend, cursorAgentCreateChat }: { 
   taskResult: TaskResult; 
   worktreeDir: string; 
   runDir: string; 
   config: RunnerConfig; 
+  model?: string;
   cursorAgentSend: (options: { 
     workspaceDir: string; 
     chatId: string; 
     prompt: string; 
     model?: string;
     outputFormat?: 'stream-json' | 'json' | 'plain';
-  }) => AgentSendResult; 
+  }) => Promise<AgentSendResult>; 
   cursorAgentCreateChat: () => string; 
 }): Promise<ReviewResult> {
   const reviewPrompt = buildReviewPrompt({
     taskName: taskResult.taskName,
     taskBranch: taskResult.taskBranch,
-    acceptanceCriteria: config.acceptanceCriteria || [],
+    acceptanceCriteria: taskResult.acceptanceCriteria || config.acceptanceCriteria || [],
   });
   
   logger.info(`Reviewing: ${taskResult.taskName}`);
@@ -172,11 +173,13 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   });
 
   const reviewChatId = cursorAgentCreateChat();
+  const reviewModel = model || config.reviewModel || config.model || 'sonnet-4.5';
+  
   const reviewResult = await cursorAgentSend({
     workspaceDir: worktreeDir,
     chatId: reviewChatId,
     prompt: reviewPrompt,
-    model: config.reviewModel || 'sonnet-4.5-thinking',
+    model: reviewModel,
     outputFormat: config.agentOutputFormat,
   });
   
@@ -186,7 +189,7 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   const convoPath = path.join(runDir, 'conversation.jsonl');
   appendLog(convoPath, createConversationEntry('reviewer', reviewResult.resultText || 'No result', {
     task: taskResult.taskName,
-    model: config.reviewModel,
+    model: reviewModel,
   }));
   
   logger.info(`Review result: ${review.status} (${review.issues?.length || 0} issues)`);
@@ -204,20 +207,21 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
 /**
  * Review loop with feedback
  */
-export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, workChatId, cursorAgentSend, cursorAgentCreateChat }: {
+export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, workChatId, model, cursorAgentSend, cursorAgentCreateChat }: {
   taskResult: TaskResult;
   worktreeDir: string;
   runDir: string;
   config: RunnerConfig;
   workChatId: string;
+  model?: string;
   cursorAgentSend: (options: { 
     workspaceDir: string; 
     chatId: string; 
     prompt: string; 
     model?: string;
     outputFormat?: 'stream-json' | 'json' | 'plain';
-  }) => AgentSendResult; 
-  cursorAgentCreateChat: () => string;
+  }) => Promise<AgentSendResult>; 
+  cursorAgentCreateChat: () => string; 
 }): Promise<{ approved: boolean; review: ReviewResult; iterations: number; error?: string }> {
   const maxIterations = config.maxReviewIterations || 3;
   let iteration = 0;
@@ -229,10 +233,11 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
       worktreeDir,
       runDir,
       config,
+      model,
       cursorAgentSend,
       cursorAgentCreateChat,
     });
-    
+
     if (currentReview.status === 'approved') {
       logger.success(`Review passed: ${taskResult.taskName} (iteration ${iteration + 1})`);
       events.emit('review.approved', {

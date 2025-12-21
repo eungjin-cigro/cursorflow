@@ -104,6 +104,40 @@ describe('Doctor Utilities', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  test('runDoctor should report pipeline branch collisions', () => {
+    const tmp = path.join(__dirname, 'tmp-doctor-collision');
+    const tasksDir = path.join(tmp, 'tasks');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    
+    fs.writeFileSync(
+      path.join(tasksDir, 'lane1.json'),
+      JSON.stringify({ pipelineBranch: 'shared-branch', tasks: [{ name: 'task1', prompt: 'prompt1' }] }),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(tasksDir, 'lane2.json'),
+      JSON.stringify({ pipelineBranch: 'shared-branch', tasks: [{ name: 'task1', prompt: 'prompt1' }] }),
+      'utf8'
+    );
+
+    mockedRunGitResult.mockImplementation((args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd === 'rev-parse --is-inside-work-tree') return { success: true, stdout: 'true' };
+      if (cmd === 'rev-parse --show-toplevel') return { success: true, stdout: '/repo' };
+      if (cmd === 'rev-parse --verify HEAD') return { success: true, stdout: 'abc123' };
+      if (cmd === 'remote get-url origin') return { success: true, stdout: 'https://github.com/test/repo' };
+      if (cmd === 'worktree list') return { success: true, stdout: '/repo 123 [main]' };
+      return { success: true, stdout: '' };
+    });
+
+    const report = runDoctor({ cwd: '/repo', tasksDir, includeCursorAgentChecks: false });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues.map(i => i.id)).toContain('branch.pipeline_collision');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });
 
 

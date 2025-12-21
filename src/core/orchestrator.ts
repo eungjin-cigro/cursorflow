@@ -412,7 +412,8 @@ async function resolveAllDependencies(
     const task = taskConfig.tasks[currentIdx];
     
     if (task) {
-      const taskBranch = `${pipelineBranch}--${String(currentIdx + 1).padStart(2, '0')}-${task.name}`;
+      const lanePipelineBranch = `${pipelineBranch}/${lane.name}`;
+      const taskBranch = `${lanePipelineBranch}--${String(currentIdx + 1).padStart(2, '0')}-${task.name}`;
       logger.info(`Syncing lane ${lane.name} branch ${taskBranch}`);
       
       try {
@@ -467,7 +468,8 @@ export async function orchestrate(tasksDir: string, options: {
   
   fs.mkdirSync(runRoot, { recursive: true });
 
-  const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}`;
+  const randomSuffix = Math.random().toString(36).substring(2, 7);
+  const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}-${randomSuffix}`;
 
   // Initialize event system
   events.setRunId(runId);
@@ -570,7 +572,7 @@ export async function orchestrate(tasksDir: string, options: {
         laneRunDir: laneRunDirs[lane.name]!,
         executor: options.executor || 'cursor-agent',
         startIndex: lane.startIndex,
-        pipelineBranch,
+        pipelineBranch: `${pipelineBranch}/${lane.name}`,
         enhancedLogConfig: options.enhancedLogging,
         noGit: options.noGit,
       });

@@ -486,16 +486,46 @@ function validateBranchNames(
   const remoteBranches = getAllRemoteBranches(repoRoot);
   const allExistingBranches = new Set([...localBranches, ...remoteBranches]);
   
-  // Collect branch prefixes from lanes
+  // Collect branch prefixes and pipeline branches from lanes
   const branchPrefixes: { laneName: string; prefix: string }[] = [];
+  const pipelineBranches: { laneName: string; branch: string }[] = [];
   
   for (const lane of lanes) {
     const branchPrefix = lane.json?.branchPrefix;
     if (branchPrefix) {
       branchPrefixes.push({ laneName: lane.fileName, prefix: branchPrefix });
     }
+    
+    const pipelineBranch = lane.json?.pipelineBranch;
+    if (pipelineBranch) {
+      pipelineBranches.push({ laneName: lane.fileName, branch: pipelineBranch });
+    }
   }
   
+  // Check for pipeline branch collisions
+  const pipeMap = new Map<string, string[]>();
+  for (const { laneName, branch } of pipelineBranches) {
+    const existing = pipeMap.get(branch) || [];
+    existing.push(laneName);
+    pipeMap.set(branch, existing);
+  }
+  
+  for (const [branch, laneNames] of pipeMap) {
+    if (laneNames.length > 1) {
+      addIssue(issues, {
+        id: 'branch.pipeline_collision',
+        severity: 'error',
+        title: 'Pipeline branch collision',
+        message: `Multiple lanes use the same pipelineBranch "${branch}": ${laneNames.join(', ')}`,
+        details: 'Each lane should have a unique pipelineBranch to avoid worktree conflicts during parallel execution.',
+        fixes: [
+          'Update the pipelineBranch in each lane JSON file to be unique',
+          'Or remove pipelineBranch to let CursorFlow generate unique ones',
+        ],
+      });
+    }
+  }
+
   // Check for branch prefix collisions between lanes
   const prefixMap = new Map<string, string[]>();
   for (const { laneName, prefix } of branchPrefixes) {
