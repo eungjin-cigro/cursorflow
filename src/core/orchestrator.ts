@@ -13,9 +13,16 @@ import { loadState } from '../utils/state';
 import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../utils/types';
 import { events } from '../utils/events';
 import { registerWebhooks } from '../utils/webhook';
+import { loadConfig, getLogsDir } from '../utils/config';
 import * as git from '../utils/git';
 import { execSync } from 'child_process';
-import { EnhancedLogManager, createLogManager, DEFAULT_LOG_CONFIG } from '../utils/enhanced-logger';
+import { 
+  EnhancedLogManager, 
+  createLogManager, 
+  DEFAULT_LOG_CONFIG,
+  ParsedMessage,
+  stripAnsi
+} from '../utils/enhanced-logger';
 
 export interface LaneInfo {
   name: string;
@@ -41,6 +48,7 @@ export function spawnLane({
   startIndex = 0, 
   pipelineBranch,
   enhancedLogConfig,
+  noGit = false,
 }: { 
   laneName: string; 
   tasksFile: string; 
@@ -49,6 +57,7 @@ export function spawnLane({
   startIndex?: number;
   pipelineBranch?: string;
   enhancedLogConfig?: Partial<EnhancedLogConfig>;
+  noGit?: boolean;
 }): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
   
@@ -67,6 +76,10 @@ export function spawnLane({
     args.push('--pipeline-branch', pipelineBranch);
   }
   
+  if (noGit) {
+    args.push('--no-git');
+  }
+  
   // Create enhanced log manager if enabled
   const logConfig = { ...DEFAULT_LOG_CONFIG, ...enhancedLogConfig };
   let logManager: EnhancedLogManager | undefined;
@@ -79,7 +92,87 @@ export function spawnLane({
   };
   
   if (logConfig.enabled) {
-    logManager = createLogManager(laneRunDir, laneName, logConfig);
+    // Create callback for clean console output
+    const onParsedMessage = (msg: ParsedMessage) => {
+      // Print a clean, colored version of the message to the console
+      const ts = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false });
+      const laneLabel = `[${laneName}]`.padEnd(12);
+      
+      let prefix = '';
+      let content = msg.content;
+      
+      switch (msg.type) {
+        case 'user':
+          prefix = `${logger.COLORS.cyan}🧑 USER${logger.COLORS.reset}`;
+          // No truncation for user prompt to ensure full command visibility
+          content = content.replace(/\n/g, ' ');
+          break;
+        case 'assistant':
+          prefix = `${logger.COLORS.green}🤖 ASST${logger.COLORS.reset}`;
+          break;
+        case 'tool':
+          prefix = `${logger.COLORS.yellow}🔧 TOOL${logger.COLORS.reset}`;
+          // Simplify tool call: [Tool: read_file] {"target_file":"..."} -> read_file(target_file: ...)
+          const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
+          if (toolMatch) {
+            const [, name, args] = toolMatch;
+            try {
+              const parsedArgs = JSON.parse(args!);
+              let argStr = '';
+              
+              if (name === 'read_file' && parsedArgs.target_file) {
+                argStr = parsedArgs.target_file;
+              } else if (name === 'run_terminal_cmd' && parsedArgs.command) {
+                argStr = parsedArgs.command;
+              } else if (name === 'write' && parsedArgs.file_path) {
+                argStr = parsedArgs.file_path;
+              } else if (name === 'search_replace' && parsedArgs.file_path) {
+                argStr = parsedArgs.file_path;
+              } else {
+                // Generic summary for other tools
+                const keys = Object.keys(parsedArgs);
+                if (keys.length > 0) {
+                  argStr = String(parsedArgs[keys[0]]).substring(0, 50);
+                }
+              }
+              content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}(${argStr})`;
+            } catch {
+              content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}: ${args}`;
+            }
+          }
+          break;
+        case 'tool_result':
+          prefix = `${logger.COLORS.gray}📄 RESL${logger.COLORS.reset}`;
+          // Simplify tool result: [Tool Result: read_file] ... -> read_file OK
+          const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
+          content = resMatch ? `${resMatch[1]} OK` : 'result';
+          break;
+        case 'result':
+          prefix = `${logger.COLORS.green}✅ DONE${logger.COLORS.reset}`;
+          break;
+        case 'system':
+          prefix = `${logger.COLORS.gray}⚙️  SYS${logger.COLORS.reset}`;
+          break;
+      }
+      
+      if (prefix) {
+        const lines = content.split('\n');
+        const tsPrefix = `${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneLabel}${logger.COLORS.reset}`;
+        
+        if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result') {
+          const header = `${prefix} ┌${'─'.repeat(60)}`;
+          process.stdout.write(`${tsPrefix} ${header}\n`);
+          for (const line of lines) {
+            process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} │ ${line}\n`);
+          }
+          process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} └${'─'.repeat(60)}\n`);
+        } else {
+          process.stdout.write(`${tsPrefix} ${prefix} ${content}\n`);
+        }
+      }
+    };
+
+    logManager = createLogManager(laneRunDir, laneName, logConfig, onParsedMessage);
     logPath = logManager.getLogPaths().clean;
     
     // Spawn with pipe for enhanced logging
@@ -89,20 +182,55 @@ export function spawnLane({
       detached: false,
     });
     
+    // Buffer for non-JSON lines
+    let lineBuffer = '';
+
     // Pipe stdout and stderr through enhanced logger
     if (child.stdout) {
       child.stdout.on('data', (data: Buffer) => {
         logManager!.writeStdout(data);
-        // Also write to process stdout for real-time visibility
-        process.stdout.write(data);
+        
+        // Filter out JSON lines from console output to keep it clean
+        const str = data.toString();
+        lineBuffer += str;
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          // Only print if NOT a noisy line
+          if (trimmed && 
+              !trimmed.startsWith('{') && 
+              !trimmed.startsWith('[') && 
+              !trimmed.includes('{"type"') &&
+              !trimmed.includes('Heartbeat:')) {
+            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
+          }
+        }
       });
     }
     
     if (child.stderr) {
       child.stderr.on('data', (data: Buffer) => {
         logManager!.writeStderr(data);
-        // Also write to process stderr for real-time visibility
-        process.stderr.write(data);
+        const str = data.toString();
+        const lines = str.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed) {
+            // Check if it's a real error or just git/status output on stderr
+            const isStatus = trimmed.startsWith('Preparing worktree') || 
+                             trimmed.startsWith('Switched to a new branch') ||
+                             trimmed.startsWith('HEAD is now at') ||
+                             trimmed.includes('actual output');
+            
+            if (isStatus) {
+              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
+            } else {
+              process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
+            }
+          }
+        }
       });
     }
     
@@ -321,6 +449,7 @@ export async function orchestrate(tasksDir: string, options: {
   webhooks?: WebhookConfig[];
   autoResolveDependencies?: boolean;
   enhancedLogging?: Partial<EnhancedLogConfig>;
+  noGit?: boolean;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -328,8 +457,14 @@ export async function orchestrate(tasksDir: string, options: {
     throw new Error(`No lane task files found in ${tasksDir}`);
   }
   
+  const config = loadConfig();
+  const logsDir = getLogsDir(config);
   const runId = `run-${Date.now()}`;
-  const runRoot = options.runDir || `_cursorflow/logs/runs/${runId}`;
+  // Use absolute path for runRoot to avoid issues with subfolders
+  const runRoot = options.runDir 
+    ? (path.isAbsolute(options.runDir) ? options.runDir : path.resolve(process.cwd(), options.runDir))
+    : path.join(logsDir, 'runs', runId);
+  
   fs.mkdirSync(runRoot, { recursive: true });
 
   const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}`;
@@ -370,7 +505,27 @@ export async function orchestrate(tasksDir: string, options: {
   logger.info(`Run directory: ${runRoot}`);
   logger.info(`Lanes: ${lanes.length}`);
 
-  const autoResolve = options.autoResolveDependencies !== false;
+  // Display dependency graph
+  logger.info('\n📊 Dependency Graph:');
+  for (const lane of lanes) {
+    const deps = lane.dependsOn.length > 0 ? ` [depends on: ${lane.dependsOn.join(', ')}]` : '';
+    console.log(`  ${logger.COLORS.cyan}${lane.name}${logger.COLORS.reset}${deps}`);
+    
+    // Simple tree-like visualization for deep dependencies
+    if (lane.dependsOn.length > 0) {
+      for (const dep of lane.dependsOn) {
+        console.log(`    └─ ${dep}`);
+      }
+    }
+  }
+  console.log('');
+
+  // Disable auto-resolve when noGit mode is enabled
+  const autoResolve = !options.noGit && options.autoResolveDependencies !== false;
+  
+  if (options.noGit) {
+    logger.info('🚫 Git operations disabled (--no-git mode)');
+  }
   
   // Monitor lanes
   const monitorInterval = setInterval(() => {
@@ -417,6 +572,7 @@ export async function orchestrate(tasksDir: string, options: {
         startIndex: lane.startIndex,
         pipelineBranch,
         enhancedLogConfig: options.enhancedLogging,
+        noGit: options.noGit,
       });
       
       running.set(lane.name, spawnResult);

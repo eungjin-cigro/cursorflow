@@ -218,11 +218,26 @@ export function commit(message: string, options: { cwd?: string; addAll?: boolea
 }
 
 /**
+ * Check if a remote exists
+ */
+export function remoteExists(remoteName = 'origin', options: { cwd?: string } = {}): boolean {
+  const result = runGitResult(['remote'], { cwd: options.cwd });
+  if (!result.success) return false;
+  return result.stdout.split('\n').map(r => r.trim()).includes(remoteName);
+}
+
+/**
  * Push to remote
  */
 export function push(branchName: string, options: { cwd?: string; force?: boolean; setUpstream?: boolean } = {}): void {
   const { cwd, force = false, setUpstream = false } = options;
   
+  // Check if origin exists before pushing
+  if (!remoteExists('origin', { cwd })) {
+    // If no origin, just skip pushing (useful for local tests)
+    return;
+  }
+
   const args = ['push'];
   
   if (force) {

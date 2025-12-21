@@ -149,7 +149,13 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   worktreeDir: string; 
   runDir: string; 
   config: RunnerConfig; 
-  cursorAgentSend: (options: { workspaceDir: string; chatId: string; prompt: string; model?: string }) => AgentSendResult; 
+  cursorAgentSend: (options: { 
+    workspaceDir: string; 
+    chatId: string; 
+    prompt: string; 
+    model?: string;
+    outputFormat?: 'stream-json' | 'json' | 'plain';
+  }) => AgentSendResult; 
   cursorAgentCreateChat: () => string; 
 }): Promise<ReviewResult> {
   const reviewPrompt = buildReviewPrompt({
@@ -166,11 +172,12 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   });
 
   const reviewChatId = cursorAgentCreateChat();
-  const reviewResult = cursorAgentSend({
+  const reviewResult = await cursorAgentSend({
     workspaceDir: worktreeDir,
     chatId: reviewChatId,
     prompt: reviewPrompt,
     model: config.reviewModel || 'sonnet-4.5-thinking',
+    outputFormat: config.agentOutputFormat,
   });
   
   const review = parseReviewResult(reviewResult.resultText || '');
@@ -203,7 +210,13 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
   runDir: string;
   config: RunnerConfig;
   workChatId: string;
-  cursorAgentSend: (options: { workspaceDir: string; chatId: string; prompt: string; model?: string }) => AgentSendResult;
+  cursorAgentSend: (options: { 
+    workspaceDir: string; 
+    chatId: string; 
+    prompt: string; 
+    model?: string;
+    outputFormat?: 'stream-json' | 'json' | 'plain';
+  }) => AgentSendResult; 
   cursorAgentCreateChat: () => string;
 }): Promise<{ approved: boolean; review: ReviewResult; iterations: number; error?: string }> {
   const maxIterations = config.maxReviewIterations || 3;
@@ -245,11 +258,12 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
     logger.info(`Sending feedback (iteration ${iteration}/${maxIterations})`);
     const feedbackPrompt = buildFeedbackPrompt(currentReview);
     
-    const fixResult = cursorAgentSend({
+    const fixResult = await cursorAgentSend({
       workspaceDir: worktreeDir,
       chatId: workChatId,
       prompt: feedbackPrompt,
       model: config.model,
+      outputFormat: config.agentOutputFormat,
     });
     
     if (!fixResult.ok) {

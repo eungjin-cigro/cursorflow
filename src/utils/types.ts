@@ -25,6 +25,8 @@ export interface CursorFlowConfig {
   worktreePrefix: string;
   maxConcurrentLanes: number;
   projectRoot: string;
+  /** Output format for cursor-agent (default: 'stream-json') */
+  agentOutputFormat: 'stream-json' | 'json' | 'plain';
   webhooks?: WebhookConfig[];
   /** Enhanced logging configuration */
   enhancedLogging?: Partial<EnhancedLogConfig>;
@@ -198,6 +200,8 @@ export interface RunnerConfig {
   baseBranch?: string;
   model?: string;
   dependencyPolicy: DependencyPolicy;
+  /** Output format for cursor-agent (default: 'stream-json') */
+  agentOutputFormat?: 'stream-json' | 'json' | 'plain';
   reviewModel?: string;
   maxReviewIterations?: number;
   acceptanceCriteria?: string[];
@@ -209,6 +213,12 @@ export interface RunnerConfig {
    * Default: false
    */
   enableIntervention?: boolean;
+  /**
+   * Disable Git operations (worktree, branch, push, commit).
+   * Useful for testing or environments without Git remote.
+   * Default: false
+   */
+  noGit?: boolean;
 }
 
 export interface DependencyRequestPlan {

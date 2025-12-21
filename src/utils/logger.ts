@@ -16,7 +16,9 @@ export const COLORS = {
   green: '\x1b[32m',
   blue: '\x1b[34m',
   cyan: '\x1b[36m',
+  magenta: '\x1b[35m',
   gray: '\x1b[90m',
+  bold: '\x1b[1m',
 };
 
 let currentLogLevel: number = LogLevel.info;
@@ -38,7 +40,8 @@ export function setLogLevel(level: string | number): void {
 function formatMessage(level: string, message: string, emoji = ''): string {
   const timestamp = new Date().toISOString();
   const prefix = emoji ? `${emoji} ` : '';
-  return `[${timestamp}] [${level.toUpperCase()}] ${prefix}${message}`;
+  const lines = String(message).split('\n');
+  return lines.map(line => `[${timestamp}] [${level.toUpperCase()}] ${prefix}${line}`).join('\n');
 }
 
 /**

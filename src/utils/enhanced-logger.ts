@@ -384,11 +384,13 @@ export class EnhancedLogManager {
   private cleanTransform: CleanLogTransform | null = null;
   private streamingParser: StreamingMessageParser | null = null;
   private lineBuffer: string = '';
+  private onParsedMessage?: (msg: ParsedMessage) => void;
 
-  constructor(logDir: string, session: LogSession, config: Partial<EnhancedLogConfig> = {}) {
+  constructor(logDir: string, session: LogSession, config: Partial<EnhancedLogConfig> = {}, onParsedMessage?: (msg: ParsedMessage) => void) {
     this.config = { ...DEFAULT_LOG_CONFIG, ...config };
     this.session = session;
     this.logDir = logDir;
+    this.onParsedMessage = onParsedMessage;
     
     // Ensure log directory exists
     fs.mkdirSync(logDir, { recursive: true });
@@ -450,6 +452,9 @@ export class EnhancedLogManager {
     // Create streaming parser for readable log
     this.streamingParser = new StreamingMessageParser((msg) => {
       this.writeReadableMessage(msg);
+      if (this.onParsedMessage) {
+        this.onParsedMessage(msg);
+      }
     });
   }
   
@@ -464,41 +469,44 @@ export class EnhancedLogManager {
     
     switch (msg.type) {
       case 'system':
-        formatted = `\n${ts}\n${msg.content}\n`;
+        formatted = `[${ts}] ⚙️ SYSTEM: ${msg.content}\n`;
         break;
         
       case 'user':
-        // Format user prompt nicely
-        const promptPreview = msg.content.length > 200 
-          ? msg.content.substring(0, 200) + '...'
-          : msg.content;
-        formatted = `\n${ts}\n┌─ 🧑 USER ─────────────────────────────────────────────\n${this.indentText(promptPreview, '│ ')}\n└───────────────────────────────────────────────────────\n`;
-        break;
-        
       case 'assistant':
       case 'result':
-        // Format assistant response
+        // Format with brackets and line (compact)
+        const isUser = msg.type === 'user';
         const isResult = msg.type === 'result';
-        const header = isResult ? '🤖 ASSISTANT (Final)' : '🤖 ASSISTANT';
+        const headerText = isUser ? '🧑 USER' : isResult ? '🤖 ASSISTANT (Final)' : '🤖 ASSISTANT';
         const duration = msg.metadata?.duration_ms 
           ? ` (${Math.round(msg.metadata.duration_ms / 1000)}s)`
           : '';
-        formatted = `\n${ts}\n┌─ ${header}${duration} ──────────────────────────────────\n${this.indentText(msg.content, '│ ')}\n└───────────────────────────────────────────────────────\n`;
+        
+        const label = `[ ${headerText}${duration} ] `;
+        const totalWidth = 80;
+        const topBorder = `┌─${label}${'─'.repeat(Math.max(0, totalWidth - label.length - 2))}`;
+        const bottomBorder = `└─${'─'.repeat(totalWidth - 2)}`;
+
+        const lines = msg.content.split('\n');
+        formatted = `[${ts}] ${topBorder}\n`;
+        for (const line of lines) {
+          formatted += `[${ts}] │ ${line}\n`;
+        }
+        formatted += `[${ts}] ${bottomBorder}\n`;
         break;
         
       case 'tool':
-        // Format tool call
-        formatted = `${ts} 🔧 ${msg.content}\n`;
+        formatted = `[${ts}] 🔧 TOOL: ${msg.content}\n`;
         break;
         
       case 'tool_result':
-        // Format tool result (truncated)
-        const lines = msg.metadata?.lines ? ` (${msg.metadata.lines} lines)` : '';
-        formatted = `${ts} 📄 ${msg.metadata?.toolName || 'Tool'}${lines}\n`;
+        const toolResultLines = msg.metadata?.lines ? ` (${msg.metadata.lines} lines)` : '';
+        formatted = `[${ts}] 📄 RESL: ${msg.metadata?.toolName || 'Tool'}${toolResultLines}\n`;
         break;
         
       default:
-        formatted = `${ts} ${msg.content}\n`;
+        formatted = `[${ts}] ${msg.content}\n`;
     }
     
     try {
@@ -661,8 +669,36 @@ export class EnhancedLogManager {
       this.cleanTransform.write(data);
     }
     
-    // Parse streaming JSON for readable log
+    // Parse streaming JSON for readable log (handles boxes, messages, tool calls)
     this.parseStreamingData(text);
+    
+    // Also include significant info/status lines in readable log (compact)
+    if (this.readableLogFd !== null) {
+      const lines = text.split('\n');
+      for (const line of lines) {
+        const cleanLine = stripAnsi(line).trim();
+        // Look for log lines: [ISO_DATE] [LEVEL] ...
+        if (cleanLine && 
+            !cleanLine.startsWith('{') && 
+            !this.isNoiseLog(cleanLine) && 
+            /\[\d{4}-\d{2}-\d{2}T/.test(cleanLine)) {
+          
+          try {
+            // Check if it has a level marker
+            if (/\[(INFO|WARN|ERROR|SUCCESS|DEBUG)\]/.test(cleanLine)) {
+              // Special formatting for summary
+              if (cleanLine.includes('Final Workspace Summary')) {
+                const tsMatch = cleanLine.match(/\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]/);
+                const ts = tsMatch ? tsMatch[1] : new Date().toISOString();
+                fs.writeSync(this.readableLogFd, `[${ts}] 📊 SUMMARY: ${cleanLine.split(']').slice(2).join(']').trim()}\n`);
+              } else {
+                fs.writeSync(this.readableLogFd, `${cleanLine}\n`);
+              }
+            }
+          } catch {}
+        }
+      }
+    }
     
     // Write JSON entry (for significant lines only)
     if (this.config.writeJsonLog) {
@@ -717,6 +753,20 @@ export class EnhancedLogManager {
     if (this.cleanTransform) {
       this.cleanTransform.write(data);
     }
+
+    // Also include error lines in readable log (compact)
+    if (this.readableLogFd !== null) {
+      const lines = text.split('\n');
+      for (const line of lines) {
+        const cleanLine = stripAnsi(line).trim();
+        if (cleanLine && !this.isNoiseLog(cleanLine)) {
+          try {
+            const ts = new Date().toISOString();
+            fs.writeSync(this.readableLogFd, `[${ts}] ❌ STDERR: ${cleanLine}\n`);
+          } catch {}
+        }
+      }
+    }
     
     // Write JSON entry
     if (this.config.writeJsonLog) {
@@ -747,6 +797,15 @@ export class EnhancedLogManager {
       this.writeToRawLog(line);
     }
     
+    // Write to readable log (compact)
+    if (this.readableLogFd !== null) {
+      const typeLabel = level === 'error' ? '❌ ERROR' : level === 'info' ? 'ℹ️ INFO' : '🔍 DEBUG';
+      const formatted = `${new Date().toISOString()} ${typeLabel}: ${message}\n`;
+      try {
+        fs.writeSync(this.readableLogFd, formatted);
+      } catch {}
+    }
+
     if (this.config.writeJsonLog) {
       this.writeJsonEntry({
         timestamp: new Date().toISOString(),
@@ -769,6 +828,15 @@ export class EnhancedLogManager {
     this.writeToCleanLog(line);
     if (this.config.keepRawLogs) {
       this.writeToRawLog(line);
+    }
+
+    // Write to readable log (compact)
+    if (this.readableLogFd !== null) {
+      const ts = new Date().toISOString();
+      const formatted = `[${ts}] ━━━ ${title} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      try {
+        fs.writeSync(this.readableLogFd, formatted);
+      } catch {}
     }
   }
 
@@ -922,7 +990,8 @@ export class EnhancedLogManager {
 export function createLogManager(
   laneRunDir: string,
   laneName: string,
-  config?: Partial<EnhancedLogConfig>
+  config?: Partial<EnhancedLogConfig>,
+  onParsedMessage?: (msg: ParsedMessage) => void
 ): EnhancedLogManager {
   const session: LogSession = {
     id: `${laneName}-${Date.now().toString(36)}`,
@@ -930,7 +999,7 @@ export function createLogManager(
     startTime: Date.now(),
   };
   
-  return new EnhancedLogManager(laneRunDir, session, config);
+  return new EnhancedLogManager(laneRunDir, session, config, onParsedMessage);
 }
 
 /**

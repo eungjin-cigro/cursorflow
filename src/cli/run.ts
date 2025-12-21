@@ -16,6 +16,7 @@ interface RunOptions {
   executor: string | null;
   maxConcurrent: number | null;
   skipDoctor: boolean;
+  noGit: boolean;
   help: boolean;
 }
 
@@ -30,8 +31,13 @@ Options:
   --max-concurrent <num> Limit parallel agents (overrides config)
   --executor <type>      cursor-agent | cloud
   --skip-doctor          Skip environment checks (not recommended)
+  --no-git               Disable Git operations (worktree, push, commit)
   --dry-run              Show execution plan without starting agents
   --help, -h             Show help
+
+Examples:
+  cursorflow run _cursorflow/tasks
+  cursorflow run _cursorflow/tasks --no-git --skip-doctor
   `);
 }
 
@@ -46,6 +52,7 @@ function parseArgs(args: string[]): RunOptions {
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '0') || null : null,
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
+    noGit: args.includes('--no-git'),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -136,6 +143,7 @@ async function run(args: string[]): Promise<void> {
       maxConcurrentLanes: options.maxConcurrent || config.maxConcurrentLanes,
       webhooks: config.webhooks || [],
       enhancedLogging: config.enhancedLogging,
+      noGit: options.noGit,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

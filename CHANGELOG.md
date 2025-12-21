@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `keepRawLogs`: Store raw logs separately (default: true)
   - `writeJsonLog`: Generate structured JSON logs (default: true)
   - `timestampFormat`: 'iso' | 'relative' | 'short' (default: 'iso')
+- **Full Lifecycle Integration Test**: Added `scripts/test-real-cursor-lifecycle.sh` (and `npm run test:lifecycle`) to verify end-to-end orchestration, result verification, and resource cleanup.
+- **Enhanced Log Customization**: Added `agentOutputFormat` to `cursorflow.config.js` to control `cursor-agent` output format (defaults to `stream-json`).
+- **Readable Logs by Default**: `cursorflow logs` now defaults to showing parsed, human-readable AI outputs for better visibility.
 - **Event System**: New `events.ts` module for structured event handling
 - **Webhook Support**: New `webhook.ts` for external integrations
 

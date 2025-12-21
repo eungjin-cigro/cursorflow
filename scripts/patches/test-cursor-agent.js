@@ -81,7 +81,7 @@ const workspace = process.cwd();
 
 const agentArgs = [
   '--print',
-  '--output-format', 'json',
+  '--output-format', 'stream-json',
   '--workspace', workspace,
   '--model', 'gemini-3-flash',
   '--resume', chatId,

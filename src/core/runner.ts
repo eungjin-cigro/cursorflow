@@ -175,7 +175,7 @@ export function validateTaskConfig(config: RunnerConfig): void {
 /**
  * Execute cursor-agent command with streaming and better error handling
  */
-export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention }: { 
+export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention, outputFormat }: { 
   workspaceDir: string; 
   chatId: string; 
   prompt: string; 
@@ -184,11 +184,14 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
   timeout?: number;
   /** Enable stdin piping for intervention feature (may cause buffering issues on some systems) */
   enableIntervention?: boolean;
+  /** Output format for cursor-agent (default: 'stream-json') */
+  outputFormat?: 'stream-json' | 'json' | 'plain';
 }): Promise<AgentSendResult> {
   // Use stream-json format for structured output with tool calls and results
+  const format = outputFormat || 'stream-json';
   const args = [
     '--print',
-    '--output-format', 'stream-json',
+    '--output-format', format,
     '--workspace', workspaceDir,
     ...(model ? ['--model', model] : []),
     '--resume', chatId,
@@ -426,33 +429,31 @@ export function extractDependencyRequest(text: string): { required: boolean; pla
 /**
  * Wrap prompt with dependency policy
  */
-export function wrapPromptForDependencyPolicy(prompt: string, policy: DependencyPolicy): string {
-  if (policy.allowDependencyChange && !policy.lockfileReadOnly) {
+export function wrapPromptForDependencyPolicy(prompt: string, policy: DependencyPolicy, options: { noGit?: boolean } = {}): string {
+  const { noGit = false } = options;
+  
+  if (policy.allowDependencyChange && !policy.lockfileReadOnly && !noGit) {
     return prompt;
   }
   
-  return `# Dependency Policy (MUST FOLLOW)
-
-You are running in a restricted lane.
-
-- allowDependencyChange: ${policy.allowDependencyChange}
-- lockfileReadOnly: ${policy.lockfileReadOnly}
-
-Rules:
-- BEFORE making any code changes, decide whether dependency changes are required.
-- If dependency changes are required, DO NOT change any files. Instead reply with:
-
-DEPENDENCY_CHANGE_REQUIRED
-\`\`\`json
-{ "reason": "...", "changes": [...], "commands": ["pnpm add ..."], "notes": "..." }
-\`\`\`
-
-Then STOP.
-- If dependency changes are NOT required, proceed normally.
-
----
-
-${prompt}`;
+  let rules = '# Dependency Policy (MUST FOLLOW)\n\nYou are running in a restricted lane.\n\n';
+  
+  rules += `- allowDependencyChange: ${policy.allowDependencyChange}\n`;
+  rules += `- lockfileReadOnly: ${policy.lockfileReadOnly}\n`;
+  
+  if (noGit) {
+    rules += '- NO_GIT_MODE: Git is disabled. DO NOT run any git commands (commit, push, etc.). Just edit files.\n';
+  }
+  
+  rules += '\nRules:\n';
+  rules += '- BEFORE making any code changes, decide whether dependency changes are required.\n';
+  rules += '- If dependency changes are required, DO NOT change any files. Instead reply with:\n\n';
+  rules += 'DEPENDENCY_CHANGE_REQUIRED\n';
+  rules += '```json\n{ "reason": "...", "changes": [...], "commands": ["pnpm add ..."], "notes": "..." }\n```\n\n';
+  rules += 'Then STOP.\n';
+  rules += '- If dependency changes are NOT required, proceed normally.\n';
+  
+  return `${rules}\n---\n\n${prompt}`;
 }
 
 /**
@@ -491,9 +492,11 @@ export async function runTask({
   config,
   index,
   worktreeDir,
+  pipelineBranch,
   taskBranch,
   chatId,
   runDir,
+  noGit = false,
 }: {
   task: Task;
   config: RunnerConfig;
@@ -503,13 +506,18 @@ export async function runTask({
   taskBranch: string;
   chatId: string;
   runDir: string;
+  noGit?: boolean;
 }): Promise<TaskExecutionResult> {
   const model = task.model || config.model || 'sonnet-4.5';
   const convoPath = path.join(runDir, 'conversation.jsonl');
   
   logger.section(`[${index + 1}/${config.tasks.length}] ${task.name}`);
   logger.info(`Model: ${model}`);
-  logger.info(`Branch: ${taskBranch}`);
+  if (noGit) {
+    logger.info('🚫 noGit mode: skipping branch operations');
+  } else {
+    logger.info(`Branch: ${taskBranch}`);
+  }
   
   events.emit('task.started', {
     taskName: task.name,
@@ -517,14 +525,16 @@ export async function runTask({
     index,
   });
 
-  // Checkout task branch
-  git.runGit(['checkout', '-B', taskBranch], { cwd: worktreeDir });
+  // Checkout task branch (skip in noGit mode)
+  if (!noGit) {
+    git.runGit(['checkout', '-B', taskBranch], { cwd: worktreeDir });
+  }
   
   // Apply dependency permissions
   applyDependencyFilePermissions(worktreeDir, config.dependencyPolicy);
   
   // Run prompt
-  const prompt1 = wrapPromptForDependencyPolicy(task.prompt, config.dependencyPolicy);
+  const prompt1 = wrapPromptForDependencyPolicy(task.prompt, config.dependencyPolicy, { noGit });
   
   appendLog(convoPath, createConversationEntry('user', prompt1, {
     task: task.name,
@@ -547,6 +557,7 @@ export async function runTask({
     signalDir: runDir,
     timeout: config.timeout,
     enableIntervention: config.enableIntervention,
+    outputFormat: config.agentOutputFormat,
   });
   
   const duration = Date.now() - startTime;
@@ -588,8 +599,10 @@ export async function runTask({
     };
   }
   
-  // Push task branch
-  git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
+  // Push task branch (skip in noGit mode)
+  if (!noGit) {
+    git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
+  }
   
   events.emit('task.completed', {
     taskName: task.name,
@@ -607,8 +620,13 @@ export async function runTask({
 /**
  * Run all tasks in sequence
  */
-export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number } = {}): Promise<TaskExecutionResult[]> {
+export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; noGit?: boolean } = {}): Promise<TaskExecutionResult[]> {
   const startIndex = options.startIndex || 0;
+  const noGit = options.noGit || config.noGit || false;
+  
+  if (noGit) {
+    logger.info('🚫 Running in noGit mode - Git operations will be skipped');
+  }
   
   // Validate configuration before starting
   logger.info('Validating task configuration...');
@@ -648,7 +666,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   logger.success('✓ Cursor authentication OK');
   
-  const repoRoot = git.getRepoRoot();
+  // In noGit mode, we don't need repoRoot - use current directory
+  const repoRoot = noGit ? process.cwd() : git.getRepoRoot();
   
   // Load existing state if resuming
   const statePath = path.join(runDir, 'state.json');
@@ -659,7 +678,10 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   }
   
   const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}`;
-  const worktreeDir = state?.worktreeDir || path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch);
+  // In noGit mode, use a simple local directory instead of worktree
+  const worktreeDir = state?.worktreeDir || (noGit 
+    ? path.join(repoRoot, config.worktreeRoot || '_cursorflow/workdir', pipelineBranch.replace(/\//g, '-'))
+    : path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch));
   
   if (startIndex === 0) {
     logger.section('🚀 Starting Pipeline');
@@ -673,10 +695,16 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   // Create worktree only if starting fresh
   if (startIndex === 0 || !fs.existsSync(worktreeDir)) {
-    git.createWorktree(worktreeDir, pipelineBranch, { 
-      baseBranch: config.baseBranch || 'main',
-      cwd: repoRoot,
-    });
+    if (noGit) {
+      // In noGit mode, just create the directory
+      logger.info(`Creating work directory: ${worktreeDir}`);
+      fs.mkdirSync(worktreeDir, { recursive: true });
+    } else {
+      git.createWorktree(worktreeDir, pipelineBranch, { 
+        baseBranch: config.baseBranch || 'main',
+        cwd: repoRoot,
+      });
+    }
   }
   
   // Create chat
@@ -708,8 +736,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   saveState(statePath, state);
   
-  // Merge dependencies if any
-  if (startIndex === 0 && config.dependsOn && config.dependsOn.length > 0) {
+  // Merge dependencies if any (skip in noGit mode)
+  if (!noGit && startIndex === 0 && config.dependsOn && config.dependsOn.length > 0) {
     logger.section('🔗 Merging Dependencies');
     
     // The runDir for the lane is passed in. Dependencies are in ../<depName> relative to this runDir
@@ -756,6 +784,50 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     
     // Push the merged state
     git.push(pipelineBranch, { cwd: worktreeDir });
+  } else if (noGit && startIndex === 0 && config.dependsOn && config.dependsOn.length > 0) {
+    logger.info('⚠️ Dependencies specified but Git is disabled - copying files instead of merging');
+    
+    // The runDir for the lane is passed in. Dependencies are in ../<depName> relative to this runDir
+    const lanesRoot = path.dirname(runDir);
+    
+    for (const depName of config.dependsOn) {
+      const depRunDir = path.join(lanesRoot, depName);
+      const depStatePath = path.join(depRunDir, 'state.json');
+      
+      if (!fs.existsSync(depStatePath)) {
+        continue;
+      }
+      
+      try {
+        const depState = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
+        if (depState.worktreeDir && fs.existsSync(depState.worktreeDir)) {
+          logger.info(`Copying files from dependency ${depName}: ${depState.worktreeDir} → ${worktreeDir}`);
+          
+          // Use a simple recursive copy (excluding Git and internal dirs)
+          const copyFiles = (src: string, dest: string) => {
+            if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+            const entries = fs.readdirSync(src, { withFileTypes: true });
+            
+            for (const entry of entries) {
+              if (entry.name === '.git' || entry.name === '_cursorflow' || entry.name === 'node_modules') continue;
+              
+              const srcPath = path.join(src, entry.name);
+              const destPath = path.join(dest, entry.name);
+              
+              if (entry.isDirectory()) {
+                copyFiles(srcPath, destPath);
+              } else {
+                fs.copyFileSync(srcPath, destPath);
+              }
+            }
+          };
+          
+          copyFiles(depState.worktreeDir, worktreeDir);
+        }
+      } catch (e) {
+        logger.error(`Failed to copy dependency ${depName}: ${e}`);
+      }
+    }
   }
   
   // Run tasks
@@ -774,6 +846,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       taskBranch,
       chatId,
       runDir,
+      noGit,
     });
     
     results.push(result);
@@ -807,23 +880,62 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       process.exit(1);
     }
     
-    // Merge into pipeline
-    logger.info(`Merging ${taskBranch} → ${pipelineBranch}`);
-    git.merge(taskBranch, { cwd: worktreeDir, noFf: true });
+    // Merge into pipeline (skip in noGit mode)
+    if (!noGit) {
+      logger.info(`Merging ${taskBranch} → ${pipelineBranch}`);
+      git.merge(taskBranch, { cwd: worktreeDir, noFf: true });
 
-    // Log changed files
-    const stats = git.getLastOperationStats(worktreeDir);
-    if (stats) {
-      logger.info('Changed files:\n' + stats);
+      // Log changed files
+      const stats = git.getLastOperationStats(worktreeDir);
+      if (stats) {
+        logger.info('Changed files:\n' + stats);
+      }
+
+      git.push(pipelineBranch, { cwd: worktreeDir });
+    } else {
+      logger.info(`✓ Task ${task.name} completed (noGit mode - no branch operations)`);
     }
-
-    git.push(pipelineBranch, { cwd: worktreeDir });
   }
   
   // Complete
   state.status = 'completed';
   state.endTime = Date.now();
   saveState(statePath, state);
+  
+  // Log final file summary
+  if (noGit) {
+    const getFileSummary = (dir: string): { files: number; dirs: number } => {
+      let stats = { files: 0, dirs: 0 };
+      if (!fs.existsSync(dir)) return stats;
+      
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name === '.git' || entry.name === '_cursorflow' || entry.name === 'node_modules') continue;
+        
+        if (entry.isDirectory()) {
+          stats.dirs++;
+          const sub = getFileSummary(path.join(dir, entry.name));
+          stats.files += sub.files;
+          stats.dirs += sub.dirs;
+        } else {
+          stats.files++;
+        }
+      }
+      return stats;
+    };
+    
+    const summary = getFileSummary(worktreeDir);
+    logger.info(`Final Workspace Summary (noGit): ${summary.files} files, ${summary.dirs} directories created/modified`);
+  } else {
+    try {
+      const stats = git.runGit(['diff', '--stat', config.baseBranch || 'main', pipelineBranch], { cwd: repoRoot, silent: true });
+      if (stats) {
+        logger.info('Final Workspace Summary (Git):\n' + stats);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
   
   logger.success('All tasks completed!');
   return results;
@@ -844,6 +956,7 @@ if (require.main === module) {
   const runDirIdx = args.indexOf('--run-dir');
   const startIdxIdx = args.indexOf('--start-index');
   const pipelineBranchIdx = args.indexOf('--pipeline-branch');
+  const noGit = args.includes('--no-git');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
   const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
@@ -856,9 +969,10 @@ if (require.main === module) {
   
   events.setRunId(runId);
 
-  // Load global config to register webhooks in this process
+  // Load global config for defaults and webhooks
+  let globalConfig;
   try {
-    const globalConfig = loadConfig();
+    globalConfig = loadConfig();
     if (globalConfig.webhooks) {
       registerWebhooks(globalConfig.webhooks);
     }
@@ -883,14 +997,17 @@ if (require.main === module) {
     process.exit(1);
   }
   
-  // Add dependency policy defaults
+  // Add defaults from global config or hardcoded
   config.dependencyPolicy = config.dependencyPolicy || {
-    allowDependencyChange: false,
-    lockfileReadOnly: true,
+    allowDependencyChange: globalConfig?.allowDependencyChange ?? false,
+    lockfileReadOnly: globalConfig?.lockfileReadOnly ?? true,
   };
   
+  // Add agent output format default
+  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'stream-json';
+  
   // Run tasks
-  runTasks(tasksFile, config, runDir, { startIndex })
+  runTasks(tasksFile, config, runDir, { startIndex, noGit })
     .then(() => {
       process.exit(0);
     })

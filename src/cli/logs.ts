@@ -45,15 +45,15 @@ Options:
   --follow, -f           Follow log output in real-time
   --filter <pattern>     Filter entries by regex pattern
   --level <level>        Filter by log level: stdout, stderr, info, error, debug
-  --clean                Show clean logs without ANSI codes (default)
-  --raw                  Show raw logs with ANSI codes
-  --readable, -r         Show readable log (parsed streaming output)
+  --readable, -r         Show readable log (parsed AI output) (default)
+  --clean                Show clean terminal logs without ANSI codes
+  --raw                  Show raw terminal logs with ANSI codes
   --help, -h             Show help
 
 Examples:
   cursorflow logs                              # View latest run logs summary
-  cursorflow logs --lane api-setup             # View specific lane logs
-  cursorflow logs --lane api-setup --readable  # View readable parsed log
+  cursorflow logs --lane api-setup             # View readable parsed log (default)
+  cursorflow logs --lane api-setup --clean     # View clean terminal logs
   cursorflow logs --all                        # View all lanes merged by time
   cursorflow logs --all --follow               # Follow all lanes in real-time
   cursorflow logs --all --format json          # Export all lanes as JSON
@@ -81,6 +81,10 @@ function parseArgs(args: string[]): LogsOptions {
     return true;
   });
 
+  const raw = args.includes('--raw');
+  const clean = args.includes('--clean');
+  const readable = args.includes('--readable') || args.includes('-r');
+
   return {
     runDir,
     lane: laneIdx >= 0 ? args[laneIdx + 1] : undefined,
@@ -91,9 +95,10 @@ function parseArgs(args: string[]): LogsOptions {
     follow: args.includes('--follow') || args.includes('-f'),
     filter: filterIdx >= 0 ? args[filterIdx + 1] : undefined,
     level: levelIdx >= 0 ? args[levelIdx + 1] : undefined,
-    clean: !args.includes('--raw') && !args.includes('--readable') && !args.includes('-r'),
-    raw: args.includes('--raw'),
-    readable: args.includes('--readable') || args.includes('-r'),
+    raw,
+    clean,
+    // Default to readable if no other format is specified
+    readable: readable || (!raw && !clean),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -136,20 +141,23 @@ function displayTextLogs(
   options: LogsOptions
 ): void {
   let logFile: string;
-  if (options.readable) {
-    logFile = path.join(laneDir, 'terminal-readable.log');
-  } else if (options.raw) {
-    logFile = path.join(laneDir, 'terminal-raw.log');
+  const readableLog = path.join(laneDir, 'terminal-readable.log');
+  const rawLog = path.join(laneDir, 'terminal-raw.log');
+  const cleanLog = path.join(laneDir, 'terminal.log');
+
+  if (options.raw) {
+    logFile = rawLog;
+  } else if (options.clean) {
+    logFile = cleanLog;
+  } else if (options.readable && fs.existsSync(readableLog)) {
+    logFile = readableLog;
   } else {
-    logFile = path.join(laneDir, 'terminal.log');
+    // Default or fallback to clean log
+    logFile = cleanLog;
   }
   
   if (!fs.existsSync(logFile)) {
-    if (options.readable) {
-      console.log('Readable log not found. This log is only available for runs with streaming output enabled.');
-    } else {
-      console.log('No log file found.');
-    }
+    console.log('No log file found.');
     return;
   }
   
@@ -167,8 +175,8 @@ function displayTextLogs(
     lines = lines.slice(-options.tail);
   }
   
-  // Clean ANSI if needed (for clean mode)
-  if (options.clean && !options.raw) {
+  // Clean ANSI if needed (for clean mode or default fallback)
+  if (!options.raw) {
     lines = lines.map(line => stripAnsi(line));
   }
   
@@ -628,12 +636,19 @@ function escapeHtml(text: string): string {
  */
 function followLogs(laneDir: string, options: LogsOptions): void {
   let logFile: string;
-  if (options.readable) {
-    logFile = path.join(laneDir, 'terminal-readable.log');
-  } else if (options.raw) {
-    logFile = path.join(laneDir, 'terminal-raw.log');
+  const readableLog = path.join(laneDir, 'terminal-readable.log');
+  const rawLog = path.join(laneDir, 'terminal-raw.log');
+  const cleanLog = path.join(laneDir, 'terminal.log');
+
+  if (options.raw) {
+    logFile = rawLog;
+  } else if (options.clean) {
+    logFile = cleanLog;
+  } else if (options.readable && fs.existsSync(readableLog)) {
+    logFile = readableLog;
   } else {
-    logFile = path.join(laneDir, 'terminal.log');
+    // Default or fallback to clean log
+    logFile = cleanLog;
   }
   
   if (!fs.existsSync(logFile)) {
@@ -669,8 +684,8 @@ function followLogs(laneDir: string, options: LogsOptions): void {
           content = lines.filter(line => regex.test(line)).join('\n');
         }
         
-        // Clean ANSI if needed
-        if (options.clean && !options.raw) {
+        // Clean ANSI if needed (unless raw mode)
+        if (!options.raw) {
           content = stripAnsi(content);
         }
         
@@ -809,7 +824,7 @@ async function logs(args: string[]): Promise<void> {
   // If no lane specified, show summary
   if (!options.lane) {
     displaySummary(runDir);
-    console.log(`${logger.COLORS.gray}Use --lane <name> to view logs, --readable for parsed AI output, or --all to view all lanes merged${logger.COLORS.reset}`);
+    console.log(`${logger.COLORS.gray}Use --lane <name> to view logs (default: readable), --clean for terminal logs, or --all to view all lanes merged${logger.COLORS.reset}`);
     return;
   }
   
