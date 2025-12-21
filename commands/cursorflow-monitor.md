@@ -1,131 +1,89 @@
 # CursorFlow Monitor
 
 ## Overview
-Monitor lane execution status. Track progress in real time and inspect logs.
+The `cursorflow monitor` command provides a powerful, interactive terminal-based dashboard to track the execution status of all lanes in real-time. It allows you to visualize dependencies, stream live terminal output, and intervene in running tasks.
 
 ## Steps
 
-1. **Monitor in real time**
+1. **Launch the interactive dashboard**
    ```bash
-   cursorflow monitor --watch
+   # Monitor the most recent run
+   cursorflow monitor latest
    ```
 
-2. **Monitor a specific run**
+2. **Dashboard Controls**
+   - **Navigation**: Use `↑` and `↓` to move between lanes.
+   - **Details**: Press `→` or `Enter` to see task progress, conversation history, and more.
+   - **Flow View**: Press `F` (from list view) to see the Directed Acyclic Graph (DAG) of task dependencies.
+   - **Live Terminal**: Press `T` (from lane detail) to stream the real-time output of the AI agent.
+   - **Intervention**: Press `I` (from lane detail) to send a manual prompt to a running agent.
+   - **Kill Process**: Press `K` (from lane detail) to forcefully terminate a stuck agent.
+   - **Back**: Use `←` or `Esc` to navigate back to previous screens.
+   - **Quit**: Press `Q` to exit.
+
+3. **Monitor a specific run directory**
    ```bash
-   cursorflow monitor _cursorflow/logs/runs/my-run/
+   cursorflow monitor _cursorflow/logs/runs/run-2025-12-21T10-00-00
    ```
 
-3. **Check status**
+## Key Views
 
-   Lane status values:
-   - pending: waiting
-   - running: in progress
-   - completed: finished
-   - failed: failed
-   - blocked_dependency: waiting on dependencies
+### List View
+Shows an overview of all lanes, their status (pending, running, completed, failed, blocked), progress percentage, elapsed time, and "Next Action" (what it's waiting for or what it unlocks).
 
-4. **Inspect logs**
+### Dependency Flow View
+A visual map of how tasks relate to each other. It shows which lanes must finish before others can start.
 
-   Per-lane log files:
-   - `state.json`: current status
-   - `conversation.jsonl`: agent conversation
-   - `git-operations.jsonl`: Git activity
-   - `events.jsonl`: event log
+### Lane Detail View
+Displays:
+- **Status & Progress**: Current task index and total tasks.
+- **PID**: The process ID of the running `cursor-agent`.
+- **Live Terminal (Preview)**: The last few lines of the agent's output.
+- **Conversation History**: A scrollable list of messages between the system and the agent. Select a message to see its full content.
 
-## Options
+### Full Terminal View
+A dedicated view that acts like `tail -f` for the agent's log. You can scroll up/down through the history using `↑` and `↓`.
 
-| Option | Description |
-|------|------|
-| `--watch` | Refresh in real time (every 2 seconds) |
-| `--interval <sec>` | Refresh interval in seconds |
-| `--json` | Output in JSON format |
-
-## Examples
-
-### Monitor the latest run
-```bash
-cursorflow monitor
+### Heartbeat Logs
+During execution, CursorFlow outputs heartbeat messages every 30 seconds:
+```
+⏱ Heartbeat: 30s elapsed, 1234 bytes received
+⏱ Heartbeat: 60s elapsed, 5678 bytes received
 ```
 
-### Real-time monitoring (5-second interval)
-```bash
-cursorflow monitor --watch --interval 5
-```
-
-### JSON output
-```bash
-cursorflow monitor --json | jq
-```
-
-## Sample output
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📡 Lane Status Monitoring
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Run: 01-dashboard-2025-12-19T18-30-00
-
-- 01-dashboard: running (2/3)
-- 02-client: completed (3/3)
-- 03-projects: blocked_dependency (1/2)
-```
-
-## Viewing logs
-
-### Conversation history
-```bash
-cat _cursorflow/logs/runs/01-dashboard-xxx/conversation.jsonl | jq
-```
-
-### Git activity log
-```bash
-cat _cursorflow/logs/runs/01-dashboard-xxx/git-operations.jsonl | jq
-```
-
-### Event log
-```bash
-cat _cursorflow/logs/runs/01-dashboard-xxx/events.jsonl | jq
-```
-
-## Status analysis
-
-### Progress per lane
-```bash
-# Inspect state.json for all lanes
-for state in _cursorflow/logs/runs/*/lanes/*/state.json; do
-  echo "$(dirname $state):"
-  jq '.status, .currentTaskIndex, .totalTasks' $state
-done
-```
-
-### Find failed lanes
-```bash
-# Lanes where status is failed
-find _cursorflow/logs/runs -name "state.json" -exec sh -c \
-  'jq -r "select(.status==\"failed\") | .label" {}' \;
-```
-
-## Checklist
-- [ ] Are lane states healthy?
-- [ ] Did any errors occur?
-- [ ] Have the logs been reviewed?
-- [ ] Are any lanes blocked?
-- [ ] Are there dependency issues?
+This helps you:
+- Track progress of long-running tasks
+- Identify stalled or hanging processes (0 bytes received)
+- Estimate completion time
 
 ## Troubleshooting
 
-### Lane is stuck
-1. Check status in `state.json`.
-2. Inspect the last conversation in `conversation.jsonl`.
-3. Resume if needed with `cursorflow resume <lane>`.
+### Lane is stuck (Thinking too long)
+1. Enter the lane detail view.
+2. Check the **PID** to ensure the process is still alive.
+3. Check the **Live Terminal** to see if it's producing output.
+4. If it's truly stuck, press `K` to kill the process and then use `cursorflow resume` to restart it.
 
-### Logs are missing
-1. Confirm the run actually started.
-2. Check log directory permissions.
-3. Verify the `logsDir` path in the config file.
+### Intervention needed
+If the agent is making a mistake or needs clarification:
+
+> ⚠️ **Note**: Intervention requires `enableIntervention: true` in your task configuration!
+
+1. Enter the lane detail view.
+2. Press `I`.
+3. Type your instructions (e.g., "Don't change the package.json, just fix the bug in utils.ts").
+4. Press `Enter` to send.
+
+If `enableIntervention` is enabled in your task JSON, the agent receives this as its next prompt. If not, the message is logged but not injected.
+
+**To enable intervention in your task JSON:**
+```json
+{
+  "enableIntervention": true,
+  "tasks": [...]
+}
+```
 
 ## Next steps
-1. If you find issues, resume with `cursorflow resume`.
-2. Review PRs for completed lanes.
-3. Analyze logs to identify improvements.
+1. Once all lanes reach `completed`, you can review the generated branches.
+2. Use `cursorflow clean` to remove temporary worktrees after you've merged the changes.

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2025-12-21
+
+### Added
+- **Configurable Timeout**: Support for `timeout` field in task JSON to handle complex tasks.
+- **Improved Stdio Handling**: Optimized child process spawning with `ignore` stdin by default to prevent buffering issues.
+- **Task Validation**: Robust pre-flight validation of task JSON configurations with helpful error messages.
+- **Heartbeat Monitoring**: Real-time progress logging (elapsed time and bytes received) for long-running tasks.
+- **Diagnostic Tools**: Added `scripts/patches/test-cursor-agent.js` for direct agent testing and `_cursorflow/tasks/minimal-test/` for isolation.
+- **Enhanced Documentation**: New `docs/API.md` and `docs/TROUBLESHOOTING.md` with detailed configuration guides.
+
+### Fixed
+- **Intervention Stability**: Redesigned intervention to be optional (`enableIntervention: true`) to ensure maximum stability for default runs.
+- **Environment Safety**: Smarter `NODE_OPTIONS` handling that preserves user settings while removing problematic debugging flags.
+
+## [0.1.8] - 2025-12-21
+
+### Added
+- **Interactive Dashboard**: Full-screen interactive terminal monitor with lane navigation.
+- **Live Terminal Streaming**: Real-time streaming of `cursor-agent` output with scrollback support.
+- **Human Intervention**: UI for sending manual prompts to running agents via `I` key.
+- **PID Control**: Tracking of process IDs and force-kill (`K` key) functionality for stuck agents.
+- **Improved Visualization**: Color-coded logs and "Next Action" status in monitor.
+
+## [0.1.7] - 2025-12-21
+
+### Added
+- **Task Dependencies**: Implemented DAG (Directed Acyclic Graph) scheduler for complex workflows.
+- **Automatic Branch Merging**: Dependent lanes now automatically merge their parents' branches before starting.
+- **Deadlock Detection**: Prevention of circular task dependencies at startup.
+- **Concurrency Control**: `maxConcurrentLanes` support in orchestrator.
+
 ## [0.1.6] - 2025-12-21
 
 ### Added

@@ -46,9 +46,15 @@ Prepare task files for a new feature by gathering requirements and generating la
      "branchPrefix": "<feature>/<lane>-",
      "executor": "cursor-agent",
      "autoCreatePr": false,
-     "allowDependencyChange": false,
-     "lockfileReadOnly": true,
      "pollInterval": 60,
+     
+     "timeout": 300000,
+     "enableIntervention": false,
+
+     "dependencyPolicy": {
+       "allowDependencyChange": false,
+       "lockfileReadOnly": true
+     },
 
      "laneNumber": 1,
      "devPort": 3001,
@@ -69,6 +75,19 @@ Prepare task files for a new feature by gathering requirements and generating la
      ]
    }
    ```
+
+   **Key Configuration Options:**
+
+   | Option | Type | Default | Description |
+   |--------|------|---------|-------------|
+   | `timeout` | number | 300000 | Task timeout in milliseconds |
+   | `enableIntervention` | boolean | false | Enable stdin piping for intervention |
+   | `dependsOn` | string[] | [] | Lane dependencies |
+
+   **Timeout Guidelines:**
+   - Simple tasks: `60000` (1 min)
+   - Medium tasks: `300000` (5 min) - default
+   - Complex tasks: `600000` (10 min)
 
 4. **Model selection guide**
 
@@ -121,12 +140,16 @@ cursorflow prepare MyFeature --template ./my-template.json
 - [ ] Have dependency changes been confirmed?
 - [ ] Are the acceptance criteria clear?
 - [ ] Have the generated files been reviewed?
+- [ ] Are task names valid (letters, numbers, `-`, `_` only)?
+- [ ] Is the timeout appropriate for task complexity?
 
 ## Notes
 1. **Model names**: Use only valid models (check with the `models` command).
 2. **Paths**: Always create tasks under `_cursorflow/tasks/`.
 3. **Branch prefix**: Make it unique to avoid collisions.
 4. **devPort**: Use unique ports per lane (3001, 3002, ...).
+5. **Task names**: Must only contain letters, numbers, `-`, `_`. No spaces or special characters.
+6. **Timeout**: Set based on task complexity. See timeout guidelines above.
 
 ## Next steps
 1. Tailor the generated JSON files to the project.

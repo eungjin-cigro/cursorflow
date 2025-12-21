@@ -50,6 +50,14 @@ export interface RunnerConfig {
   reviewModel?: string;
   maxReviewIterations?: number;
   acceptanceCriteria?: string[];
+  /** Task execution timeout in milliseconds. Default: 300000 (5 minutes) */
+  timeout?: number;
+  /** 
+   * Enable intervention feature (stdin piping for message injection).
+   * Warning: May cause stdout buffering issues on some systems.
+   * Default: false
+   */
+  enableIntervention?: boolean;
 }
 
 export interface DependencyRequestPlan {
@@ -111,6 +119,7 @@ export interface LaneState {
   updatedAt?: number;
   tasksFile?: string; // Original tasks file path
   dependsOn?: string[];
+  pid?: number;
 }
 
 export interface ConversationEntry {

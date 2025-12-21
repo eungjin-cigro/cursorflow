@@ -44,6 +44,7 @@ class InteractiveMonitor {
   private terminalScrollOffset: number = 0;
   private lastTerminalTotalLines: number = 0;
   private interventionInput: string = '';
+  private notification: { message: string; type: 'info' | 'error' | 'success'; time: number } | null = null;
 
   constructor(runDir: string, interval: number) {
     this.runDir = runDir;
@@ -154,6 +155,9 @@ class InteractiveMonitor {
         this.view = View.TERMINAL;
         this.terminalScrollOffset = 0;
         this.render();
+        break;
+      case 'k':
+        this.killLane();
         break;
       case 'i':
         const lane = this.lanes.find(l => l.name === this.selectedLaneName);
@@ -304,9 +308,42 @@ class InteractiveMonitor {
     this.render();
   }
 
+  private killLane() {
+    if (!this.selectedLaneName) return;
+    const lane = this.lanes.find(l => l.name === this.selectedLaneName);
+    if (!lane) return;
+
+    const status = this.getLaneStatus(lane.path, lane.name);
+    if (status.pid && status.status === 'running') {
+      try {
+        process.kill(status.pid, 'SIGTERM');
+        this.showNotification(`Sent SIGTERM to PID ${status.pid}`, 'success');
+      } catch (e) {
+        this.showNotification(`Failed to kill PID ${status.pid}`, 'error');
+      }
+    } else {
+      this.showNotification(`No running process found for ${this.selectedLaneName}`, 'info');
+    }
+  }
+
+  private showNotification(message: string, type: 'info' | 'error' | 'success') {
+    this.notification = { message, type, time: Date.now() };
+    this.render();
+  }
+
   private render() {
     // Clear screen
     process.stdout.write('\x1Bc');
+    
+    // Clear old notifications
+    if (this.notification && Date.now() - this.notification.time > 3000) {
+      this.notification = null;
+    }
+
+    if (this.notification) {
+      const color = this.notification.type === 'error' ? '\x1b[31m' : this.notification.type === 'success' ? '\x1b[32m' : '\x1b[36m';
+      console.log(`${color}🔔 ${this.notification.message}\x1b[0m\n`);
+    }
     
     switch (this.view) {
       case View.LIST:
@@ -413,6 +450,7 @@ class InteractiveMonitor {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     process.stdout.write(`  Status:    ${this.getStatusIcon(status.status)} ${status.status}\n`);
+    process.stdout.write(`  PID:       ${status.pid || '-'}\n`);
     process.stdout.write(`  Progress:  ${status.progress} (${status.currentTask}/${status.totalTasks} tasks)\n`);
     process.stdout.write(`  Time:      ${this.formatDuration(status.duration)}\n`);
     process.stdout.write(`  Branch:    ${status.pipelineBranch}\n`);
@@ -429,7 +467,7 @@ class InteractiveMonitor {
 
     console.log('\n💬 Conversation History (Select to see full details):');
     console.log('─'.repeat(80));
-    process.stdout.write('  [↑/↓] Browse | [→/Enter] Full Msg | [I] Intervene | [T] Live Terminal | [Esc/←] Back\n\n');
+    process.stdout.write('  [↑/↓] Browse | [→/Enter] Full Msg | [I] Intervene | [K] Kill | [T] Live Terminal | [Esc/←] Back\n\n');
 
     if (this.currentLogs.length === 0) {
       console.log('  (No messages yet)');
@@ -670,6 +708,7 @@ class InteractiveMonitor {
       dependsOn,
       duration,
       error: state.error,
+      pid: state.pid
     };
   }
 

@@ -9,360 +9,148 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
-## Key Features
+## 🚀 Key Features
 
-- 🚀 **Parallel execution**: Run multiple lanes concurrently with Git worktrees
-- 🔍 **Automatic review**: AI-powered code review with iterative feedback
-- 📝 **Detailed logging**: Capture conversations, commits, and Git operations
-- 🔀 **Dependency management**: Automatic dependency gating and resume support
-- 🎯 **Per-lane ports**: Unique dev server ports for each lane
-- 💻 **Cursor integration**: Manage workflows directly inside the IDE with custom commands
-- 🛠️ **Config-driven**: Flexible project-specific configuration
-- 🔒 **Security-first**: Multi-layer automated security scanning before deployment
+- ⚡ **Parallel Execution**: Run multiple AI agents concurrently using isolated Git worktrees.
+- 🔗 **Task Dependencies (DAG)**: Define complex workflows where tasks wait for and merge their dependencies automatically.
+- 📊 **Interactive Dashboard**: A powerful terminal-based monitor to track all lanes, progress, and dependencies in real-time.
+- 📺 **Live Terminal Streaming**: Watch the AI agent's output as it happens with scrollable history.
+- 🙋 **Human Intervention**: Send direct messages to running agents to guide them or fix issues on the fly (requires `enableIntervention: true`).
+- 🛡️ **PID Control**: Track and manage agent processes directly from the dashboard.
+- 🔍 **Automatic Review**: AI-powered code review with iterative feedback loops.
+- 🔀 **Smart Merging**: Automatically merge completed feature branches into subsequent dependent lanes.
+- 🔒 **Security-First**: Automated security scanning and dependency policy enforcement.
 
-## Quick Start
+## 🛠️ Quick Start
 
-### Install
+### 1. Install
 
 ```bash
-# npm
+# npm (recommended)
 npm install -g @litmers/cursorflow-orchestrator
-
-# pnpm (recommended)
-pnpm add -g @litmers/cursorflow-orchestrator
-
-# yarn
-yarn global add @litmers/cursorflow-orchestrator
 ```
 
-### Requirements
-
-- **Node.js** >= 18.0.0
-- **Git** with worktree support
-- **cursor-agent CLI**: `npm install -g @cursor/agent`
-
-### Initialize a project
+### 2. Initialize
 
 ```bash
 cd your-project
 cursorflow init --example
 ```
 
-This command:
-1. Creates the `cursorflow.config.js` config file
-2. Creates `_cursorflow/tasks/` and `_cursorflow/logs/` directories
-3. Installs Cursor IDE commands
-4. Generates example tasks when `--example` is provided
-
-### Run the example
+### 3. Run & Monitor
 
 ```bash
-# Run example tasks
+# Start orchestration
 cursorflow run _cursorflow/tasks/example/
 
-# Monitor from another terminal
-cursorflow monitor --watch
+# Open the interactive dashboard (highly recommended!)
+cursorflow monitor latest
 ```
 
-## 🧪 Testing CursorFlow
+## 🎮 Dashboard Controls
 
-A complete demo project is included for testing with real LLM execution.
+Within the `cursorflow monitor` dashboard:
+- `↑/↓`: Navigate between lanes or scroll through logs.
+- `→ / Enter`: Enter detailed lane view.
+- `← / Esc`: Go back.
+- `F`: Toggle **Dependency Flow** view.
+- `T`: Open **Live Terminal Streaming**.
+- `I`: **Intervene** (send a message to the agent).
+- `K`: **Kill** the current agent process.
+- `Q`: Quit monitor.
 
-### Quick Test
+## ⚙️ Configuration
 
-```bash
-# From the CursorFlow repository root
-./test-cursorflow.sh setup   # Verify prerequisites
-./test-cursorflow.sh run     # Run demo with LLM
-./test-cursorflow.sh watch   # Monitor in real-time
-./test-cursorflow.sh clean   # Clean up after test
-```
-
-### What Gets Tested
-
-- ✅ Task orchestration with 2 parallel lanes
-- ✅ Git worktree creation and management
-- ✅ Real LLM execution (Claude Sonnet 4.5 via cursor-agent)
-- ✅ Branch creation and commits
-- ✅ Real-time monitoring with status updates
-- ✅ Complete log capture (conversation + terminal)
-
-### Demo Tasks
-
-1. **create-utils**: Creates `src/utils.js` with utility functions
-2. **add-tests**: Creates `src/utils.test.js` with simple tests
-
-Each task runs ~1-2 minutes, demonstrating the full CursorFlow workflow.
-
-**See**: `test-projects/demo-project/README.md` for detailed documentation.
-
-## 📚 Examples
-
-Ready-to-use examples are included in the `examples/` directory.
-
-### Demo Project
-
-A complete example demonstrating CursorFlow's core features:
-
-```bash
-# Copy example tasks to your project
-cd your-project
-cursorflow init
-cp -r /path/to/cursorflow/examples/demo-project/_cursorflow/tasks/demo-test _cursorflow/tasks/
-
-# Run the demo
-cursorflow run _cursorflow/tasks/demo-test/
-
-# Monitor in real-time
-cursorflow monitor --watch
-```
-
-**Includes:**
-- 2 parallel tasks with real LLM execution
-- Complete documentation and setup instructions
-- Expected results and troubleshooting guide
-
-**See**: `examples/demo-project/README.md` for detailed instructions.
-
-**Browse more examples**: `examples/README.md`
-
-## Cursor IDE Integration
-
-CursorFlow ships custom commands that are available directly inside Cursor IDE.
-
-### Install commands
-
-```bash
-# Installed automatically during init
-cursorflow init
-
-# Or install manually
-npx cursorflow-setup
-```
-
-### Usage
-
-Type `/` in Cursor chat and use:
-
-- `/cursorflow-init` - initialize a project
-- `/cursorflow-prepare` - prepare tasks
-- `/cursorflow-run` - run orchestration
-- `/cursorflow-monitor` - monitor runs
-- `/cursorflow-clean` - clean resources
-- `/cursorflow-resume` - resume a lane
-- `/cursorflow-doctor` - verify environment
-- `/cursorflow-signal` - intervene in a lane
-- `/cursorflow-review` - configure or check reviews
-
-## CLI Commands
-
-### Init
-```bash
-cursorflow init [options]
-  --example          Create example tasks
-  --with-commands    Install Cursor commands (default: true)
-  --config-only      Generate config file only
-```
-
-### Prepare tasks
-```bash
-cursorflow prepare <feature> [options]
-  --lanes <number>   Number of lanes
-  --template <path>  Template file path
-```
-
-### Run
-```bash
-cursorflow run <tasks-dir> [options]
-  --dry-run          Show the execution plan only
-  --executor <type>  cursor-agent | cloud
-```
-
-### Monitor
-```bash
-cursorflow monitor [run-dir] [options]
-  --watch            Live monitoring
-  --interval <sec>   Refresh interval
-```
-
-### Clean
-```bash
-cursorflow clean <type> [options]
-  branches          Clean branches
-  worktrees         Clean worktrees
-  logs              Clean logs
-  all               Clean everything
-```
-
-### Resume
-```bash
-cursorflow resume <lane> [options]
-  --run-dir <path>   Specify run directory
-  --restart          Restart from task 1
-```
-
-### Doctor
-```bash
-cursorflow doctor [options]
-  --tasks-dir <path> Validate specific lane tasks
-  --json             Output in JSON format
-```
-
-### Signal (Intervention)
-```bash
-cursorflow signal <lane> <message>
-  --run-dir <path>   Specify run directory
-```
-
-## 🚀 Deployment & Updates
-
-### For Maintainers
-To release a new version to NPM:
-1. Ensure your working directory is clean on the `main` branch.
-2. Run the release script:
-   ```bash
-   ./scripts/release.sh [patch|minor|major]
-   ```
-3. The script will bump the version, update CHANGELOG, and push a tag to trigger GitHub Actions.
-
-### For Users
-To update to the latest version and refresh IDE commands:
-1. Update the package: `npm install -g @litmers/cursorflow-orchestrator`
-2. Refresh Cursor commands: `cursorflow-setup --force`
-
-## Configuration
-
-### Config file (cursorflow.config.js)
-
-```javascript
-module.exports = {
-  // Directories
-  tasksDir: '_cursorflow/tasks',
-  logsDir: '_cursorflow/logs',
-
-  // Git settings
-  baseBranch: 'main',
-  branchPrefix: 'feature/',
-
-  // Run settings
-  executor: 'cursor-agent', // 'cursor-agent' | 'cloud'
-  pollInterval: 60,
-
-  // Dependency management
-  allowDependencyChange: false,
-  lockfileReadOnly: true,
-
-  // Review settings
-  enableReview: true,
-  reviewModel: 'sonnet-4.5-thinking',
-  maxReviewIterations: 3,
-
-  // Default lane settings
-  defaultLaneConfig: {
-    devPort: 3001,
-    autoCreatePr: false,
-  },
-
-  // Logging
-  logLevel: 'info',
-  verboseGit: false,
-};
-```
-
-### Task file (JSON)
+### Task Configuration Schema
 
 ```json
 {
-  "repository": "https://github.com/your-org/your-repo",
   "baseBranch": "main",
-  "branchPrefix": "feature/my-",
-  "executor": "cursor-agent",
-  "laneNumber": 1,
-  "devPort": 3001,
-  "enableReview": true,
+  "branchPrefix": "cursorflow/feature-",
+  "model": "sonnet-4.5",
+  "timeout": 300000,
+  "enableIntervention": false,
+  "dependsOn": ["other-lane"],
+  "dependencyPolicy": {
+    "allowDependencyChange": false,
+    "lockfileReadOnly": true
+  },
   "tasks": [
     {
-      "name": "implement",
-      "model": "sonnet-4.5",
-      "acceptanceCriteria": [
-        "No build errors",
-        "Key features implemented"
-      ],
-      "prompt": "Implementation instructions..."
+      "name": "implement-feature",
+      "prompt": "Implement the user authentication..."
     }
   ]
 }
 ```
 
-## Usage Examples
+### Key Options
 
-### Single feature development
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | number | 300000 | Task timeout in milliseconds (5 min default) |
+| `enableIntervention` | boolean | false | Enable stdin piping for intervention |
+| `model` | string | "sonnet-4.5" | AI model to use |
+| `dependsOn` | string[] | [] | Lane dependencies |
+
+### Timeout Configuration
+
+Set custom timeouts based on task complexity:
+
+```json
+{
+  "timeout": 60000,
+  "tasks": [{ "name": "simple-task", "prompt": "..." }]
+}
+```
+
+- **Simple tasks**: `60000` (1 minute)
+- **Medium tasks**: `300000` (5 minutes) - default
+- **Complex tasks**: `600000` (10 minutes)
+
+### Task Validation
+
+CursorFlow automatically validates your task configuration before execution:
+
+- ✅ Required `name` and `prompt` fields
+- ✅ Valid task name format (letters, numbers, `-`, `_` only)
+- ✅ Proper timeout values
+- ✅ Helpful error messages with fix suggestions
+
+### Progress Monitoring (Heartbeat)
+
+During execution, CursorFlow logs progress every 30 seconds:
+
+```
+⏱ Heartbeat: 30s elapsed, 1234 bytes received
+⏱ Heartbeat: 60s elapsed, 5678 bytes received
+```
+
+## 🔗 Task Dependencies
+
+You can define dependencies between lanes in your task JSON files. Dependent lanes will wait for their parents to complete and then automatically merge the parent's work before starting.
+
+```json
+{
+  "name": "api-implementation",
+  "dependsOn": ["database-schema", "common-utils"],
+  "tasks": [ ... ]
+}
+```
+
+## 🧪 Advanced Testing
+
+A complete test suite for dependency orchestration is included.
 
 ```bash
-# 1. Prepare tasks
-cursorflow prepare AddUserAuth --lanes 1
+# Run a complex dependency test (6 interdependent lanes)
+cursorflow run test-projects/advanced-orchestration/_cursorflow/tasks/full-stack/
 
-# 2. Edit the task JSON
-# _cursorflow/tasks/2512191830_AddUserAuth/01-task.json
-
-# 3. Run
-cursorflow run _cursorflow/tasks/2512191830_AddUserAuth/
-
-# 4. Monitor
-cursorflow monitor --watch
+# Monitor the flow
+cursorflow monitor latest
 ```
 
-### Multi-domain parallel development
-
-```bash
-# 1. Prepare tasks (5 lanes)
-cursorflow prepare AdminDashboard --lanes 5
-
-# 2. Configure each lane
-# 01-dashboard.json, 02-clients.json, ...
-
-# 3. Run in parallel
-cursorflow run _cursorflow/tasks/2512191830_AdminDashboard/
-
-# 4. Live monitor
-cursorflow monitor --watch --interval 5
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    CursorFlow CLI                       │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-        ┌──────────┴──────────┐
-        │                     │
-   ┌────▼────┐          ┌────▼────┐
-   │ Config  │          │  Core   │
-   │ System  │          │ Engine  │
-   └────┬────┘          └────┬────┘
-        │                    │
-        │         ┌──────────┼──────────┐
-        │         │          │          │
-   ┌────▼────┐ ┌─▼──┐  ┌────▼────┐  ┌─▼─────┐
-   │   Git   │ │Run │  │ Monitor │  │Review │
-   │ Utils   │ │ner │  │         │  │       │
-   └─────────┘ └─┬──┘  └─────────┘  └───────┘
-                 │
-        ┌────────┼────────┐
-        │        │        │
-   ┌────▼───┐ ┌─▼──────┐ │
-   │Worktree│ │ Cursor │ │
-   │        │ │ Agent  │ │
-   └────────┘ └────────┘ │
-                          │
-                     ┌────▼────┐
-                     │  Logs   │
-                     │  State  │
-                     └─────────┘
-```
-
-## Documentation
+## 📚 Documentation
 
 - [📖 User Guide](docs/GUIDE.md) - Detailed usage instructions
 - [📋 API Reference](docs/API.md) - CLI and config API
@@ -371,35 +159,23 @@ cursorflow monitor --watch --interval 5
 - [🔧 Troubleshooting](docs/TROUBLESHOOTING.md) - Issue resolution
 - [📦 Examples](examples/) - Practical examples
 
-## Roadmap
+## 🚀 Deployment & Updates
 
-- [ ] v1.0: Core features and base docs
-- [ ] v1.1: Enhanced review system
-- [ ] v1.2: Improved cloud execution
-- [ ] v1.3: Plugin system
-- [ ] v2.0: GUI tool
+### For Maintainers
+To release a new version to NPM:
+1. Run the release script: `./scripts/release.sh [patch|minor|major]`
+2. The script handles versioning, changelog, and triggers GitHub Actions.
 
-## Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Set up dev environment
+### For Users
+Update and refresh commands:
 ```bash
-git clone https://github.com/eungjin-cigro/cursorflow.git
-cd cursorflow
-pnpm install
-pnpm test
+npm install -g @litmers/cursorflow-orchestrator
+cursorflow-setup --force
 ```
 
 ## License
 
 MIT © Eugene Jin
-
-## Support
-
-- 🐛 [Issue Tracker](https://github.com/eungjin-cigro/cursorflow/issues)
-- 💬 [Discussions](https://github.com/eungjin-cigro/cursorflow/discussions)
-- 📧 Email: eungjin.cigro@gmail.com
 
 ---
 

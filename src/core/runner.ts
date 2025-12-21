@@ -107,15 +107,79 @@ function parseJsonFromStdout(stdout: string): any {
   return null;
 }
 
+/** Default timeout: 5 minutes */
+const DEFAULT_TIMEOUT_MS = 300000;
+
+/** Heartbeat interval: 30 seconds */
+const HEARTBEAT_INTERVAL_MS = 30000;
+
+/**
+ * Validate task configuration
+ * @throws Error if validation fails
+ */
+export function validateTaskConfig(config: RunnerConfig): void {
+  if (!config.tasks || !Array.isArray(config.tasks)) {
+    throw new Error('Invalid config: "tasks" must be an array');
+  }
+  
+  if (config.tasks.length === 0) {
+    throw new Error('Invalid config: "tasks" array is empty');
+  }
+  
+  for (let i = 0; i < config.tasks.length; i++) {
+    const task = config.tasks[i];
+    const taskNum = i + 1;
+    
+    if (!task) {
+      throw new Error(`Invalid config: Task ${taskNum} is null or undefined`);
+    }
+    
+    if (!task.name || typeof task.name !== 'string') {
+      throw new Error(
+        `Invalid config: Task ${taskNum} missing required "name" field.\n` +
+        `  Found: ${JSON.stringify(task, null, 2).substring(0, 200)}...\n` +
+        `  Expected: { "name": "task-name", "prompt": "..." }`
+      );
+    }
+    
+    if (!task.prompt || typeof task.prompt !== 'string') {
+      throw new Error(
+        `Invalid config: Task "${task.name}" (${taskNum}) missing required "prompt" field`
+      );
+    }
+    
+    // Validate task name format (no spaces, special chars that could break branch names)
+    if (!/^[a-zA-Z0-9_-]+$/.test(task.name)) {
+      throw new Error(
+        `Invalid config: Task name "${task.name}" contains invalid characters.\n` +
+        `  Task names must only contain: letters, numbers, underscore (_), hyphen (-)`
+      );
+    }
+  }
+  
+  // Validate timeout if provided
+  if (config.timeout !== undefined) {
+    if (typeof config.timeout !== 'number' || config.timeout <= 0) {
+      throw new Error(
+        `Invalid config: "timeout" must be a positive number (milliseconds).\n` +
+        `  Found: ${config.timeout}`
+      );
+    }
+  }
+}
+
 /**
  * Execute cursor-agent command with streaming and better error handling
  */
-export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir }: { 
+export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention }: { 
   workspaceDir: string; 
   chatId: string; 
   prompt: string; 
   model?: string; 
   signalDir?: string;
+  timeout?: number;
+  /** Enable stdin piping for intervention feature (may cause buffering issues on some systems) */
+  enableIntervention?: boolean;
 }): Promise<AgentSendResult> {
   const args = [
     '--print',
@@ -126,16 +190,66 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     prompt,
   ];
   
-  logger.info('Executing cursor-agent...');
+  const timeoutMs = timeout || DEFAULT_TIMEOUT_MS;
+  logger.info(`Executing cursor-agent... (timeout: ${Math.round(timeoutMs / 1000)}s)`);
+  
+  // Determine stdio mode based on intervention setting
+  // When intervention is enabled, we pipe stdin for message injection
+  // When disabled (default), we ignore stdin to avoid buffering issues
+  const stdinMode = enableIntervention ? 'pipe' : 'ignore';
+  
+  if (enableIntervention) {
+    logger.info('Intervention mode enabled (stdin piped)');
+  }
   
   return new Promise((resolve) => {
+    // Build environment, preserving user's NODE_OPTIONS but disabling problematic flags
+    const childEnv = { ...process.env };
+    
+    // Only filter out specific problematic NODE_OPTIONS, don't clear entirely
+    if (childEnv.NODE_OPTIONS) {
+      // Remove flags that might interfere with cursor-agent
+      const filtered = childEnv.NODE_OPTIONS
+        .split(' ')
+        .filter(opt => !opt.includes('--inspect') && !opt.includes('--debug'))
+        .join(' ');
+      childEnv.NODE_OPTIONS = filtered;
+    }
+    
+    // Disable Python buffering in case cursor-agent uses Python
+    childEnv.PYTHONUNBUFFERED = '1';
+    
     const child = spawn('cursor-agent', args, {
-      stdio: ['pipe', 'pipe', 'pipe'], // Enable stdin piping
-      env: process.env,
+      stdio: [stdinMode, 'pipe', 'pipe'],
+      env: childEnv,
     });
+
+    // Save PID to state if possible
+    if (child.pid && signalDir) {
+      try {
+        const statePath = path.join(signalDir, 'state.json');
+        if (fs.existsSync(statePath)) {
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+          state.pid = child.pid;
+          fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+        }
+      } catch (e) {
+        // Best effort
+      }
+    }
 
     let fullStdout = '';
     let fullStderr = '';
+
+    // Heartbeat logging to show progress
+    let lastHeartbeat = Date.now();
+    let bytesReceived = 0;
+    const heartbeatInterval = setInterval(() => {
+      const elapsed = Math.round((Date.now() - lastHeartbeat) / 1000);
+      const totalElapsed = Math.round((Date.now() - startTime) / 1000);
+      logger.info(`⏱ Heartbeat: ${totalElapsed}s elapsed, ${bytesReceived} bytes received`);
+    }, HEARTBEAT_INTERVAL_MS);
+    const startTime = Date.now();
 
     // Watch for "intervention.txt" signal file if any
     const interventionPath = signalDir ? path.join(signalDir, 'intervention.txt') : null;
@@ -147,8 +261,13 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
           try {
             const message = fs.readFileSync(interventionPath, 'utf8').trim();
             if (message) {
-              logger.info(`Injecting intervention: ${message}`);
-              child.stdin.write(message + '\n');
+              if (enableIntervention && child.stdin) {
+                logger.info(`Injecting intervention: ${message}`);
+                child.stdin.write(message + '\n');
+              } else {
+                logger.warn(`Intervention requested but stdin not available: ${message}`);
+                logger.warn('To enable intervention, set enableIntervention: true in config');
+              }
               fs.unlinkSync(interventionPath); // Clear it
             }
           } catch (e) {
@@ -158,30 +277,38 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       });
     }
 
-    child.stdout.on('data', (data) => {
-      const str = data.toString();
-      fullStdout += str;
-      // Also pipe to our own stdout so it goes to terminal.log
-      process.stdout.write(data);
-    });
+    if (child.stdout) {
+      child.stdout.on('data', (data) => {
+        const str = data.toString();
+        fullStdout += str;
+        bytesReceived += data.length;
+        // Also pipe to our own stdout so it goes to terminal.log
+        process.stdout.write(data);
+      });
+    }
 
-    child.stderr.on('data', (data) => {
-      fullStderr += data.toString();
-      // Pipe to our own stderr so it goes to terminal.log
-      process.stderr.write(data);
-    });
+    if (child.stderr) {
+      child.stderr.on('data', (data) => {
+        fullStderr += data.toString();
+        // Pipe to our own stderr so it goes to terminal.log
+        process.stderr.write(data);
+      });
+    }
 
-    const timeout = setTimeout(() => {
+    const timeoutHandle = setTimeout(() => {
+      clearInterval(heartbeatInterval);
       child.kill();
+      const timeoutSec = Math.round(timeoutMs / 1000);
       resolve({
         ok: false,
         exitCode: -1,
-        error: 'cursor-agent timed out after 5 minutes. The LLM request may be taking too long or there may be network issues.',
+        error: `cursor-agent timed out after ${timeoutSec} seconds. The LLM request may be taking too long or there may be network issues.`,
       });
-    }, 300000);
+    }, timeoutMs);
 
     child.on('close', (code) => {
-      clearTimeout(timeout);
+      clearTimeout(timeoutHandle);
+      clearInterval(heartbeatInterval);
       if (interventionWatcher) interventionWatcher.close();
       
       const json = parseJsonFromStdout(fullStdout);
@@ -214,7 +341,8 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     });
 
     child.on('error', (err) => {
-      clearTimeout(timeout);
+      clearTimeout(timeoutHandle);
+      clearInterval(heartbeatInterval);
       resolve({
         ok: false,
         exitCode: -1,
@@ -361,7 +489,9 @@ export async function runTask({
     chatId,
     prompt: prompt1,
     model,
-    signalDir: runDir
+    signalDir: runDir,
+    timeout: config.timeout,
+    enableIntervention: config.enableIntervention,
   });
   
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
@@ -404,6 +534,17 @@ export async function runTask({
  */
 export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number } = {}): Promise<TaskExecutionResult[]> {
   const startIndex = options.startIndex || 0;
+  
+  // Validate configuration before starting
+  logger.info('Validating task configuration...');
+  try {
+    validateTaskConfig(config);
+    logger.success('✓ Configuration valid');
+  } catch (validationError: any) {
+    logger.error('❌ Configuration validation failed');
+    logger.error(`   ${validationError.message}`);
+    throw validationError;
+  }
   
   // Ensure cursor-agent is installed
   ensureCursorAgent();

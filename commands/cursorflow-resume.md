@@ -163,6 +163,17 @@ git commit -m "fix: build error"
 cursorflow resume 01-dashboard
 ```
 
+### Scenario 5: Timeout errors
+If the lane failed due to timeout:
+1. Increase the timeout in your task JSON:
+   ```json
+   { "timeout": 600000 }
+   ```
+2. Resume the lane:
+   ```bash
+   cursorflow resume 01-dashboard
+   ```
+
 ### Scenario 3: Branch conflicts
 ```bash
 # Clean branches then restart
