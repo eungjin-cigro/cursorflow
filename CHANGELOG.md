@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] - 2025-12-21
+
+### Added
+- **Enhanced Logging System**: Comprehensive terminal output capture and management
+  - ANSI escape sequence stripping for clean, readable logs
+  - Automatic timestamps on each log line (ISO, relative, or short format)
+  - Log rotation with configurable max size and file retention
+  - Separate raw logs (with ANSI codes) and clean logs
+  - Structured JSON logs (`terminal.jsonl`) for programmatic access
+  - **Streaming JSON output** from cursor-agent (`--output-format stream-json`)
+  - Streaming message parser for real-time log processing
+  - Session headers with context (lane name, task, model, timestamps)
+- **Log Viewer CLI**: New `cursorflow logs` command
+  - View logs for specific lanes with `--lane <name>`
+  - **View all lanes merged**: `--all` or `-a` for unified timeline view
+  - Follow logs in real-time with `--follow` or `-f` (works with `--all`)
+  - Export to multiple formats: text, json, markdown, html
+  - Filter by regex pattern with `--filter`
+  - Filter by log level with `--level`
+  - Tail last N lines with `--tail`
+  - Color-coded lanes in merged view for easy identification
+- **Logging Configuration**: New `enhancedLogging` section in `cursorflow.config.js`
+  - `enabled`: Toggle enhanced logging (default: true)
+  - `stripAnsi`: Remove ANSI codes from clean logs (default: true)
+  - `addTimestamps`: Prepend timestamps to lines (default: true)
+  - `maxFileSize`: Rotation threshold in bytes (default: 50MB)
+  - `maxFiles`: Number of rotated files to keep (default: 5)
+  - `keepRawLogs`: Store raw logs separately (default: true)
+  - `writeJsonLog`: Generate structured JSON logs (default: true)
+  - `timestampFormat`: 'iso' | 'relative' | 'short' (default: 'iso')
+- **Event System**: New `events.ts` module for structured event handling
+- **Webhook Support**: New `webhook.ts` for external integrations
+
 ## [0.1.13] - 2025-12-21
 
 ### Fixed

@@ -132,7 +132,7 @@ Each example includes:
 {
   "baseBranch": "main",
   "branchPrefix": "feature/lane-1-",
-  "timeout": 300000,
+  "timeout": 600000,
   "enableReview": true,
   "reviewModel": "sonnet-4.5-thinking",
   "tasks": [

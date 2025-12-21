@@ -134,6 +134,8 @@ async function run(args: string[]): Promise<void> {
       pollInterval: config.pollInterval * 1000,
       runDir: path.join(logsDir, 'runs', `run-${Date.now()}`),
       maxConcurrentLanes: options.maxConcurrent || config.maxConcurrentLanes,
+      webhooks: config.webhooks || [],
+      enhancedLogging: config.enhancedLogging,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

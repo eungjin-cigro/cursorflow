@@ -380,7 +380,7 @@ _cursorflow/tasks/2412211530_FeatureName/
 {
   "baseBranch": "main",
   "branchPrefix": "featurename/lane-1-",
-  "timeout": 300000,
+  "timeout": 600000,
   "enableIntervention": false,
   "dependencyPolicy": {
     "allowDependencyChange": false,

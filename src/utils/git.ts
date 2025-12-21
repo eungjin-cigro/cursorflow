@@ -323,3 +323,28 @@ export function getCommitInfo(commitHash: string, options: { cwd?: string } = {}
     subject: lines[5] || '',
   };
 }
+
+/**
+ * Get diff statistics for the last operation (commit or merge)
+ * Comparing HEAD with its first parent
+ */
+export function getLastOperationStats(cwd?: string): string {
+  try {
+    // Check if there are any commits
+    const hasCommits = runGitResult(['rev-parse', 'HEAD'], { cwd }).success;
+    if (!hasCommits) return '';
+
+    // Check if HEAD has a parent
+    const hasParent = runGitResult(['rev-parse', 'HEAD^1'], { cwd }).success;
+    if (!hasParent) {
+      // If no parent, show stats for the first commit
+      // Using an empty tree hash as the base
+      const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+      return runGit(['diff', '--stat', emptyTree, 'HEAD'], { cwd, silent: true });
+    }
+
+    return runGit(['diff', '--stat', 'HEAD^1', 'HEAD'], { cwd, silent: true });
+  } catch (e) {
+    return '';
+  }
+}

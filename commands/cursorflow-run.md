@@ -136,7 +136,7 @@ Each JSON file in the tasks directory follows this schema:
 {
   "baseBranch": "main",
   "branchPrefix": "feature/lane-1-",
-  "timeout": 300000,
+  "timeout": 600000,
   "enableIntervention": false,
   "dependsOn": ["01-lane-1"],
   "dependencyPolicy": {
@@ -165,7 +165,7 @@ Each JSON file in the tasks directory follows this schema:
 | `branchPrefix` | string | Yes | Prefix for feature branch naming |
 | `tasks` | Task[] | Yes | Array of task objects to execute |
 | `dependsOn` | string[] | No | Lane names to wait for and merge |
-| `timeout` | number | No | Task timeout in ms (default: 300000) |
+| `timeout` | number | No | Task timeout in ms (default: 600000) |
 | `enableIntervention` | boolean | No | Allow stdin injection during execution |
 | `dependencyPolicy.allowDependencyChange` | boolean | No | Allow package.json modifications |
 | `dependencyPolicy.lockfileReadOnly` | boolean | No | Keep lockfile read-only |

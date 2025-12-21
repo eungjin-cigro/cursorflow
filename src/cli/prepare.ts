@@ -515,7 +515,7 @@ function getDefaultConfig(laneNumber: number, featureName: string, tasks: Task[]
     branchPrefix: `${featureName.toLowerCase()}/lane-${laneNumber}-`,
     
     // Execution Settings
-    timeout: 300000,
+    timeout: 600000,
     enableIntervention: false,
     
     // Dependency Policy

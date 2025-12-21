@@ -10,31 +10,47 @@ import { spawn, ChildProcess } from 'child_process';
 
 import * as logger from '../utils/logger';
 import { loadState } from '../utils/state';
-import { LaneState, RunnerConfig } from '../utils/types';
+import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../utils/types';
+import { events } from '../utils/events';
+import { registerWebhooks } from '../utils/webhook';
+import * as git from '../utils/git';
+import { execSync } from 'child_process';
+import { EnhancedLogManager, createLogManager, DEFAULT_LOG_CONFIG } from '../utils/enhanced-logger';
 
 export interface LaneInfo {
   name: string;
   path: string;
   dependsOn: string[];
+  startIndex?: number; // Current task index to resume from
 }
 
 export interface SpawnLaneResult {
   child: ChildProcess;
   logPath: string;
+  logManager?: EnhancedLogManager;
 }
 
 /**
  * Spawn a lane process
  */
-export function spawnLane({ tasksFile, laneRunDir, executor }: { 
+export function spawnLane({ 
+  laneName,
+  tasksFile, 
+  laneRunDir, 
+  executor, 
+  startIndex = 0, 
+  pipelineBranch,
+  enhancedLogConfig,
+}: { 
   laneName: string; 
   tasksFile: string; 
   laneRunDir: string; 
   executor: string; 
+  startIndex?: number;
+  pipelineBranch?: string;
+  enhancedLogConfig?: Partial<EnhancedLogConfig>;
 }): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
-  const logPath = path.join(laneRunDir, 'terminal.log');
-  const logFd = fs.openSync(logPath, 'a');
   
   // Use extension-less resolve to handle both .ts (dev) and .js (dist)
   const runnerPath = require.resolve('./runner');
@@ -44,21 +60,75 @@ export function spawnLane({ tasksFile, laneRunDir, executor }: {
     tasksFile,
     '--run-dir', laneRunDir,
     '--executor', executor,
+    '--start-index', startIndex.toString(),
   ];
-  
-  const child = spawn('node', args, {
-    stdio: ['ignore', logFd, logFd],
-    env: process.env,
-    detached: false,
-  });
-  
-  try {
-    fs.closeSync(logFd);
-  } catch {
-    // Ignore
+
+  if (pipelineBranch) {
+    args.push('--pipeline-branch', pipelineBranch);
   }
   
-  return { child, logPath };
+  // Create enhanced log manager if enabled
+  const logConfig = { ...DEFAULT_LOG_CONFIG, ...enhancedLogConfig };
+  let logManager: EnhancedLogManager | undefined;
+  let logPath: string;
+  let child: ChildProcess;
+  
+  // Build environment for child process
+  const childEnv = {
+    ...process.env,
+  };
+  
+  if (logConfig.enabled) {
+    logManager = createLogManager(laneRunDir, laneName, logConfig);
+    logPath = logManager.getLogPaths().clean;
+    
+    // Spawn with pipe for enhanced logging
+    child = spawn('node', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: childEnv,
+      detached: false,
+    });
+    
+    // Pipe stdout and stderr through enhanced logger
+    if (child.stdout) {
+      child.stdout.on('data', (data: Buffer) => {
+        logManager!.writeStdout(data);
+        // Also write to process stdout for real-time visibility
+        process.stdout.write(data);
+      });
+    }
+    
+    if (child.stderr) {
+      child.stderr.on('data', (data: Buffer) => {
+        logManager!.writeStderr(data);
+        // Also write to process stderr for real-time visibility
+        process.stderr.write(data);
+      });
+    }
+    
+    // Close log manager when process exits
+    child.on('exit', () => {
+      logManager?.close();
+    });
+  } else {
+    // Fallback to simple file logging
+    logPath = path.join(laneRunDir, 'terminal.log');
+    const logFd = fs.openSync(logPath, 'a');
+    
+    child = spawn('node', args, {
+      stdio: ['ignore', logFd, logFd],
+      env: childEnv,
+      detached: false,
+    });
+    
+    try {
+      fs.closeSync(logFd);
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return { child, logPath, logManager };
 }
 
 /**
@@ -139,6 +209,108 @@ export function printLaneStatus(lanes: LaneInfo[], laneRunDirs: Record<string, s
 }
 
 /**
+ * Resolve dependencies for all blocked lanes and sync with all active lanes
+ */
+async function resolveAllDependencies(
+  blockedLanes: Map<string, DependencyRequestPlan>, 
+  allLanes: LaneInfo[], 
+  laneRunDirs: Record<string, string>,
+  pipelineBranch: string,
+  runRoot: string
+) {
+  // 1. Collect all unique changes and commands from blocked lanes
+  const allChanges: string[] = [];
+  const allCommands: string[] = [];
+  
+  for (const [, plan] of blockedLanes) {
+    if (plan.changes) allChanges.push(...plan.changes);
+    if (plan.commands) allCommands.push(...plan.commands);
+  }
+  
+  const uniqueChanges = Array.from(new Set(allChanges));
+  const uniqueCommands = Array.from(new Set(allCommands));
+  
+  if (uniqueCommands.length === 0) return;
+
+  // 2. Setup a temporary worktree for resolution if needed, or use the first available one
+  const firstLaneName = Array.from(blockedLanes.keys())[0]!;
+  const statePath = path.join(laneRunDirs[firstLaneName]!, 'state.json');
+  const state = loadState<LaneState>(statePath);
+  const worktreeDir = state?.worktreeDir || path.join(runRoot, 'resolution-worktree');
+
+  if (!fs.existsSync(worktreeDir)) {
+    logger.info(`Creating resolution worktree at ${worktreeDir}`);
+    git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: 'main' });
+  }
+
+  // 3. Resolve on pipeline branch
+  logger.info(`Resolving dependencies on ${pipelineBranch}`);
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  
+  for (const cmd of uniqueCommands) {
+    logger.info(`Running: ${cmd}`);
+    try {
+      execSync(cmd, { cwd: worktreeDir, stdio: 'inherit' });
+    } catch (e: any) {
+      throw new Error(`Command failed: ${cmd}. ${e.message}`);
+    }
+  }
+  
+  try {
+    git.runGit(['add', '.'], { cwd: worktreeDir });
+    git.runGit(['commit', '-m', `chore: auto-resolve dependencies\n\n${uniqueChanges.join('\n')}`], { cwd: worktreeDir });
+
+    // Log changed files
+    const stats = git.getLastOperationStats(worktreeDir);
+    if (stats) {
+      logger.info('Changed files:\n' + stats);
+    }
+
+    git.push(pipelineBranch, { cwd: worktreeDir });
+  } catch (e) { /* ignore if nothing to commit */ }
+
+  // 4. Sync ALL active lanes (blocked + pending + running)
+  // Since we only call this when running.size === 0, "active" means not completed/failed
+  for (const lane of allLanes) {
+    const laneDir = laneRunDirs[lane.name];
+    if (!laneDir) continue;
+
+    const laneState = loadState<LaneState>(path.join(laneDir, 'state.json'));
+    if (!laneState || laneState.status === 'completed' || laneState.status === 'failed') continue;
+
+    // Merge pipelineBranch into the lane's current task branch
+    const currentIdx = laneState.currentTaskIndex;
+    const taskConfig = JSON.parse(fs.readFileSync(lane.path, 'utf8')) as RunnerConfig;
+    const task = taskConfig.tasks[currentIdx];
+    
+    if (task) {
+      const taskBranch = `${pipelineBranch}--${String(currentIdx + 1).padStart(2, '0')}-${task.name}`;
+      logger.info(`Syncing lane ${lane.name} branch ${taskBranch}`);
+      
+      try {
+        // If task branch doesn't exist yet, it will be created from pipelineBranch when the lane starts
+        if (git.branchExists(taskBranch, { cwd: worktreeDir })) {
+          git.runGit(['checkout', taskBranch], { cwd: worktreeDir });
+          git.runGit(['merge', pipelineBranch, '--no-edit'], { cwd: worktreeDir });
+          
+          // Log changed files
+          const stats = git.getLastOperationStats(worktreeDir);
+          if (stats) {
+            logger.info(`Sync results for ${lane.name}:\n` + stats);
+          }
+
+          git.push(taskBranch, { cwd: worktreeDir });
+        }
+      } catch (e: any) {
+        logger.warn(`Failed to sync branch ${taskBranch}: ${e.message}`);
+      }
+    }
+  }
+  
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+}
+
+/**
  * Run orchestration with dependency management
  */
 export async function orchestrate(tasksDir: string, options: { 
@@ -146,6 +318,9 @@ export async function orchestrate(tasksDir: string, options: {
   executor?: string; 
   pollInterval?: number; 
   maxConcurrentLanes?: number;
+  webhooks?: WebhookConfig[];
+  autoResolveDependencies?: boolean;
+  enhancedLogging?: Partial<EnhancedLogConfig>;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -153,8 +328,36 @@ export async function orchestrate(tasksDir: string, options: {
     throw new Error(`No lane task files found in ${tasksDir}`);
   }
   
-  const runRoot = options.runDir || `_cursorflow/logs/runs/run-${Date.now()}`;
+  const runId = `run-${Date.now()}`;
+  const runRoot = options.runDir || `_cursorflow/logs/runs/${runId}`;
   fs.mkdirSync(runRoot, { recursive: true });
+
+  const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}`;
+
+  // Initialize event system
+  events.setRunId(runId);
+  if (options.webhooks) {
+    registerWebhooks(options.webhooks);
+  }
+
+  events.emit('orchestration.started', {
+    runId,
+    tasksDir,
+    laneCount: lanes.length,
+    runRoot,
+  });
+  
+  const maxConcurrent = options.maxConcurrentLanes || 10;
+  const running: Map<string, { child: ChildProcess; logPath: string }> = new Map();
+  const exitCodes: Record<string, number> = {};
+  const completedLanes = new Set<string>();
+  const failedLanes = new Set<string>();
+  const blockedLanes: Map<string, DependencyRequestPlan> = new Map();
+  
+  // Track start index for each lane (initially 0)
+  for (const lane of lanes) {
+    lane.startIndex = 0;
+  }
   
   const laneRunDirs: Record<string, string> = {};
   for (const lane of lanes) {
@@ -166,36 +369,32 @@ export async function orchestrate(tasksDir: string, options: {
   logger.info(`Tasks directory: ${tasksDir}`);
   logger.info(`Run directory: ${runRoot}`);
   logger.info(`Lanes: ${lanes.length}`);
-  
-  const maxConcurrent = options.maxConcurrentLanes || 10;
-  const running: Map<string, { child: ChildProcess; logPath: string }> = new Map();
-  const exitCodes: Record<string, number> = {};
-  const completedLanes = new Set<string>();
-  const failedLanes = new Set<string>();
+
+  const autoResolve = options.autoResolveDependencies !== false;
   
   // Monitor lanes
   const monitorInterval = setInterval(() => {
     printLaneStatus(lanes, laneRunDirs);
   }, options.pollInterval || 60000);
   
-  while (completedLanes.size + failedLanes.size < lanes.length) {
+  while (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length || (blockedLanes.size > 0 && running.size === 0)) {
     // 1. Identify lanes ready to start
     const readyToStart = lanes.filter(lane => {
-      // Not already running or completed
-      if (running.has(lane.name) || completedLanes.has(lane.name) || failedLanes.has(lane.name)) {
+      // Not already running or completed or failed or blocked
+      if (running.has(lane.name) || completedLanes.has(lane.name) || failedLanes.has(lane.name) || blockedLanes.has(lane.name)) {
         return false;
       }
       
       // Check dependencies
       for (const dep of lane.dependsOn) {
         if (failedLanes.has(dep)) {
-          // If a dependency failed or is blocked, this lane will not start
-          const depCode = exitCodes[dep] || 1;
-          const reason = depCode === 2 ? 'is blocked' : 'failed';
-          logger.error(`Lane ${lane.name} will not start because dependency ${dep} ${reason}`);
-          
+          logger.error(`Lane ${lane.name} will not start because dependency ${dep} failed`);
           failedLanes.add(lane.name);
-          exitCodes[lane.name] = depCode; // Propagate the specific status
+          exitCodes[lane.name] = 1;
+          return false;
+        }
+        if (blockedLanes.has(dep)) {
+          // If a dependency is blocked, wait
           return false;
         }
         if (!completedLanes.has(dep)) {
@@ -209,20 +408,27 @@ export async function orchestrate(tasksDir: string, options: {
     for (const lane of readyToStart) {
       if (running.size >= maxConcurrent) break;
       
-      logger.info(`Lane started: ${lane.name}`);
+      logger.info(`Lane started: ${lane.name}${lane.startIndex ? ` (resuming from ${lane.startIndex})` : ''}`);
       const spawnResult = spawnLane({
         laneName: lane.name,
         tasksFile: lane.path,
         laneRunDir: laneRunDirs[lane.name]!,
         executor: options.executor || 'cursor-agent',
+        startIndex: lane.startIndex,
+        pipelineBranch,
+        enhancedLogConfig: options.enhancedLogging,
       });
       
       running.set(lane.name, spawnResult);
+      events.emit('lane.started', {
+        laneName: lane.name,
+        pid: spawnResult.child.pid,
+        logPath: spawnResult.logPath,
+      });
     }
     
     // 3. Wait for any running lane to finish
     if (running.size > 0) {
-      // We need to wait for at least one to finish
       const promises = Array.from(running.entries()).map(async ([name, { child }]) => {
         const code = await waitChild(child);
         return { name, code };
@@ -235,21 +441,70 @@ export async function orchestrate(tasksDir: string, options: {
       
       if (finished.code === 0) {
         completedLanes.add(finished.name);
+        events.emit('lane.completed', {
+          laneName: finished.name,
+          exitCode: finished.code,
+        });
+      } else if (finished.code === 2) {
+        // Blocked by dependency
+        const statePath = path.join(laneRunDirs[finished.name]!, 'state.json');
+        const state = loadState<LaneState>(statePath);
+        
+        if (state && state.dependencyRequest) {
+          blockedLanes.set(finished.name, state.dependencyRequest);
+          const lane = lanes.find(l => l.name === finished.name);
+          if (lane) {
+            lane.startIndex = Math.max(0, state.currentTaskIndex - 1); // Task was blocked, retry it
+          }
+          
+          events.emit('lane.blocked', {
+            laneName: finished.name,
+            dependencyRequest: state.dependencyRequest,
+          });
+          logger.warn(`Lane ${finished.name} is blocked on dependency change request`);
+        } else {
+          failedLanes.add(finished.name);
+          logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
+        }
       } else {
         failedLanes.add(finished.name);
+        events.emit('lane.failed', {
+          laneName: finished.name,
+          exitCode: finished.code,
+          error: 'Process exited with non-zero code',
+        });
       }
       
       printLaneStatus(lanes, laneRunDirs);
     } else {
-      // Nothing running and nothing ready (but not all finished)
-      // This could happen if there's a circular dependency or some logic error
-      if (readyToStart.length === 0 && completedLanes.size + failedLanes.size < lanes.length) {
-        const remaining = lanes.filter(l => !completedLanes.has(l.name) && !failedLanes.has(l.name));
+      // Nothing running. Are we blocked?
+      if (blockedLanes.size > 0 && autoResolve) {
+        logger.section('🛠 Auto-Resolving Dependencies');
+        
+        try {
+          await resolveAllDependencies(blockedLanes, lanes, laneRunDirs, pipelineBranch, runRoot);
+          
+          // Clear blocked status
+          blockedLanes.clear();
+          logger.success('Dependencies resolved and synced across all active lanes. Resuming...');
+        } catch (error: any) {
+          logger.error(`Auto-resolution failed: ${error.message}`);
+          // Move blocked to failed
+          for (const name of blockedLanes.keys()) {
+            failedLanes.add(name);
+          }
+          blockedLanes.clear();
+        }
+      } else if (readyToStart.length === 0 && completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length) {
+        const remaining = lanes.filter(l => !completedLanes.has(l.name) && !failedLanes.has(l.name) && !blockedLanes.has(l.name));
         logger.error(`Deadlock detected! Remaining lanes cannot start: ${remaining.map(l => l.name).join(', ')}`);
         for (const l of remaining) {
           failedLanes.add(l.name);
           exitCodes[l.name] = 1;
         }
+      } else {
+        // All finished
+        break;
       }
     }
   }
@@ -265,17 +520,25 @@ export async function orchestrate(tasksDir: string, options: {
     process.exit(1);
   }
   
-  // Check for blocked lanes
-  const blocked = Object.entries(exitCodes)
-    .filter(([, code]) => code === 2)
-    .map(([lane]) => lane);
+  // Check for blocked lanes (if autoResolve was false)
+  const blocked = Array.from(blockedLanes.keys());
   
   if (blocked.length > 0) {
     logger.warn(`Lanes blocked on dependency: ${blocked.join(', ')}`);
     logger.info('Handle dependency changes manually and resume lanes');
+    events.emit('orchestration.failed', {
+      error: 'Some lanes blocked on dependency change requests',
+      blockedLanes: blocked,
+    });
     process.exit(2);
   }
   
   logger.success('All lanes completed successfully!');
+  events.emit('orchestration.completed', {
+    runId,
+    laneCount: lanes.length,
+    completedCount: completedLanes.size,
+    failedCount: failedLanes.size,
+  });
   return { lanes, exitCodes, runRoot };
 }

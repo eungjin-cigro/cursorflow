@@ -101,7 +101,7 @@ Within the `cursorflow monitor` dashboard:
 {
   "baseBranch": "main",
   "branchPrefix": "feature/lane-1-",
-  "timeout": 300000,
+  "timeout": 600000,
   "enableIntervention": false,
   "dependsOn": ["01-lane-1"],
   "enableReview": true,
@@ -121,7 +121,7 @@ Within the `cursorflow monitor` dashboard:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `timeout` | number | 300000 | Task timeout in milliseconds (5 min) |
+| `timeout` | number | 600000 | Task timeout in milliseconds (10 min) |
 | `enableIntervention` | boolean | false | Enable stdin piping for intervention |
 | `model` | string | "sonnet-4.5" | AI model to use |
 | `dependsOn` | string[] | [] | Lane dependencies |
@@ -168,6 +168,87 @@ cursorflow doctor --tasks-dir _cursorflow/tasks/my-feature
 | `cursorflow clean` | Clean branches/worktrees |
 | `cursorflow signal` | Send message to running agent |
 | `cursorflow models` | List available AI models |
+| `cursorflow logs` | View, export, and follow logs |
+
+## 📝 Enhanced Logging
+
+CursorFlow provides comprehensive logging with automatic cleanup and export options:
+
+### Features
+- **ANSI Stripping**: Clean logs without terminal escape codes
+- **Timestamps**: Automatic timestamps on each line (ISO, relative, or short format)
+- **Log Rotation**: Automatic rotation when files exceed size limits
+- **Multiple Formats**: 
+  - `terminal.log` - Clean, readable logs
+  - `terminal-raw.log` - Raw logs with ANSI codes
+  - `terminal.jsonl` - Structured JSON for programmatic access
+
+### Usage
+
+```bash
+# View logs summary for latest run
+cursorflow logs
+
+# View specific lane logs
+cursorflow logs --lane api-setup
+
+# View ALL lanes merged (unified timeline)
+cursorflow logs --all
+
+# Follow all lanes in real-time
+cursorflow logs --all --follow
+
+# Follow logs in real-time
+cursorflow logs --lane api-setup --follow
+
+# Export to different formats
+cursorflow logs --lane api-setup --format json --output logs.json
+cursorflow logs --all --format html --output all-logs.html
+
+# Filter logs
+cursorflow logs --all --filter "error|failed"
+cursorflow logs --all --level stderr
+cursorflow logs --lane api-setup --level error --tail 50
+```
+
+### Merged Logs View (`--all`)
+
+When running multiple lanes, use `--all` to see a unified timeline:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🔀 Merged Logs - run-123 (45 entries from 3 lanes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Lanes: ■ api-setup  ■ frontend  ■ database
+
+[10:15:30] [api-setup   ] [STDOUT] Starting API setup...
+[10:15:31] [frontend    ] [STDOUT] Setting up React...
+[10:15:32] [database    ] [STDOUT] Creating schema...
+[10:15:33] [api-setup   ] [STDOUT] Endpoints created
+[10:15:34] [frontend    ] [STDERR] Warning: Deprecated API
+...
+```
+
+### Configuration
+
+Add to `cursorflow.config.js`:
+
+```javascript
+module.exports = {
+  // ... other config ...
+  enhancedLogging: {
+    enabled: true,           // Enable enhanced logging
+    stripAnsi: true,         // Strip ANSI codes for clean logs
+    addTimestamps: true,     // Add timestamps to each line
+    maxFileSize: 52428800,   // 50MB max before rotation
+    maxFiles: 5,             // Keep 5 rotated files
+    keepRawLogs: true,       // Keep raw logs separately
+    writeJsonLog: true,      // Generate JSON logs
+    timestampFormat: 'iso',  // 'iso' | 'relative' | 'short'
+  },
+};
+```
 
 ## 📖 Documentation
 

@@ -73,6 +73,21 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     worktreePrefix: 'cursorflow-',
     maxConcurrentLanes: 10,
     
+    // Webhooks
+    webhooks: [],
+    
+    // Enhanced logging
+    enhancedLogging: {
+      enabled: true,
+      stripAnsi: true,
+      addTimestamps: true,
+      maxFileSize: 50 * 1024 * 1024, // 50MB
+      maxFiles: 5,
+      keepRawLogs: true,
+      writeJsonLog: true,
+      timestampFormat: 'iso',
+    },
+    
     // Internal
     projectRoot,
   };
@@ -179,6 +194,27 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Advanced
   worktreePrefix: 'cursorflow-',
   maxConcurrentLanes: 10,
+
+  // Webhook configuration
+  // webhooks: [
+  //   {
+  //     enabled: true,
+  //     url: 'https://api.example.com/events',
+  //     events: ['*'],
+  //   }
+  // ],
+
+  // Enhanced logging configuration
+  enhancedLogging: {
+    enabled: true,           // Enable enhanced logging features
+    stripAnsi: true,         // Strip ANSI codes for clean logs
+    addTimestamps: true,     // Add timestamps to each line
+    maxFileSize: 52428800,   // 50MB max file size before rotation
+    maxFiles: 5,             // Number of rotated files to keep
+    keepRawLogs: true,       // Keep raw logs with ANSI codes
+    writeJsonLog: true,      // Write structured JSON logs
+    timestampFormat: 'iso',  // 'iso' | 'relative' | 'short'
+  },
 };
 `;
   

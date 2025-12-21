@@ -8,6 +8,7 @@ import * as logger from '../utils/logger';
 import { appendLog, createConversationEntry } from '../utils/state';
 import * as path from 'path';
 import { ReviewResult, ReviewIssue, TaskResult, RunnerConfig, AgentSendResult } from '../utils/types';
+import { events } from '../utils/events';
 
 /**
  * Build review prompt
@@ -159,6 +160,11 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   
   logger.info(`Reviewing: ${taskResult.taskName}`);
   
+  events.emit('review.started', {
+    taskName: taskResult.taskName,
+    taskBranch: taskResult.taskBranch,
+  });
+
   const reviewChatId = cursorAgentCreateChat();
   const reviewResult = cursorAgentSend({
     workspaceDir: worktreeDir,
@@ -178,6 +184,13 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, curs
   
   logger.info(`Review result: ${review.status} (${review.issues?.length || 0} issues)`);
   
+  events.emit('review.completed', {
+    taskName: taskResult.taskName,
+    status: review.status,
+    issueCount: review.issues?.length || 0,
+    summary: review.summary,
+  });
+
   return review;
 }
 
@@ -209,6 +222,10 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
     
     if (currentReview.status === 'approved') {
       logger.success(`Review passed: ${taskResult.taskName} (iteration ${iteration + 1})`);
+      events.emit('review.approved', {
+        taskName: taskResult.taskName,
+        iterations: iteration + 1,
+      });
       return { approved: true, review: currentReview, iterations: iteration + 1 };
     }
     
@@ -216,6 +233,11 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
     
     if (iteration >= maxIterations) {
       logger.warn(`Max review iterations (${maxIterations}) reached: ${taskResult.taskName}`);
+      events.emit('review.rejected', {
+        taskName: taskResult.taskName,
+        reason: 'Max iterations reached',
+        iterations: iteration,
+      });
       break;
     }
     

@@ -20,6 +20,7 @@ const COMMANDS: Record<string, CommandFn> = {
   doctor: require('./doctor'),
   signal: require('./signal'),
   models: require('./models'),
+  logs: require('./logs'),
   setup: require('./setup-commands').main,
   'setup-commands': require('./setup-commands').main,
 };
@@ -37,10 +38,11 @@ function printHelp(): void {
   \x1b[33mrun\x1b[0m <tasks-dir> [options]   Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options] \x1b[36mInteractive\x1b[0m lane dashboard
   \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs
-  \x1b[33mresume\x1b[0m <lane> [options]     Resume interrupted lane
+  \x1b[33mresume\x1b[0m [lane] [options]     Resume lane(s) - use --all for batch resume
   \x1b[33mdoctor\x1b[0m [options]            Check environment and preflight
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]            List available AI models
+  \x1b[33mlogs\x1b[0m [run-dir] [options]    View, export, and follow logs
 
 \x1b[1mGLOBAL OPTIONS\x1b[0m
   --config <path>             Config file path
@@ -114,3 +116,4 @@ if (require.main === module) {
 
 export default main;
 export { main };
+export { events } from '../utils/events';

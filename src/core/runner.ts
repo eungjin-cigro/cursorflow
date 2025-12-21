@@ -12,6 +12,10 @@ import * as git from '../utils/git';
 import * as logger from '../utils/logger';
 import { ensureCursorAgent, checkCursorAuth, printAuthHelp } from '../utils/cursor-agent';
 import { saveState, appendLog, createConversationEntry } from '../utils/state';
+import { events } from '../utils/events';
+import { loadConfig } from '../utils/config';
+import { registerWebhooks } from '../utils/webhook';
+import { stripAnsi } from '../utils/enhanced-logger';
 import { 
   RunnerConfig, 
   Task, 
@@ -107,8 +111,8 @@ function parseJsonFromStdout(stdout: string): any {
   return null;
 }
 
-/** Default timeout: 5 minutes */
-const DEFAULT_TIMEOUT_MS = 300000;
+/** Default timeout: 10 minutes */
+const DEFAULT_TIMEOUT_MS = 600000;
 
 /** Heartbeat interval: 30 seconds */
 const HEARTBEAT_INTERVAL_MS = 30000;
@@ -181,9 +185,10 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
   /** Enable stdin piping for intervention feature (may cause buffering issues on some systems) */
   enableIntervention?: boolean;
 }): Promise<AgentSendResult> {
+  // Use stream-json format for structured output with tool calls and results
   const args = [
     '--print',
-    '--output-format', 'json',
+    '--output-format', 'stream-json',
     '--workspace', workspaceDir,
     ...(model ? ['--model', model] : []),
     '--resume', chatId,
@@ -506,6 +511,12 @@ export async function runTask({
   logger.info(`Model: ${model}`);
   logger.info(`Branch: ${taskBranch}`);
   
+  events.emit('task.started', {
+    taskName: task.name,
+    taskBranch,
+    index,
+  });
+
   // Checkout task branch
   git.runGit(['checkout', '-B', taskBranch], { cwd: worktreeDir });
   
@@ -521,6 +532,13 @@ export async function runTask({
   }));
   
   logger.info('Sending prompt to agent...');
+  const startTime = Date.now();
+  events.emit('agent.prompt_sent', {
+    taskName: task.name,
+    model,
+    promptLength: prompt1.length,
+  });
+
   const r1 = await cursorAgentSend({
     workspaceDir: worktreeDir,
     chatId,
@@ -531,12 +549,26 @@ export async function runTask({
     enableIntervention: config.enableIntervention,
   });
   
+  const duration = Date.now() - startTime;
+  events.emit('agent.response_received', {
+    taskName: task.name,
+    ok: r1.ok,
+    duration,
+    responseLength: r1.resultText?.length || 0,
+    error: r1.error,
+  });
+
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
     task: task.name,
     model,
   }));
   
   if (!r1.ok) {
+    events.emit('task.failed', {
+      taskName: task.name,
+      taskBranch,
+      error: r1.error,
+    });
     return {
       taskName: task.name,
       taskBranch,
@@ -559,6 +591,12 @@ export async function runTask({
   // Push task branch
   git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
   
+  events.emit('task.completed', {
+    taskName: task.name,
+    taskBranch,
+    status: 'FINISHED',
+  });
+
   return {
     taskName: task.name,
     taskBranch,
@@ -704,6 +742,12 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
             noFf: true, 
             message: `chore: merge dependency ${depName} (${depState.pipelineBranch})` 
           });
+
+          // Log changed files
+          const stats = git.getLastOperationStats(worktreeDir);
+          if (stats) {
+            logger.info('Changed files:\n' + stats);
+          }
         }
       } catch (e) {
         logger.error(`Failed to merge dependency ${depName}: ${e}`);
@@ -743,6 +787,14 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       state.status = 'failed';
       state.dependencyRequest = result.dependencyRequest || null;
       saveState(statePath, state);
+      
+      if (result.dependencyRequest) {
+        events.emit('lane.dependency_requested', {
+          laneName: state.label,
+          dependencyRequest: result.dependencyRequest,
+        });
+      }
+      
       logger.warn('Task blocked on dependency change');
       process.exit(2);
     }
@@ -758,6 +810,13 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     // Merge into pipeline
     logger.info(`Merging ${taskBranch} → ${pipelineBranch}`);
     git.merge(taskBranch, { cwd: worktreeDir, noFf: true });
+
+    // Log changed files
+    const stats = git.getLastOperationStats(worktreeDir);
+    if (stats) {
+      logger.info('Changed files:\n' + stats);
+    }
+
     git.push(pipelineBranch, { cwd: worktreeDir });
   }
   
@@ -784,11 +843,28 @@ if (require.main === module) {
   const tasksFile = args[0]!;
   const runDirIdx = args.indexOf('--run-dir');
   const startIdxIdx = args.indexOf('--start-index');
-  // const executorIdx = args.indexOf('--executor');
+  const pipelineBranchIdx = args.indexOf('--pipeline-branch');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
   const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
-  // const executor = executorIdx >= 0 ? args[executorIdx + 1] : 'cursor-agent';
+  const forcedPipelineBranch = pipelineBranchIdx >= 0 ? args[pipelineBranchIdx + 1] : null;
+
+  // Extract runId from runDir (format: .../runs/run-123/lanes/lane-name)
+  const parts = runDir.split(path.sep);
+  const runsIdx = parts.lastIndexOf('runs');
+  const runId = runsIdx >= 0 && parts[runsIdx + 1] ? parts[runsIdx + 1]! : `run-${Date.now()}`;
+  
+  events.setRunId(runId);
+
+  // Load global config to register webhooks in this process
+  try {
+    const globalConfig = loadConfig();
+    if (globalConfig.webhooks) {
+      registerWebhooks(globalConfig.webhooks);
+    }
+  } catch (e) {
+    // Non-blocking
+  }
   
   if (!fs.existsSync(tasksFile)) {
     console.error(`Tasks file not found: ${tasksFile}`);
@@ -799,6 +875,9 @@ if (require.main === module) {
   let config: RunnerConfig;
   try {
     config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
+    if (forcedPipelineBranch) {
+      config.pipelineBranch = forcedPipelineBranch;
+    }
   } catch (error: any) {
     console.error(`Failed to load tasks file: ${error.message}`);
     process.exit(1);
