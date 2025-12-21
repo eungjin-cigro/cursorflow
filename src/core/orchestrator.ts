@@ -153,13 +153,16 @@ export function spawnLane({
         case 'system':
           prefix = `${logger.COLORS.gray}⚙️  SYS${logger.COLORS.reset}`;
           break;
+        case 'thinking':
+          prefix = `${logger.COLORS.gray}🤔 THNK${logger.COLORS.reset}`;
+          break;
       }
       
       if (prefix) {
         const lines = content.split('\n');
         const tsPrefix = `${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneLabel}${logger.COLORS.reset}`;
         
-        if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result') {
+        if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result' || msg.type === 'thinking') {
           const header = `${prefix} ┌${'─'.repeat(60)}`;
           process.stdout.write(`${tsPrefix} ${header}\n`);
           for (const line of lines) {
@@ -202,8 +205,7 @@ export function spawnLane({
           if (trimmed && 
               !trimmed.startsWith('{') && 
               !trimmed.startsWith('[') && 
-              !trimmed.includes('{"type"') &&
-              !trimmed.includes('Heartbeat:')) {
+              !trimmed.includes('{"type"')) {
             process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
           }
         }

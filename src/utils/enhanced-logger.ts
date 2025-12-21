@@ -163,6 +163,23 @@ export class StreamingMessageParser {
           },
         });
         break;
+        
+      case 'thinking':
+        // Thinking message (Claude 3.7+ etc.)
+        if (json.subtype === 'delta' && json.text) {
+          // Check if this is a new message or continuation
+          if (this.currentRole !== 'thinking') {
+            // Flush previous message if any
+            this.flush();
+            this.currentRole = 'thinking';
+            this.messageStartTime = json.timestamp_ms || Date.now();
+          }
+          this.currentMessage += json.text;
+        } else if (json.subtype === 'completed') {
+          // Thinking completed - flush immediately
+          this.flush();
+        }
+        break;
     }
   }
   
@@ -191,7 +208,7 @@ export class StreamingMessageParser {
 }
 
 export interface ParsedMessage {
-  type: 'system' | 'user' | 'assistant' | 'tool' | 'tool_result' | 'result';
+  type: 'system' | 'user' | 'assistant' | 'tool' | 'tool_result' | 'result' | 'thinking';
   role: string;
   content: string;
   timestamp: number;
@@ -505,6 +522,21 @@ export class EnhancedLogManager {
         formatted = `[${ts}] 📄 RESL: ${msg.metadata?.toolName || 'Tool'}${toolResultLines}\n`;
         break;
         
+      case 'thinking':
+        // Format thinking block
+        const thinkLabel = `[ 🤔 THINKING ] `;
+        const thinkWidth = 80;
+        const thinkTop = `┌─${thinkLabel}${'─'.repeat(Math.max(0, thinkWidth - thinkLabel.length - 2))}`;
+        const thinkBottom = `└─${'─'.repeat(thinkWidth - 2)}`;
+
+        const thinkLines = msg.content.trim().split('\n');
+        formatted = `[${ts}] ${thinkTop}\n`;
+        for (const line of thinkLines) {
+          formatted += `[${ts}] │ ${line}\n`;
+        }
+        formatted += `[${ts}] ${thinkBottom}\n`;
+        break;
+        
       default:
         formatted = `[${ts}] ${msg.content}\n`;
     }
@@ -669,20 +701,71 @@ export class EnhancedLogManager {
       this.cleanTransform.write(data);
     }
     
-    // Parse streaming JSON for readable log (handles boxes, messages, tool calls)
-    this.parseStreamingData(text);
+    // Process lines for readable log and JSON entries
+    this.lineBuffer += text;
+    const lines = this.lineBuffer.split('\n');
+    this.lineBuffer = lines.pop() || '';
     
-    // Also include significant info/status lines in readable log (compact)
-    if (this.readableLogFd !== null) {
-      const lines = text.split('\n');
-      for (const line of lines) {
-        const cleanLine = stripAnsi(line).trim();
+    for (const line of lines) {
+      const cleanLine = stripAnsi(line).trim();
+      if (!cleanLine) continue;
+
+      // Handle streaming JSON messages (for boxes, etc. in readable log)
+      if (cleanLine.startsWith('{')) {
+        if (this.streamingParser) {
+          this.streamingParser.parseLine(cleanLine);
+        }
+
+        // Special handling for terminal.jsonl entries for AI messages
+        if (this.config.writeJsonLog) {
+          try {
+            const json = JSON.parse(cleanLine);
+            let displayMsg = cleanLine;
+            let metadata = { ...json };
+
+            // Extract cleaner text for significant AI message types
+            if (json.type === 'thinking' && json.text) {
+              displayMsg = json.text;
+            } else if (json.type === 'assistant' && json.message?.content) {
+              displayMsg = json.message.content
+                .filter((c: any) => c.type === 'text')
+                .map((c: any) => c.text)
+                .join('');
+            } else if (json.type === 'user' && json.message?.content) {
+              displayMsg = json.message.content
+                .filter((c: any) => c.type === 'text')
+                .map((c: any) => c.text)
+                .join('');
+            } else if (json.type === 'tool_call' && json.subtype === 'started') {
+              const toolName = Object.keys(json.tool_call)[0] || 'unknown';
+              const args = json.tool_call[toolName]?.args || {};
+              displayMsg = `🔧 CALL: ${toolName}(${JSON.stringify(args)})`;
+            } else if (json.type === 'tool_call' && json.subtype === 'completed') {
+              const toolName = Object.keys(json.tool_call)[0] || 'unknown';
+              displayMsg = `📄 RESL: ${toolName}`;
+            } else if (json.type === 'result') {
+              displayMsg = json.result || 'Task completed';
+            }
+
+            this.writeJsonEntry({
+              timestamp: new Date().toISOString(),
+              level: 'stdout',
+              lane: this.session.laneName,
+              task: this.session.taskName,
+              message: displayMsg.substring(0, 2000), // Larger limit for AI text
+              metadata,
+            });
+            continue; // Already logged this JSON line
+          } catch {
+            // Not valid JSON or error, fall through to regular logging
+          }
+        }
+      }
+
+      // Also include significant info/status lines in readable log (compact)
+      if (this.readableLogFd !== null) {
         // Look for log lines: [ISO_DATE] [LEVEL] ...
-        if (cleanLine && 
-            !cleanLine.startsWith('{') && 
-            !this.isNoiseLog(cleanLine) && 
-            /\[\d{4}-\d{2}-\d{2}T/.test(cleanLine)) {
-          
+        if (!this.isNoiseLog(cleanLine) && /\[\d{4}-\d{2}-\d{2}T/.test(cleanLine)) {
           try {
             // Check if it has a level marker
             if (/\[(INFO|WARN|ERROR|SUCCESS|DEBUG)\]/.test(cleanLine)) {
@@ -698,44 +781,26 @@ export class EnhancedLogManager {
           } catch {}
         }
       }
-    }
-    
-    // Write JSON entry (for significant lines only)
-    if (this.config.writeJsonLog) {
-      const cleanText = stripAnsi(text).trim();
-      if (cleanText && !this.isNoiseLog(cleanText)) {
+      
+      // Write regular non-JSON lines to terminal.jsonl
+      if (this.config.writeJsonLog && !this.isNoiseLog(cleanLine)) {
         this.writeJsonEntry({
           timestamp: new Date().toISOString(),
           level: 'stdout',
           lane: this.session.laneName,
           task: this.session.taskName,
-          message: cleanText.substring(0, 1000), // Truncate very long lines
-          raw: this.config.keepRawLogs ? undefined : text.substring(0, 1000),
+          message: cleanLine.substring(0, 1000),
+          raw: this.config.keepRawLogs ? undefined : line.substring(0, 1000),
         });
       }
     }
   }
   
   /**
-   * Parse streaming JSON data for readable log
+   * Parse streaming JSON data for readable log - legacy, integrated into writeStdout
    */
   private parseStreamingData(text: string): void {
-    if (!this.streamingParser) return;
-    
-    // Buffer incomplete lines
-    this.lineBuffer += text;
-    const lines = this.lineBuffer.split('\n');
-    
-    // Keep the last incomplete line in buffer
-    this.lineBuffer = lines.pop() || '';
-    
-    // Parse complete lines
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('{')) {
-        this.streamingParser.parseLine(trimmed);
-      }
-    }
+    // Legacy method, no longer used but kept for internal references if any
   }
 
   /**

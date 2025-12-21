@@ -51,7 +51,7 @@ fi
 echo -e "${GREEN}✓ Prerequisites OK${NC}"
 
 # Setup Directories
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_ROOT="$PROJECT_ROOT/_lifecycle_test"
 CLI_BIN="$PROJECT_ROOT/dist/cli/index.js"
 
@@ -150,15 +150,37 @@ echo -e "${GREEN}✓ Complex tasks defined${NC}"
 
 # Run Orchestration
 echo -e "${YELLOW}Running orchestration (2 lanes, 3 tasks total)...${NC}"
-echo -e "${CYAN}This will interact with Cursor IDE. Please wait...${NC}"
+echo -e "${CYAN}This will interact with Cursor IDE. Monitoring started in background...${NC}"
+echo -e "${CYAN}You can follow the logs at: tail -f _cursorflow/logs/runs/latest/lanes/*/terminal-readable.log${NC}"
+echo -e "${YELLOW}Waiting for agents to start and chat...${NC}"
 echo ""
 
+# Start monitor in background
+MONITOR_LOG="monitor.log"
+(
+  while true; do
+    cursorflow monitor >> "$MONITOR_LOG" 2>&1
+    sleep 5
+  done
+) &
+MONITOR_PID=$!
+
 # We use the CLI command directly
+RUN_EXIT_CODE=0
 if [ "$NO_GIT" == "true" ]; then
     echo -e "${YELLOW}⚠️  Running in --no-git mode (no Git operations)${NC}"
-    cursorflow run _cursorflow/tasks --skip-doctor --no-git
+    cursorflow run _cursorflow/tasks --skip-doctor --no-git || RUN_EXIT_CODE=$?
 else
-    cursorflow run _cursorflow/tasks --skip-doctor
+    # Use --max-concurrent 1 to make it easier to follow for this specific test
+    cursorflow run _cursorflow/tasks --skip-doctor --max-concurrent 1 || RUN_EXIT_CODE=$?
+fi
+
+# Stop monitor
+kill $MONITOR_PID 2>/dev/null || true
+
+if [ $RUN_EXIT_CODE -ne 0 ]; then
+    echo -e "${RED}❌ Orchestration FAILED with exit code $RUN_EXIT_CODE${NC}"
+    exit $RUN_EXIT_CODE
 fi
 
 echo -e "${GREEN}✓ Orchestration finished${NC}"

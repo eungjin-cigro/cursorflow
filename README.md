@@ -256,6 +256,7 @@ module.exports = {
 - [🏃 Run Command](commands/cursorflow-run.md) - Execution options
 - [🩺 Doctor Command](commands/cursorflow-doctor.md) - Validation details
 - [📊 Monitor Command](commands/cursorflow-monitor.md) - Dashboard usage
+- [🔗 Event Triggers & Webhooks](commands/cursorflow-triggers.md) - Event system and webhooks
 - [📦 Examples](examples/) - Practical examples
 
 ## 🚀 Deployment & Updates

@@ -505,8 +505,12 @@ class InteractiveMonitor {
           nextAction = '🏁 Done';
         }
       } else if (status.status === 'waiting') {
-        const missingDeps = status.dependsOn.filter((d: string) => laneStatuses[d] && laneStatuses[d].status !== 'completed');
-        nextAction = `Wait for: ${missingDeps.join(', ')}`;
+        if (status.waitingFor && status.waitingFor.length > 0) {
+          nextAction = `Wait for task: ${status.waitingFor.join(', ')}`;
+        } else {
+          const missingDeps = status.dependsOn.filter((d: string) => laneStatuses[d] && laneStatuses[d].status !== 'completed');
+          nextAction = `Wait for lane: ${missingDeps.join(', ')}`;
+        }
       } else if (status.status === 'running') {
         nextAction = '🚀 Working...';
       }
@@ -552,6 +556,10 @@ class InteractiveMonitor {
     process.stdout.write(`  Branch:    ${status.pipelineBranch}\n`);
     process.stdout.write(`  Chat ID:   ${status.chatId}\n`);
     process.stdout.write(`  Depends:   ${status.dependsOn.join(', ') || 'None'}\n`);
+    
+    if (status.waitingFor && status.waitingFor.length > 0) {
+      process.stdout.write(`\x1b[33m  Wait For:  ${status.waitingFor.join(', ')}\x1b[0m\n`);
+    }
     
     if (status.error) {
       process.stdout.write(`\x1b[31m  Error:     ${status.error}\x1b[0m\n`);
@@ -815,9 +823,10 @@ class InteractiveMonitor {
       dependsOn,
       duration,
       error: state.error,
-      pid: state.pid
+      pid: state.pid,
+      waitingFor: state.waitingFor || [],
     };
-  }
+}
 
   private formatDuration(ms: number): string {
     if (ms <= 0) return '-';

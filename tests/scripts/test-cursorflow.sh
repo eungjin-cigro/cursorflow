@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEMO_PROJECT="$SCRIPT_DIR/test-projects/demo-project"
+DEMO_PROJECT="$SCRIPT_DIR/../../test-projects/demo-project"
 
 if [ ! -d "$DEMO_PROJECT" ]; then
   echo "❌ Demo project not found at: $DEMO_PROJECT"

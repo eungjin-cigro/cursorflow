@@ -18,6 +18,7 @@ export interface CursorFlowConfig {
   lockfileReadOnly: boolean;
   enableReview: boolean;
   reviewModel: string;
+  reviewAllTasks?: boolean;
   maxReviewIterations: number;
   defaultLaneConfig: LaneConfig;
   logLevel: string;
@@ -189,6 +190,10 @@ export interface Task {
   model?: string;
   /** Acceptance criteria for the AI reviewer to validate */
   acceptanceCriteria?: string[];
+  /** Task-level dependencies (format: "lane:task") */
+  dependsOn?: string[];
+  /** Task execution timeout in milliseconds. Overrides lane-level timeout. */
+  timeout?: number;
 }
 
 export interface RunnerConfig {
@@ -200,9 +205,11 @@ export interface RunnerConfig {
   baseBranch?: string;
   model?: string;
   dependencyPolicy: DependencyPolicy;
+  enableReview?: boolean;
   /** Output format for cursor-agent (default: 'stream-json') */
   agentOutputFormat?: 'stream-json' | 'json' | 'plain';
   reviewModel?: string;
+  reviewAllTasks?: boolean;
   maxReviewIterations?: number;
   acceptanceCriteria?: string[];
   /** Task execution timeout in milliseconds. Default: 600000 (10 minutes) */
@@ -263,6 +270,7 @@ export interface ReviewResult {
 export interface TaskResult {
   taskName: string;
   taskBranch: string;
+  acceptanceCriteria?: string[];
   [key: string]: any;
 }
 
@@ -281,6 +289,10 @@ export interface LaneState {
   tasksFile?: string; // Original tasks file path
   dependsOn?: string[];
   pid?: number;
+  /** List of completed task names in this lane */
+  completedTasks?: string[];
+  /** Task-level dependencies currently being waited for (format: "lane:task") */
+  waitingFor?: string[];
 }
 
 export interface ConversationEntry {

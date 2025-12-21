@@ -59,6 +59,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     // Review
     enableReview: false,
     reviewModel: 'sonnet-4.5-thinking',
+    reviewAllTasks: false,
     maxReviewIterations: 3,
     
     // Lane defaults
@@ -178,6 +179,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Review configuration
   enableReview: false,
   reviewModel: 'sonnet-4.5-thinking',
+  reviewAllTasks: false,
   maxReviewIterations: 3,
   
   // Lane configuration

@@ -45,6 +45,9 @@ temp/
 .cursorrules
 .cursor/
 _cursorflow/
+_lifecycle-tests/
+_lifecycle_test/
+_comprehensive_test/
 
 # Test projects
 test-projects/

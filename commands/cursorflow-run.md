@@ -181,6 +181,8 @@ Each JSON file in the tasks directory follows this schema:
 | `prompt` | string | Yes | Instructions for the AI agent |
 | `model` | string | No | Model override for this task |
 | `acceptanceCriteria` | string[] | No | Criteria for AI reviewer validation |
+| `dependsOn` | string[] | No | Task-level dependencies (lane:task) |
+| `timeout` | number | No | Task-specific timeout in ms |
 
 ## Monitoring During Execution
 

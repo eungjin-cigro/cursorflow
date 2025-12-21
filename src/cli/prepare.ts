@@ -97,12 +97,16 @@ Prepare task files for a new feature - Terminal-first workflow.
     --prompt <text>           Task prompt (uses preset or single task)
     --criteria <list>         Comma-separated acceptance criteria
     --model <model>           Model to use (default: sonnet-4.5)
-    --task <spec>             Full task spec: "name|model|prompt|criteria" (repeatable)
+    --task <spec>             Full task spec: "name|model|prompt|criteria|dependsOn|timeout" (repeatable)
 
   Dependencies:
     --sequential              Chain lanes: 1 → 2 → 3
     --deps <spec>             Custom dependencies: "2:1;3:1,2"
     --depends-on <lanes>      Dependencies for --add-lane: "01-lane-1,02-lane-2"
+    Task-level deps:          In --task, add "lane:task" at the end.
+                              Example: "test|sonnet-4.5|Run tests|All pass|01-lane-1:setup"
+    Task-level timeout:       In --task, add milliseconds at the end.
+                              Example: "heavy|sonnet-4.5|Big task|Done||1200000"
 
   Incremental (add to existing):
     --add-lane <dir>          Add a new lane to existing task directory
@@ -203,23 +207,31 @@ function parseArgs(args: string[]): PrepareOptions {
 }
 
 function parseTaskSpec(spec: string): Task {
-  // Format: "name|model|prompt|criteria1,criteria2"
+  // Format: "name|model|prompt|criteria1,criteria2|lane:task1,lane:task2|timeoutMs"
   const parts = spec.split('|');
   
   if (parts.length < 3) {
-    throw new Error(`Invalid task spec: "${spec}". Expected format: "name|model|prompt[|criteria1,criteria2]"`);
+    throw new Error(`Invalid task spec: "${spec}". Expected format: "name|model|prompt[|criteria[|dependsOn[|timeout]]]"`);
   }
   
-  const [name, model, prompt, criteriaStr] = parts;
+  const [name, model, prompt, criteriaStr, depsStr, timeoutStr] = parts;
   const acceptanceCriteria = criteriaStr 
     ? criteriaStr.split(',').map(c => c.trim()).filter(c => c)
     : undefined;
+  
+  const dependsOn = depsStr
+    ? depsStr.split(',').map(d => d.trim()).filter(d => d)
+    : undefined;
+
+  const timeout = timeoutStr ? parseInt(timeoutStr) : undefined;
   
   return {
     name: name.trim(),
     model: model.trim() || 'sonnet-4.5',
     prompt: prompt.trim(),
     ...(acceptanceCriteria && acceptanceCriteria.length > 0 ? { acceptanceCriteria } : {}),
+    ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
+    ...(timeout ? { timeout } : {}),
   };
 }
 

@@ -18,6 +18,7 @@ module.exports = {
   // Review configuration
   enableReview: false,
   reviewModel: 'sonnet-4.5-thinking',
+  reviewAllTasks: false,
   maxReviewIterations: 3,
   
   // Lane configuration
