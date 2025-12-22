@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess, execSync } from 'child_process';
 import * as logger from '../utils/logger';
-import { loadConfig, getLogsDir } from '../utils/config';
+import { loadConfig, getLogsDir, getPofDir } from '../utils/config';
 import { loadState, saveState } from '../utils/state';
 import { LaneState } from '../utils/types';
 import { runDoctor } from '../utils/doctor';
@@ -269,7 +269,14 @@ function checkAndFixZombieLanes(runDir: string): { fixed: string[]; pofCreated: 
   // Create POF file if any zombies were found
   let pofCreated = false;
   if (zombieDetails.length > 0) {
-    const pofPath = safeJoin(runDir, 'pof.json');
+    const config = loadConfig();
+    const pofDir = getPofDir(config);
+    if (!fs.existsSync(pofDir)) {
+      fs.mkdirSync(pofDir, { recursive: true });
+    }
+    
+    const runId = path.basename(runDir);
+    const pofPath = safeJoin(pofDir, `pof-${runId}.json`);
     const existingPof = fs.existsSync(pofPath) 
       ? JSON.parse(fs.readFileSync(pofPath, 'utf-8')) 
       : null;
