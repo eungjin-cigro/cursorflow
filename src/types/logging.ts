@@ -15,12 +15,7 @@ export type MessageType =
   | 'tool' 
   | 'tool_result' 
   | 'result' 
-  | 'thinking'
-  | 'info'
-  | 'warn'
-  | 'error'
-  | 'success'
-  | 'progress';
+  | 'thinking';
 
 export interface ParsedMessage {
   type: MessageType;
