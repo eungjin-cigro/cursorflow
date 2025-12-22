@@ -2,10 +2,13 @@
  * CursorFlow runs command - List and view run details
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
 import { RunService } from '../utils/run-service';
 import { RunStatus, RunInfo } from '../utils/types';
+import { safeJoin } from '../utils/path';
 
 interface RunsOptions {
   status?: RunStatus;
@@ -170,7 +173,18 @@ async function runs(args: string[]): Promise<void> {
   
   const config = loadConfig();
   const logsDir = getLogsDir(config);
-  const runService = new RunService(logsDir);
+  const runsDir = safeJoin(logsDir, 'runs');
+  
+  if (!fs.existsSync(runsDir)) {
+    if (options.json) {
+      console.log('[]');
+    } else {
+      console.log('No runs found. (Runs directory does not exist)');
+    }
+    return;
+  }
+  
+  const runService = new RunService(runsDir);
   
   if (options.runId) {
     const run = runService.getRunInfo(options.runId);
