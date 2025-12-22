@@ -43,7 +43,13 @@ export class TaskService {
     const dirs = fs.readdirSync(this.tasksDir)
       .filter(d => {
         const fullPath = safeJoin(this.tasksDir, d);
-        return fs.statSync(fullPath).isDirectory() && d !== 'example';
+        if (!fs.statSync(fullPath).isDirectory() || d === 'example') return false;
+
+        // Robust check: must match YYMMDDHHMM_ prefix OR contain at least one .json file
+        const hasTimestamp = /^\d{10}_/.test(d);
+        const hasJsonFiles = fs.readdirSync(fullPath).some(f => f.endsWith('.json'));
+        
+        return hasTimestamp || hasJsonFiles;
       })
       .map(name => this.getTaskDirInfo(name))
       .filter((t): t is TaskDirInfo => t !== null)

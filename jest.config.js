@@ -4,14 +4,14 @@ module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.ts'],
   testPathIgnorePatterns: [
-    '/node_modules/',
-    '/_cursorflow/',
-    '/test-projects/',
-    '/examples/'
+    '<rootDir>/node_modules/',
+    '<rootDir>/_cursorflow/',
+    '<rootDir>/test-projects/',
+    '<rootDir>/examples/'
   ],
   modulePathIgnorePatterns: [
-    '/_cursorflow/',
-    '/test-projects/',
-    '/examples/'
+    '<rootDir>/_cursorflow/',
+    '<rootDir>/test-projects/',
+    '<rootDir>/examples/'
   ],
 };

@@ -6,7 +6,8 @@ import * as doctor from '../../src/utils/doctor';
 jest.mock('../../src/utils/doctor');
 
 describe('TaskService', () => {
-  const tmpDir = path.join(__dirname, 'tmp-task-service');
+  const uniqueId = Math.random().toString(36).substring(2, 10);
+  const tmpDir = path.join(__dirname, `tmp-task-service-${uniqueId}`);
   const tasksDir = path.join(tmpDir, 'tasks');
   let taskService: TaskService;
 
@@ -19,6 +20,15 @@ describe('TaskService', () => {
 
   afterAll(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    // Clear tasks directory before each test
+    const items = fs.readdirSync(tasksDir);
+    for (const item of items) {
+      fs.rmSync(path.join(tasksDir, item), { recursive: true, force: true });
+    }
+    jest.clearAllMocks();
   });
 
   describe('listTaskDirs', () => {
@@ -35,9 +45,28 @@ describe('TaskService', () => {
       fs.mkdirSync(path.join(tasksDir, task2));
 
       const dirs = taskService.listTaskDirs();
-      expect(dirs.length).toBeGreaterThanOrEqual(2);
+      expect(dirs.length).toBe(2);
       expect(dirs[0]!.name).toBe(task2);
       expect(dirs[1]!.name).toBe(task1);
+    });
+
+    it('should ignore non-task directories', () => {
+      // Valid task (has timestamp prefix)
+      fs.mkdirSync(path.join(tasksDir, '2412201000_ValidTask'));
+      
+      // Valid task (no timestamp prefix but has .json files)
+      const noTsDir = path.join(tasksDir, 'NoTimestampTask');
+      fs.mkdirSync(noTsDir);
+      fs.writeFileSync(path.join(noTsDir, 'lane1.json'), '{}');
+
+      // Invalid directory (no timestamp prefix AND no .json files)
+      fs.mkdirSync(path.join(tasksDir, 'invalid-dir'));
+
+      const dirs = taskService.listTaskDirs();
+      expect(dirs.length).toBe(2);
+      expect(dirs.map(d => d.name)).toContain('2412201000_ValidTask');
+      expect(dirs.map(d => d.name)).toContain('NoTimestampTask');
+      expect(dirs.map(d => d.name)).not.toContain('invalid-dir');
     });
   });
 
@@ -77,6 +106,9 @@ describe('TaskService', () => {
 
     it('should extract correct timestamp', () => {
       const taskName = '2412221530_AuthSystem';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+
       const info = taskService.getTaskDirInfo(taskName);
       expect(info!.timestamp.getFullYear()).toBe(2024);
       expect(info!.timestamp.getMonth()).toBe(11); // 12월은 11
@@ -94,6 +126,9 @@ describe('TaskService', () => {
       (doctor.runDoctor as jest.Mock).mockReturnValue(mockReport);
 
       const taskName = '2412221530_AuthSystem';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+
       const report = taskService.validateTaskDir(taskName);
       
       expect(report).toEqual(mockReport);
@@ -115,7 +150,11 @@ describe('TaskService', () => {
       };
       (doctor.runDoctor as jest.Mock).mockReturnValue(mockReport);
 
-      const res = taskService.canRun('2412221530_AuthSystem');
+      const taskName = '2412221530_AuthSystem';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+
+      const res = taskService.canRun(taskName);
       expect(res.ok).toBe(false);
       expect(res.issues).toContain('Something is wrong');
     });
