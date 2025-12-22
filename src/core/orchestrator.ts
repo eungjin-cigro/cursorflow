@@ -28,7 +28,19 @@ import {
   ParsedMessage
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
-import { analyzeFailure, analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig } from './failure-policy';
+import { analyzeFailure, analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig, FailureType } from './failure-policy';
+import { 
+  AutoRecoveryManager, 
+  getAutoRecoveryManager, 
+  DEFAULT_AUTO_RECOVERY_CONFIG,
+  AutoRecoveryConfig,
+  RecoveryStage,
+  savePOF,
+  createPOFFromRecoveryState,
+  getGitPushFailureGuidance,
+  getMergeConflictGuidance,
+  getGitErrorGuidance,
+} from './auto-recovery';
 import { detectCyclicDependencies, validateDependencies, printDependencyGraph, DependencyInfo } from '../utils/dependency';
 import { preflightCheck, printPreflightReport, autoRepair } from '../utils/health';
 import { getLatestCheckpoint } from '../utils/checkpoint';
@@ -37,10 +49,10 @@ import { cleanStaleLocks, getLockDir } from '../utils/lock';
 /** Heartbeat interval: 30 seconds */
 const HEARTBEAT_INTERVAL_MS = 30000;
 
-/** Default stall detection configuration */
+/** Default stall detection configuration - 1 minute idle timeout for fast recovery */
 const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
   ...DEFAULT_STALL_CONFIG,
-  idleTimeoutMs: 3 * 60 * 1000,      // 3 minutes
+  idleTimeoutMs: 60 * 1000,          // 1 minute (quick detection for continue signal)
   progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes
   maxRestarts: 2,
 };
@@ -70,10 +82,13 @@ interface RunningLaneInfo {
   logManager?: EnhancedLogManager;
   lastActivity: number;
   lastStateUpdate: number;
-  stallPhase: number; // 0: normal, 1: continued, 2: restarted
+  stallPhase: number; // 0: normal, 1: continued, 2: stronger_prompt, 3: restarted
   taskStartTime: number;
   lastOutput: string;
   statePath: string;
+  bytesReceived: number; // Total bytes received from agent
+  lastBytesCheck: number; // Bytes at last check (for delta calculation)
+  continueSignalsSent: number; // Number of continue signals sent
 }
 
 /**
@@ -441,6 +456,7 @@ export async function orchestrate(tasksDir: string, options: {
   noGit?: boolean;
   skipPreflight?: boolean;
   stallConfig?: Partial<StallDetectionConfig>;
+  autoRecoveryConfig?: Partial<AutoRecoveryConfig>;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -532,6 +548,13 @@ export async function orchestrate(tasksDir: string, options: {
     ...DEFAULT_ORCHESTRATOR_STALL_CONFIG,
     ...options.stallConfig,
   };
+  
+  // Initialize auto-recovery manager
+  const autoRecoveryManager = getAutoRecoveryManager({
+    ...DEFAULT_AUTO_RECOVERY_CONFIG,
+    idleTimeoutMs: stallConfig.idleTimeoutMs, // Sync with stall config
+    ...options.autoRecoveryConfig,
+  });
 
   // Initialize event system
   events.setRunId(runId);
@@ -693,12 +716,16 @@ export async function orchestrate(tasksDir: string, options: {
         }
       });
       
-      // Track last output for long operation detection
+      // Track last output and bytes received for long operation and stall detection
       if (spawnResult.child.stdout) {
         spawnResult.child.stdout.on('data', (data: Buffer) => {
           const info = running.get(lane.name);
           if (info) {
             info.lastOutput = data.toString().trim().split('\n').pop() || '';
+            info.bytesReceived += data.length;
+            
+            // Update auto-recovery manager
+            autoRecoveryManager.recordActivity(lane.name, data.length, info.lastOutput);
           }
         });
       }
@@ -712,7 +739,13 @@ export async function orchestrate(tasksDir: string, options: {
         taskStartTime: now,
         lastOutput: '',
         statePath: laneStatePath,
+        bytesReceived: 0,
+        lastBytesCheck: 0,
+        continueSignalsSent: 0,
       });
+      
+      // Register lane with auto-recovery manager
+      autoRecoveryManager.registerLane(lane.name);
       
       // Update lane tracking
       lane.taskStartTime = now;
@@ -741,7 +774,7 @@ export async function orchestrate(tasksDir: string, options: {
       if (pollTimeout) clearTimeout(pollTimeout);
       
       if (result.name === '__poll__') {
-        // Periodic stall check with multi-layer detection
+        // Periodic stall check with multi-layer detection and escalating recovery
         for (const [laneName, info] of running.entries()) {
           const now = Date.now();
           const idleTime = now - info.lastActivity;
@@ -760,7 +793,11 @@ export async function orchestrate(tasksDir: string, options: {
             // State file might not exist yet
           }
           
-          // Use multi-layer stall analysis
+          // Calculate bytes received since last check
+          const bytesDelta = info.bytesReceived - info.lastBytesCheck;
+          info.lastBytesCheck = info.bytesReceived;
+          
+          // Use multi-layer stall analysis with enhanced context
           const analysis = analyzeStall({
             stallPhase: info.stallPhase,
             idleTimeMs: idleTime,
@@ -768,6 +805,8 @@ export async function orchestrate(tasksDir: string, options: {
             lastOutput: info.lastOutput,
             restartCount: lane.restartCount || 0,
             taskStartTimeMs: info.taskStartTime,
+            bytesReceived: bytesDelta, // Bytes since last check
+            continueSignalsSent: info.continueSignalsSent,
           }, stallConfig);
           
           // Only act if action is not NONE
@@ -781,14 +820,35 @@ export async function orchestrate(tasksDir: string, options: {
                 fs.writeFileSync(interventionPath, 'continue');
                 info.stallPhase = 1;
                 info.lastActivity = now;
-                logger.info(`[${laneName}] Sent continue signal`);
+                info.continueSignalsSent++;
+                logger.info(`[${laneName}] Sent continue signal (#${info.continueSignalsSent})`);
+                
+                events.emit('recovery.continue_signal', {
+                  laneName,
+                  idleSeconds: Math.round(idleTime / 1000),
+                  signalCount: info.continueSignalsSent,
+                });
               } catch (e) {
                 logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
               }
-            } else if (analysis.action === RecoveryAction.RESTART_LANE || 
+            } else if (analysis.action === RecoveryAction.STRONGER_PROMPT) {
+              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
+              const strongerPrompt = `[SYSTEM INTERVENTION] You seem to be stuck. Please continue with your current task immediately. If you're waiting for something, explain what you need and proceed with what you can do now. If you've completed the task, summarize your work and finish.`;
+              try {
+                fs.writeFileSync(interventionPath, strongerPrompt);
+                info.stallPhase = 2;
+                info.lastActivity = now;
+                logger.warn(`[${laneName}] Sent stronger prompt after continue signal failed`);
+                
+                events.emit('recovery.stronger_prompt', { laneName });
+              } catch (e) {
+                logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
+              }
+            } else if (analysis.action === RecoveryAction.KILL_AND_RESTART ||
+                       analysis.action === RecoveryAction.RESTART_LANE || 
                        analysis.action === RecoveryAction.RESTART_LANE_FROM_CHECKPOINT) {
               lane.restartCount = (lane.restartCount || 0) + 1;
-              info.stallPhase = 2;
+              info.stallPhase = 3;
               
               // Try to get checkpoint info
               const checkpoint = getLatestCheckpoint(laneRunDirs[laneName]!);
@@ -796,12 +856,148 @@ export async function orchestrate(tasksDir: string, options: {
                 logger.info(`[${laneName}] Checkpoint available: ${checkpoint.id} (task ${checkpoint.taskIndex})`);
               }
               
-              info.child.kill('SIGKILL');
-              logger.info(`[${laneName}] Restarting lane (restart #${lane.restartCount})`);
+              // Kill the process
+              try {
+                info.child.kill('SIGKILL');
+              } catch {
+                // Process might already be dead
+              }
+              
+              logger.warn(`[${laneName}] Killing and restarting lane (restart #${lane.restartCount})`);
+              
+              events.emit('recovery.restart', {
+                laneName,
+                restartCount: lane.restartCount,
+                maxRestarts: stallConfig.maxRestarts,
+              });
+            } else if (analysis.action === RecoveryAction.RUN_DOCTOR) {
+              info.stallPhase = 4;
+              
+              // Run diagnostics
+              logger.error(`[${laneName}] Running diagnostics due to persistent failures...`);
+              
+              // Import health check dynamically to avoid circular dependency
+              const { runHealthCheck, checkAgentHealth, checkAuthHealth } = await import('../utils/health');
+              
+              const [agentHealth, authHealth] = await Promise.all([
+                checkAgentHealth(),
+                checkAuthHealth(),
+              ]);
+              
+              const issues: string[] = [];
+              if (!agentHealth.ok) issues.push(`Agent: ${agentHealth.message}`);
+              if (!authHealth.ok) issues.push(`Auth: ${authHealth.message}`);
+              
+              if (issues.length > 0) {
+                logger.error(`[${laneName}] Diagnostic issues found:\n  ${issues.join('\n  ')}`);
+              } else {
+                logger.warn(`[${laneName}] No obvious issues found. The problem may be with the AI model or network.`);
+              }
+              
+              // Save diagnostic to file
+              const diagnosticPath = safeJoin(laneRunDirs[laneName]!, 'diagnostic.json');
+              fs.writeFileSync(diagnosticPath, JSON.stringify({
+                timestamp: Date.now(),
+                agentHealthy: agentHealth.ok,
+                authHealthy: authHealth.ok,
+                issues,
+                analysis,
+              }, null, 2));
+              
+              // Kill the process
+              try {
+                info.child.kill('SIGKILL');
+              } catch {
+                // Process might already be dead
+              }
+              
+              logger.error(`[${laneName}] Aborting lane after diagnostic. Check ${diagnosticPath} for details.`);
+              
+              // Save POF for failed recovery
+              const recoveryState = autoRecoveryManager.getState(laneName);
+              if (recoveryState) {
+                try {
+                  const laneStatePath = safeJoin(laneRunDirs[laneName]!, 'state.json');
+                  const laneState = loadState<LaneState>(laneStatePath);
+                  const pofDir = safeJoin(runRoot, '..', '..', 'pof');
+                  const diagnosticInfo = {
+                    timestamp: Date.now(),
+                    agentHealthy: agentHealth.ok,
+                    authHealthy: authHealth.ok,
+                    systemHealthy: true,
+                    suggestedAction: issues.length > 0 ? 'Fix the issues above and retry' : 'Try with a different model',
+                    details: issues.join('\n') || 'No obvious issues found',
+                  };
+                  const pofEntry = createPOFFromRecoveryState(
+                    runId,
+                    runRoot,
+                    laneName,
+                    recoveryState,
+                    laneState,
+                    diagnosticInfo
+                  );
+                  savePOF(runId, pofDir, pofEntry);
+                } catch (pofError: any) {
+                  logger.warn(`[${laneName}] Failed to save POF: ${pofError.message}`);
+                }
+              }
+              
+              events.emit('recovery.diagnosed', {
+                laneName,
+                diagnostic: { agentHealthy: agentHealth.ok, authHealthy: authHealth.ok, issues },
+              });
             } else if (analysis.action === RecoveryAction.ABORT_LANE) {
-              info.stallPhase = 3;
-              info.child.kill('SIGKILL');
+              info.stallPhase = 5;
+              
+              try {
+                info.child.kill('SIGKILL');
+              } catch {
+                // Process might already be dead
+              }
+              
               logger.error(`[${laneName}] Aborting lane due to repeated stalls`);
+              
+              // Save POF for failed recovery
+              const recoveryState = autoRecoveryManager.getState(laneName);
+              if (recoveryState) {
+                try {
+                  const laneStatePath = safeJoin(laneRunDirs[laneName]!, 'state.json');
+                  const laneState = loadState<LaneState>(laneStatePath);
+                  const pofDir = safeJoin(runRoot, '..', '..', 'pof');
+                  const pofEntry = createPOFFromRecoveryState(
+                    runId,
+                    runRoot,
+                    laneName,
+                    recoveryState,
+                    laneState,
+                    recoveryState.diagnosticInfo
+                  );
+                  savePOF(runId, pofDir, pofEntry);
+                } catch (pofError: any) {
+                  logger.warn(`[${laneName}] Failed to save POF: ${pofError.message}`);
+                }
+              }
+            } else if (analysis.action === RecoveryAction.SEND_GIT_GUIDANCE) {
+              // Send guidance message to agent for git issues
+              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
+              
+              // Determine which guidance to send based on the failure type
+              let guidance: string;
+              if (analysis.type === FailureType.GIT_PUSH_REJECTED) {
+                guidance = getGitPushFailureGuidance();
+              } else if (analysis.type === FailureType.MERGE_CONFLICT) {
+                guidance = getMergeConflictGuidance();
+              } else {
+                guidance = getGitErrorGuidance(analysis.message);
+              }
+              
+              try {
+                fs.writeFileSync(interventionPath, guidance);
+                info.lastActivity = now;
+                logger.info(`[${laneName}] Sent git issue guidance to agent`);
+              } catch (e: any) {
+                logger.error(`[${laneName}] Failed to send guidance: ${e.message}`);
+              }
             }
           }
         }
@@ -812,6 +1008,9 @@ export async function orchestrate(tasksDir: string, options: {
       const info = running.get(finished.name)!;
       running.delete(finished.name);
       exitCodes[finished.name] = finished.code;
+      
+      // Unregister from auto-recovery manager
+      autoRecoveryManager.unregisterLane(finished.name);
       
       if (finished.code === 0) {
         completedLanes.add(finished.name);

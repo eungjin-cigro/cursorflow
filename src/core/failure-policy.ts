@@ -13,15 +13,19 @@ import { getCircuitBreaker, CircuitState } from '../utils/retry';
 export enum FailureType {
   STALL_IDLE = 'STALL_IDLE',
   STALL_NO_PROGRESS = 'STALL_NO_PROGRESS',
+  STALL_ZERO_BYTES = 'STALL_ZERO_BYTES',
   AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE',
   AGENT_AUTH_ERROR = 'AGENT_AUTH_ERROR',
   AGENT_RATE_LIMIT = 'AGENT_RATE_LIMIT',
   AGENT_TIMEOUT = 'AGENT_TIMEOUT',
+  AGENT_NO_RESPONSE = 'AGENT_NO_RESPONSE',
+  ZOMBIE_PROCESS = 'ZOMBIE_PROCESS',
   DEPENDENCY_BLOCK = 'DEPENDENCY_BLOCK',
   DEPENDENCY_FAILED = 'DEPENDENCY_FAILED',
   DEPENDENCY_TIMEOUT = 'DEPENDENCY_TIMEOUT',
   REVIEW_FAIL = 'REVIEW_FAIL',
   GIT_ERROR = 'GIT_ERROR',
+  GIT_PUSH_REJECTED = 'GIT_PUSH_REJECTED',
   MERGE_CONFLICT = 'MERGE_CONFLICT',
   NETWORK_ERROR = 'NETWORK_ERROR',
   STATE_CORRUPTION = 'STATE_CORRUPTION',
@@ -30,13 +34,17 @@ export enum FailureType {
 
 export enum RecoveryAction {
   CONTINUE_SIGNAL = 'CONTINUE_SIGNAL',
+  STRONGER_PROMPT = 'STRONGER_PROMPT',
   RETRY_TASK = 'RETRY_TASK',
   RESTART_LANE = 'RESTART_LANE',
   RESTART_LANE_FROM_CHECKPOINT = 'RESTART_LANE_FROM_CHECKPOINT',
+  KILL_AND_RESTART = 'KILL_AND_RESTART',
   ABORT_LANE = 'ABORT_LANE',
   WAIT_FOR_USER = 'WAIT_FOR_USER',
   WAIT_AND_RETRY = 'WAIT_AND_RETRY',
   RESET_GIT = 'RESET_GIT',
+  SEND_GIT_GUIDANCE = 'SEND_GIT_GUIDANCE',
+  RUN_DOCTOR = 'RUN_DOCTOR',
   NONE = 'NONE',
 }
 
@@ -68,10 +76,10 @@ export interface StallDetectionConfig {
 }
 
 export const DEFAULT_STALL_CONFIG: StallDetectionConfig = {
-  idleTimeoutMs: 3 * 60 * 1000,      // 3 minutes without output
+  idleTimeoutMs: 60 * 1000,           // 1 minute without output (quick detection)
   progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes without progress
   taskTimeoutMs: 30 * 60 * 1000,      // 30 minutes max per task
-  longOperationGraceMs: 15 * 60 * 1000, // 15 minute grace for long ops
+  longOperationGraceMs: 10 * 60 * 1000, // 10 minute grace for long ops
   longOperationPatterns: [
     /Installing dependencies/i,
     /npm install/i,
@@ -80,12 +88,15 @@ export const DEFAULT_STALL_CONFIG: StallDetectionConfig = {
     /Building/i,
     /Compiling/i,
     /Downloading/i,
+    /Fetching/i,
+    /Cloning/i,
+    /Bundling/i,
   ],
   maxRestarts: 2,
 };
 
 export interface StallContext {
-  /** Current stall phase (0: normal, 1: continued, 2: restarted) */
+  /** Current stall phase (0: normal, 1: continued, 2: stronger_prompt, 3: restarted) */
   stallPhase: number;
   /** Time since last activity */
   idleTimeMs: number;
@@ -97,6 +108,10 @@ export interface StallContext {
   restartCount?: number;
   /** Task start time */
   taskStartTimeMs?: number;
+  /** Bytes received since last check (0 = no response at all) */
+  bytesReceived?: number;
+  /** Number of continue signals already sent */
+  continueSignalsSent?: number;
 }
 
 export interface FailureContext {
@@ -112,10 +127,25 @@ export interface FailureContext {
 }
 
 /**
- * Analyze stall condition with multi-layer detection
+ * Analyze stall condition with multi-layer detection and escalating recovery
+ * 
+ * Recovery escalation stages:
+ * 1. Phase 0 → Phase 1: Send continue signal (after 2 min idle)
+ * 2. Phase 1 → Phase 2: Send stronger prompt (after 1.5 min grace)
+ * 3. Phase 2 → Phase 3: Kill and restart process (after 1 min grace)
+ * 4. Phase 3+: Abort after max restarts exceeded
  */
 export function analyzeStall(context: StallContext, config: StallDetectionConfig = DEFAULT_STALL_CONFIG): FailureAnalysis {
-  const { stallPhase, idleTimeMs, progressTimeMs, lastOutput, restartCount = 0, taskStartTimeMs } = context;
+  const { 
+    stallPhase, 
+    idleTimeMs, 
+    progressTimeMs, 
+    lastOutput, 
+    restartCount = 0, 
+    taskStartTimeMs,
+    bytesReceived = -1, // -1 means not tracked
+    continueSignalsSent = 0,
+  } = context;
   
   // Check if this might be a long operation
   const isLongOperation = lastOutput && config.longOperationPatterns.some(p => p.test(lastOutput));
@@ -125,10 +155,21 @@ export function analyzeStall(context: StallContext, config: StallDetectionConfig
   if (taskStartTimeMs && (Date.now() - taskStartTimeMs) > config.taskTimeoutMs) {
     return {
       type: FailureType.AGENT_TIMEOUT,
-      action: restartCount < config.maxRestarts ? RecoveryAction.RESTART_LANE : RecoveryAction.ABORT_LANE,
+      action: restartCount < config.maxRestarts ? RecoveryAction.KILL_AND_RESTART : RecoveryAction.RUN_DOCTOR,
       message: `Task exceeded maximum timeout of ${Math.round(config.taskTimeoutMs / 60000)} minutes`,
       isTransient: restartCount < config.maxRestarts,
-      details: { taskDurationMs: Date.now() - taskStartTimeMs },
+      details: { taskDurationMs: Date.now() - taskStartTimeMs, restartCount },
+    };
+  }
+  
+  // Check for zero bytes received (agent completely unresponsive)
+  if (bytesReceived === 0 && idleTimeMs > effectiveIdleTimeout) {
+    return {
+      type: FailureType.AGENT_NO_RESPONSE,
+      action: stallPhase < 2 ? RecoveryAction.CONTINUE_SIGNAL : RecoveryAction.KILL_AND_RESTART,
+      message: `Agent produced 0 bytes for ${Math.round(idleTimeMs / 1000)}s - possible API issue`,
+      isTransient: true,
+      details: { idleTimeMs, bytesReceived, stallPhase },
     };
   }
   
@@ -136,61 +177,88 @@ export function analyzeStall(context: StallContext, config: StallDetectionConfig
   if (progressTimeMs && progressTimeMs > config.progressTimeoutMs) {
     return {
       type: FailureType.STALL_NO_PROGRESS,
-      action: stallPhase === 0 ? RecoveryAction.CONTINUE_SIGNAL : RecoveryAction.RESTART_LANE,
+      action: stallPhase === 0 ? RecoveryAction.CONTINUE_SIGNAL : 
+              stallPhase === 1 ? RecoveryAction.STRONGER_PROMPT :
+              RecoveryAction.KILL_AND_RESTART,
       message: `No progress for ${Math.round(progressTimeMs / 60000)} minutes`,
       isTransient: true,
-      details: { progressTimeMs },
+      details: { progressTimeMs, stallPhase },
     };
   }
   
-  // Handle based on stall phase
+  // Phase 0: Normal operation, check for initial idle
   if (stallPhase === 0 && idleTimeMs > effectiveIdleTimeout) {
     return {
       type: FailureType.STALL_IDLE,
       action: RecoveryAction.CONTINUE_SIGNAL,
-      message: `Lane idle for ${Math.round(idleTimeMs / 1000)}s. Sending continue...`,
+      message: `Lane idle for ${Math.round(idleTimeMs / 1000)}s. Sending continue signal...`,
       isTransient: true,
-      details: { idleTimeMs, isLongOperation },
+      details: { idleTimeMs, isLongOperation, phase: 0 },
     };
   }
   
+  // Phase 1: Continue signal sent, wait for response
   if (stallPhase === 1) {
-    // Already sent continue, check if still stalled
-    const restartTimeout = config.idleTimeoutMs * 1.5; // 50% more time after continue
+    const graceTimeout = 90 * 1000; // 1.5 minutes grace after continue
     
-    if (idleTimeMs > restartTimeout) {
+    if (idleTimeMs > graceTimeout) {
+      return {
+        type: FailureType.STALL_IDLE,
+        action: RecoveryAction.STRONGER_PROMPT,
+        message: `Still idle after continue signal. Sending stronger prompt...`,
+        isTransient: true,
+        details: { idleTimeMs, continueSignalsSent, phase: 1 },
+      };
+    }
+  }
+  
+  // Phase 2: Stronger prompt sent, wait or escalate
+  if (stallPhase === 2) {
+    const strongerGraceTimeout = 60 * 1000; // 1 minute grace after stronger prompt
+    
+    if (idleTimeMs > strongerGraceTimeout) {
       if (restartCount < config.maxRestarts) {
         return {
           type: FailureType.STALL_IDLE,
-          action: RecoveryAction.RESTART_LANE,
-          message: 'Lane still idle after continue signal. Restarting lane...',
+          action: RecoveryAction.KILL_AND_RESTART,
+          message: `No response after stronger prompt. Killing and restarting process...`,
           isTransient: true,
-          details: { idleTimeMs, restartCount },
+          details: { idleTimeMs, restartCount, maxRestarts: config.maxRestarts, phase: 2 },
         };
       } else {
         return {
           type: FailureType.STALL_IDLE,
-          action: RecoveryAction.ABORT_LANE,
-          message: `Lane stalled after ${restartCount} restarts. Aborting.`,
+          action: RecoveryAction.RUN_DOCTOR,
+          message: `Lane failed after ${restartCount} restarts. Running diagnostics...`,
           isTransient: false,
-          details: { restartCount },
+          details: { restartCount, phase: 2 },
         };
       }
     }
   }
   
-  if (stallPhase >= 2) {
-    // Already restarted, be more aggressive
-    const abortTimeout = config.idleTimeoutMs * 0.5;
+  // Phase 3+: After restart, monitor with shorter timeout
+  if (stallPhase >= 3) {
+    const postRestartTimeout = config.idleTimeoutMs * 0.75; // Shorter timeout after restart
     
-    if (idleTimeMs > abortTimeout) {
-      return {
-        type: FailureType.STALL_IDLE,
-        action: RecoveryAction.ABORT_LANE,
-        message: 'Lane stalled again after restart. Aborting.',
-        isTransient: false,
-        details: { stallPhase, idleTimeMs },
-      };
+    if (idleTimeMs > postRestartTimeout) {
+      if (restartCount < config.maxRestarts) {
+        return {
+          type: FailureType.STALL_IDLE,
+          action: RecoveryAction.CONTINUE_SIGNAL,
+          message: `Lane idle after restart. Retrying continue signal...`,
+          isTransient: true,
+          details: { idleTimeMs, restartCount, phase: stallPhase },
+        };
+      } else {
+        return {
+          type: FailureType.STALL_IDLE,
+          action: RecoveryAction.RUN_DOCTOR,
+          message: `Lane repeatedly stalled. Running diagnostics for root cause...`,
+          isTransient: false,
+          details: { stallPhase, restartCount },
+        };
+      }
     }
   }
   
@@ -281,20 +349,31 @@ export function analyzeFailure(error: string | null | undefined, context?: Failu
     };
   }
 
-  // 6. Git/merge errors
-  if (msg.includes('conflict') || msg.includes('merge failed')) {
+  // 6. Git/merge errors - send guidance to agent
+  if (msg.includes('conflict') || msg.includes('merge failed') || msg.includes('automatic merge failed')) {
     return {
       type: FailureType.MERGE_CONFLICT,
-      action: RecoveryAction.RESET_GIT,
-      message: 'Merge conflict detected.',
-      isTransient: false,
+      action: RecoveryAction.SEND_GIT_GUIDANCE,
+      message: 'Merge conflict detected. Sending guidance to agent...',
+      isTransient: true,
     };
   }
   
+  // Git push rejected (common in parallel lanes)
+  if (msg.includes('rejected') || msg.includes('non-fast-forward') || 
+      msg.includes('failed to push') || msg.includes('fetch first')) {
+    return {
+      type: FailureType.GIT_PUSH_REJECTED,
+      action: RecoveryAction.SEND_GIT_GUIDANCE,
+      message: 'Git push rejected. Sending guidance to agent...',
+      isTransient: true,
+    };
+  }
+
   if (msg.includes('git') && (msg.includes('error') || msg.includes('failed'))) {
     return {
       type: FailureType.GIT_ERROR,
-      action: RecoveryAction.RETRY_TASK,
+      action: (context?.retryCount || 0) < 2 ? RecoveryAction.RETRY_TASK : RecoveryAction.RESET_GIT,
       message: 'Git operation failed.',
       isTransient: true,
     };

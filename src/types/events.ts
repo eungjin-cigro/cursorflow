@@ -116,3 +116,41 @@ export interface ReviewRejectedPayload {
   iterations: number;
 }
 
+// Recovery Events
+export interface RecoveryContinueSignalPayload {
+  laneName: string;
+  idleSeconds: number;
+  signalCount: number;
+}
+
+export interface RecoveryStrongerPromptPayload {
+  laneName: string;
+  prompt?: string;
+}
+
+export interface RecoveryRestartPayload {
+  laneName: string;
+  restartCount: number;
+  maxRestarts: number;
+}
+
+export interface RecoveryDiagnosedPayload {
+  laneName: string;
+  diagnostic: {
+    timestamp?: number;
+    agentHealthy: boolean;
+    authHealthy: boolean;
+    systemHealthy?: boolean;
+    suggestedAction?: string;
+    details?: string;
+    issues?: string[];
+  };
+}
+
+export interface RecoveryConflictResolutionPayload {
+  success: boolean;
+  strategy: string;
+  resolvedCount: number;
+  unresolvedCount: number;
+}
+
