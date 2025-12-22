@@ -26,7 +26,7 @@ import {
   DependencyPolicy, 
   DependencyRequestPlan,
   LaneState
-} from '../utils/types';
+} from '../types';
 
 /**
  * Execute cursor-agent command with timeout and better error handling
@@ -410,33 +410,155 @@ export function extractDependencyRequest(text: string): { required: boolean; pla
 }
 
 /**
- * Wrap prompt with dependency policy
+ * Inter-task state file name
  */
-export function wrapPromptForDependencyPolicy(prompt: string, policy: DependencyPolicy, options: { noGit?: boolean } = {}): string {
-  const { noGit = false } = options;
+const LANE_STATE_FILE = '_cursorflow/lane-state.json';
+
+/**
+ * Dependency request file name - agent writes here when dependency changes are needed
+ */
+const DEPENDENCY_REQUEST_FILE = '_cursorflow/dependency-request.json';
+
+/**
+ * Read dependency request from file if it exists
+ */
+export function readDependencyRequestFile(worktreeDir: string): { required: boolean; plan?: DependencyRequestPlan } {
+  const filePath = safeJoin(worktreeDir, DEPENDENCY_REQUEST_FILE);
   
-  if (policy.allowDependencyChange && !policy.lockfileReadOnly && !noGit) {
+  if (!fs.existsSync(filePath)) {
+    return { required: false };
+  }
+  
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const plan = JSON.parse(content) as DependencyRequestPlan;
+    
+    // Validate required fields
+    if (plan.reason && Array.isArray(plan.commands) && plan.commands.length > 0) {
+      logger.info(`📦 Dependency request file detected: ${filePath}`);
+      return { required: true, plan };
+    }
+    
+    logger.warn(`Invalid dependency request file format: ${filePath}`);
+    return { required: false };
+  } catch (e) {
+    logger.warn(`Failed to parse dependency request file: ${e}`);
+    return { required: false };
+  }
+}
+
+/**
+ * Clear dependency request file after processing
+ */
+export function clearDependencyRequestFile(worktreeDir: string): void {
+  const filePath = safeJoin(worktreeDir, DEPENDENCY_REQUEST_FILE);
+  
+  if (fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+      logger.info(`🗑️ Cleared dependency request file: ${filePath}`);
+    } catch (e) {
+      logger.warn(`Failed to clear dependency request file: ${e}`);
+    }
+  }
+}
+
+/**
+ * Wrap prompt with dependency policy instructions (legacy, used by tests)
+ */
+export function wrapPromptForDependencyPolicy(prompt: string, policy: DependencyPolicy): string {
+  if (policy.allowDependencyChange && !policy.lockfileReadOnly) {
     return prompt;
   }
   
-  let rules = '# Dependency Policy (MUST FOLLOW)\n\nYou are running in a restricted lane.\n\n';
+  let wrapped = `### 📦 Dependency Policy\n`;
+  wrapped += `- allowDependencyChange: ${policy.allowDependencyChange}\n`;
+  wrapped += `- lockfileReadOnly: ${policy.lockfileReadOnly}\n\n`;
+  wrapped += prompt;
   
-  rules += `- allowDependencyChange: ${policy.allowDependencyChange}\n`;
-  rules += `- lockfileReadOnly: ${policy.lockfileReadOnly}\n`;
+  return wrapped;
+}
+
+/**
+ * Wrap prompt with global context, dependency policy, and worktree instructions
+ */
+export function wrapPrompt(
+  prompt: string, 
+  config: RunnerConfig, 
+  options: { 
+    noGit?: boolean; 
+    isWorktree?: boolean;
+    previousState?: string | null;
+  } = {}
+): string {
+  const { noGit = false, isWorktree = true, previousState = null } = options;
   
-  if (noGit) {
-    rules += '- NO_GIT_MODE: Git is disabled. DO NOT run any git commands (commit, push, etc.). Just edit files.\n';
+  // 1. PREFIX: Environment & Worktree context
+  let wrapped = `### 🛠 Environment & Context\n`;
+  wrapped += `- **Workspace**: 당신은 독립된 **Git 워크트리** (프로젝트 루트)에서 작업 중입니다.\n`;
+  wrapped += `- **Path Rule**: 모든 파일 참조 및 터미널 명령어는 **현재 디렉토리(./)**를 기준으로 하세요.\n`;
+  
+  if (isWorktree) {
+    wrapped += `- **File Availability**: Git 추적 파일만 존재합니다. (node_modules, .env 등은 기본적으로 없음)\n`;
+  }
+
+  // 2. Previous Task State (if available)
+  if (previousState) {
+    wrapped += `\n### 💡 Previous Task State\n`;
+    wrapped += `이전 태스크에서 전달된 상태 정보입니다:\n`;
+    wrapped += `\`\`\`json\n${previousState}\n\`\`\`\n`;
   }
   
-  rules += '\nRules:\n';
-  rules += '- BEFORE making any code changes, decide whether dependency changes are required.\n';
-  rules += '- If dependency changes are required, DO NOT change any files. Instead reply with:\n\n';
-  rules += 'DEPENDENCY_CHANGE_REQUIRED\n';
-  rules += '```json\n{ "reason": "...", "changes": [...], "commands": ["pnpm add ..."], "notes": "..." }\n```\n\n';
-  rules += 'Then STOP.\n';
-  rules += '- If dependency changes are NOT required, proceed normally.\n';
+  // 3. Dependency Policy (Integrated)
+  const policy = config.dependencyPolicy;
+  wrapped += `\n### 📦 Dependency Policy\n`;
+  wrapped += `- allowDependencyChange: ${policy.allowDependencyChange}\n`;
+  wrapped += `- lockfileReadOnly: ${policy.lockfileReadOnly}\n`;
   
-  return `${rules}\n---\n\n${prompt}`;
+  if (noGit) {
+    wrapped += `- NO_GIT_MODE: Git 명령어를 사용하지 마세요. 파일 수정만 가능합니다.\n`;
+  }
+
+  wrapped += `\n**📦 Dependency Change Rules:**\n`;
+  wrapped += `1. 코드를 수정하기 전, 의존성 변경이 필요한지 **먼저** 판단하세요.\n`;
+  wrapped += `2. 의존성 변경이 필요하다면:\n`;
+  wrapped += `   - **다른 파일을 절대 수정하지 마세요.**\n`;
+  wrapped += `   - 아래 JSON을 \`./${DEPENDENCY_REQUEST_FILE}\` 파일에 저장하세요:\n`;
+  wrapped += `     \`\`\`json\n`;
+  wrapped += `     {\n`;
+  wrapped += `       "reason": "왜 이 의존성이 필요한지 설명",\n`;
+  wrapped += `       "changes": ["add lodash@^4.17.21", "remove unused-pkg"],\n`;
+  wrapped += `       "commands": ["pnpm add lodash@^4.17.21", "pnpm remove unused-pkg"],\n`;
+  wrapped += `       "notes": "추가 참고사항 (선택)"  \n`;
+  wrapped += `     }\n`;
+  wrapped += `     \`\`\`\n`;
+  wrapped += `   - 파일 저장 후 **즉시 작업을 종료**하세요. 오케스트레이터가 처리합니다.\n`;
+  wrapped += `3. 의존성 변경이 불필요하면 바로 본 작업을 진행하세요.\n`;
+
+  wrapped += `\n---\n\n${prompt}\n\n---\n`;
+
+  // 4. SUFFIX: Task Completion & Git Requirements
+  wrapped += `\n### 📝 Task Completion Requirements\n`;
+  wrapped += `**반드시 다음 순서로 작업을 마무리하세요:**\n\n`;
+  
+  if (!noGit) {
+    wrapped += `1. **Git Commit & Push** (필수!):\n`;
+    wrapped += `   \`\`\`bash\n`;
+    wrapped += `   git add -A\n`;
+    wrapped += `   git commit -m "feat: <작업 내용 요약>"\n`;
+    wrapped += `   git push origin HEAD\n`;
+    wrapped += `   \`\`\`\n`;
+    wrapped += `   ⚠️ 커밋과 푸시 없이 작업을 종료하면 변경사항이 손실됩니다!\n\n`;
+  }
+  
+  wrapped += `2. **State Passing**: 다음 태스크로 전달할 정보가 있다면 \`./${LANE_STATE_FILE}\`에 JSON으로 저장하세요.\n\n`;
+  wrapped += `3. **Summary**: 작업 완료 후 다음을 요약해 주세요:\n`;
+  wrapped += `   - 생성/수정된 파일 목록\n`;
+  wrapped += `   - 주요 변경 사항\n`;
+  wrapped += `   - 커밋 해시 (git log --oneline -1)\n\n`;
+  wrapped += `4. 지시된 문서(docs/...)를 찾을 수 없다면 즉시 보고하세요.\n`;
+
+  return wrapped;
 }
 
 /**
@@ -593,10 +715,27 @@ export async function runTask({
   // Apply dependency permissions
   applyDependencyFilePermissions(worktreeDir, config.dependencyPolicy);
   
-  // Run prompt
-  const prompt1 = wrapPromptForDependencyPolicy(task.prompt, config.dependencyPolicy, { noGit });
+  // Read previous task state if available
+  let previousState: string | null = null;
+  const stateFilePath = safeJoin(worktreeDir, LANE_STATE_FILE);
+  if (fs.existsSync(stateFilePath)) {
+    try {
+      previousState = fs.readFileSync(stateFilePath, 'utf8');
+      logger.info('Loaded previous task state from _cursorflow/lane-state.json');
+    } catch (e) {
+      logger.warn(`Failed to read inter-task state: ${e}`);
+    }
+  }
+
+  // Wrap prompt with context, previous state, and completion instructions
+  const wrappedPrompt = wrapPrompt(task.prompt, config, { 
+    noGit, 
+    isWorktree: !noGit,
+    previousState
+  });
   
-  appendLog(convoPath, createConversationEntry('user', prompt1, {
+  // Log ONLY the original prompt to keep logs clean
+  appendLog(convoPath, createConversationEntry('user', task.prompt, {
     task: task.name,
     model,
   }));
@@ -606,13 +745,13 @@ export async function runTask({
   events.emit('agent.prompt_sent', {
     taskName: task.name,
     model,
-    promptLength: prompt1.length,
+    promptLength: wrappedPrompt.length,
   });
 
   const r1 = await cursorAgentSend({
     workspaceDir: worktreeDir,
     chatId,
-    prompt: prompt1,
+    prompt: wrappedPrompt,
     model,
     signalDir: runDir,
     timeout,
@@ -649,15 +788,31 @@ export async function runTask({
     };
   }
   
-  // Check for dependency request
-  const depReq = extractDependencyRequest(r1.resultText || '');
-  if (depReq.required && !config.dependencyPolicy.allowDependencyChange) {
-    return {
-      taskName: task.name,
-      taskBranch,
-      status: 'BLOCKED_DEPENDENCY',
-      dependencyRequest: depReq.plan || null,
-    };
+  // Check for dependency request (file-based takes priority, then text-based)
+  const fileDepReq = readDependencyRequestFile(worktreeDir);
+  const textDepReq = extractDependencyRequest(r1.resultText || '');
+  
+  // Determine which request to use (file-based is preferred as it's more structured)
+  const depReq = fileDepReq.required ? fileDepReq : textDepReq;
+  
+  if (depReq.required) {
+    logger.info(`📦 Dependency change requested: ${depReq.plan?.reason || 'No reason provided'}`);
+    
+    if (depReq.plan) {
+      logger.info(`   Commands: ${depReq.plan.commands.join(', ')}`);
+    }
+    
+    if (!config.dependencyPolicy.allowDependencyChange) {
+      // Clear the file so it doesn't persist after resolution
+      clearDependencyRequestFile(worktreeDir);
+      
+      return {
+        taskName: task.name,
+        taskBranch,
+        status: 'BLOCKED_DEPENDENCY',
+        dependencyRequest: depReq.plan || null,
+      };
+    }
   }
   
   // Push task branch (skip in noGit mode)
@@ -759,7 +914,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.success('✓ Cursor authentication OK');
   
   // In noGit mode, we don't need repoRoot - use current directory
-  const repoRoot = noGit ? process.cwd() : git.getRepoRoot();
+  const repoRoot = noGit ? process.cwd() : git.getMainRepoRoot();
   
   // Load existing state if resuming
   const statePath = safeJoin(runDir, 'state.json');

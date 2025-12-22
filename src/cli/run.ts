@@ -18,6 +18,7 @@ interface RunOptions {
   maxConcurrent: number | null;
   skipDoctor: boolean;
   noGit: boolean;
+  raw: boolean;
   help: boolean;
 }
 
@@ -33,6 +34,7 @@ Options:
   --executor <type>      cursor-agent | cloud
   --skip-doctor          Skip environment checks (not recommended)
   --no-git               Disable Git operations (worktree, push, commit)
+  --raw                  Save raw logs (absolute raw, no processing)
   --dry-run              Show execution plan without starting agents
   --help, -h             Show help
 
@@ -54,6 +56,7 @@ function parseArgs(args: string[]): RunOptions {
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '0') || null : null,
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
     noGit: args.includes('--no-git'),
+    raw: args.includes('--raw'),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -120,9 +123,9 @@ async function run(args: string[]): Promise<void> {
       for (const issue of report.issues) {
         const header = `${issue.title} (${issue.id})`;
         if (issue.severity === 'error') {
-          logger.error(header, '❌');
+          logger.error(header, { emoji: '❌' });
         } else {
-          logger.warn(header, '⚠️');
+          logger.warn(header, { emoji: '⚠️' });
         }
         console.log(`   ${issue.message}`);
         if (issue.details) console.log(`   Details: ${issue.details}`);
@@ -143,7 +146,10 @@ async function run(args: string[]): Promise<void> {
       runDir: path.join(logsDir, 'runs', `run-${Date.now()}`),
       maxConcurrentLanes: options.maxConcurrent || config.maxConcurrentLanes,
       webhooks: config.webhooks || [],
-      enhancedLogging: config.enhancedLogging,
+      enhancedLogging: {
+        ...config.enhancedLogging,
+        ...(options.raw ? { raw: true } : {}),
+      },
       noGit: options.noGit,
     });
   } catch (error: any) {

@@ -12,20 +12,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { LogImportance } from './types';
+import { LogImportance, JsonLogEntry } from '../types';
 import * as logger from './logger';
-
-/**
- * Raw JSON log entry from terminal.jsonl
- */
-export interface JsonLogEntry {
-  timestamp: string;
-  type: string;
-  level?: string;
-  content?: string;
-  message?: string;
-  [key: string]: any;
-}
 
 /**
  * Processed log entry for display
@@ -474,7 +462,7 @@ export class LogBufferService extends EventEmitter {
       case 'stdout':
         return `${logger.COLORS.white}[STDOUT]${logger.COLORS.reset}`;
       default:
-        return `${logger.COLORS.gray}[${type.toUpperCase().padEnd(6)}]${logger.COLORS.reset}`;
+        return `${logger.COLORS.gray}[${type.toUpperCase().padEnd(8)}]${logger.COLORS.reset}`;
     }
   }
 }

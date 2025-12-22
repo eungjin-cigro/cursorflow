@@ -4,20 +4,19 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir, getPofDir } from '../utils/config';
 import { loadState, saveState } from '../utils/state';
-import { LaneState } from '../utils/types';
+import { LaneState } from '../types';
 import { runDoctor } from '../utils/doctor';
 import { safeJoin } from '../utils/path';
 import { 
   EnhancedLogManager, 
   createLogManager, 
-  DEFAULT_LOG_CONFIG,
-  stripAnsi,
   ParsedMessage
 } from '../utils/enhanced-logger';
+import { formatMessageForConsole } from '../utils/log-formatter';
 
 interface ResumeOptions {
   lane: string | null;
@@ -40,7 +39,7 @@ Usage: cursorflow resume [lane] [options]
 Resume interrupted or failed lanes.
 
 Options:
-  <lane>                 Lane name to resume (single lane mode)
+  <lane>                 Lane name or tasks directory to resume
   --all                  Resume ALL incomplete/failed lanes
   --status               Show status of all lanes in the run (no resume)
   --run-dir <path>       Use a specific run directory (default: latest)
@@ -56,8 +55,8 @@ Examples:
   cursorflow resume --status                 # Check status of all lanes
   cursorflow resume --all                    # Resume all incomplete lanes
   cursorflow resume lane-1                   # Resume single lane
+  cursorflow resume _cursorflow/tasks/feat1  # Resume all lanes in directory
   cursorflow resume --all --restart          # Restart all incomplete lanes from task 0
-  cursorflow resume --all --max-concurrent 2 # Resume with max 2 parallel lanes
   `);
 }
 
@@ -110,79 +109,6 @@ const STATUS_COLORS: Record<string, string> = {
   unknown: '\x1b[90m',   // gray
 };
 const RESET = '\x1b[0m';
-
-/**
- * Format and print parsed message to console (copied from orchestrator.ts)
- */
-function handleParsedMessage(laneName: string, msg: ParsedMessage): void {
-  const ts = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false });
-  const laneLabel = `[${laneName}]`.padEnd(12);
-  
-  let prefix = '';
-  let content = msg.content;
-  
-  switch (msg.type) {
-    case 'user':
-      prefix = `${logger.COLORS.cyan}🧑 USER${logger.COLORS.reset}`;
-      content = content.replace(/\n/g, ' ');
-      break;
-    case 'assistant':
-      prefix = `${logger.COLORS.green}🤖 ASST${logger.COLORS.reset}`;
-      break;
-    case 'tool':
-      prefix = `${logger.COLORS.yellow}🔧 TOOL${logger.COLORS.reset}`;
-      const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
-      if (toolMatch) {
-        const [, name, args] = toolMatch;
-        try {
-          const parsedArgs = JSON.parse(args!);
-          let argStr = '';
-          if (name === 'read_file' && parsedArgs.target_file) argStr = parsedArgs.target_file;
-          else if (name === 'run_terminal_cmd' && parsedArgs.command) argStr = parsedArgs.command;
-          else if (name === 'write' && parsedArgs.file_path) argStr = parsedArgs.file_path;
-          else if (name === 'search_replace' && parsedArgs.file_path) argStr = parsedArgs.file_path;
-          else {
-            const keys = Object.keys(parsedArgs);
-            if (keys.length > 0) argStr = String(parsedArgs[keys[0]]).substring(0, 50);
-          }
-          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}(${argStr})`;
-        } catch {
-          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}: ${args}`;
-        }
-      }
-      break;
-    case 'tool_result':
-      prefix = `${logger.COLORS.gray}📄 RESL${logger.COLORS.reset}`;
-      const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
-      content = resMatch ? `${resMatch[1]} OK` : 'result';
-      break;
-    case 'result':
-      prefix = `${logger.COLORS.green}✅ DONE${logger.COLORS.reset}`;
-      break;
-    case 'system':
-      prefix = `${logger.COLORS.gray}⚙️  SYS${logger.COLORS.reset}`;
-      break;
-    case 'thinking':
-      prefix = `${logger.COLORS.gray}🤔 THNK${logger.COLORS.reset}`;
-      break;
-  }
-  
-  if (prefix) {
-    const lines = content.split('\n');
-    const tsPrefix = `${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneLabel}${logger.COLORS.reset}`;
-    
-    if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result' || msg.type === 'thinking') {
-      const header = `${prefix} ┌${'─'.repeat(60)}`;
-      process.stdout.write(`${tsPrefix} ${header}\n`);
-      for (const line of lines) {
-        process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} │ ${line}\n`);
-      }
-      process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} └${'─'.repeat(60)}\n`);
-    } else {
-      process.stdout.write(`${tsPrefix} ${prefix} ${content}\n`);
-    }
-  }
-}
 
 interface LaneInfo {
   name: string;
@@ -525,56 +451,28 @@ function spawnLaneResume(
     runnerArgs.push('--executor', options.executor);
   }
 
-  const logManager = createLogManager(laneDir, laneName, options.enhancedLogConfig || {}, (msg) => handleParsedMessage(laneName, msg));
+  const logManager = createLogManager(laneDir, laneName, options.enhancedLogConfig || {}, (msg) => {
+    const formatted = formatMessageForConsole(msg, { 
+      laneLabel: `[${laneName}]`,
+      includeTimestamp: true 
+    });
+    process.stdout.write(formatted + '\n');
+  });
   
   const child = spawn('node', runnerArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: process.env,
   });
   
-  let lineBuffer = '';
-  
   if (child.stdout) {
     child.stdout.on('data', (data: Buffer) => {
       logManager.writeStdout(data);
-      
-      const str = data.toString();
-      lineBuffer += str;
-      const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed && 
-            !trimmed.startsWith('{') && 
-            !trimmed.startsWith('[') && 
-            !trimmed.includes('{"type"')) {
-          process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
-        }
-      }
     });
   }
   
   if (child.stderr) {
     child.stderr.on('data', (data: Buffer) => {
       logManager.writeStderr(data);
-      const str = data.toString();
-      const lines = str.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          const isStatus = trimmed.startsWith('Preparing worktree') || 
-                           trimmed.startsWith('Switched to a new branch') ||
-                           trimmed.startsWith('HEAD is now at') ||
-                           trimmed.includes('actual output');
-          
-          if (isStatus) {
-            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
-          } else {
-            process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
-          }
-        }
-      }
     });
   }
   
@@ -602,8 +500,9 @@ function waitForChild(child: ChildProcess): Promise<number> {
 /**
  * Resume multiple lanes with concurrency control and dependency awareness
  */
-async function resumeAllLanes(
-  runDir: string,
+async function resumeLanes(
+  lanesToResume: LaneInfo[],
+  allLanes: LaneInfo[],
   options: { 
     restart: boolean; 
     maxConcurrent: number; 
@@ -613,21 +512,6 @@ async function resumeAllLanes(
     enhancedLogConfig?: any;
   }
 ): Promise<{ succeeded: string[]; failed: string[]; skipped: string[] }> {
-  const allLanes = getAllLaneStatuses(runDir);
-  const lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
-  const missingTaskInfo = allLanes.filter(l => l.needsResume && !l.state?.tasksFile);
-  
-  if (missingTaskInfo.length > 0) {
-    logger.warn(`Lanes that haven't started yet and have no task info: ${missingTaskInfo.map(l => l.name).join(', ')}`);
-    logger.warn('These lanes cannot be resumed because their original task file paths were not recorded.');
-  }
-  
-  if (lanesToResume.length === 0) {
-    logger.success('All lanes are already completed! Nothing to resume.');
-    return { succeeded: [], failed: [], skipped: [] };
-  }
-  
-  // Check for lanes with unmet dependencies that can never be satisfied
   const completedSet = new Set<string>(allLanes.filter(l => l.isCompleted).map(l => l.name));
   const toResumeNames = new Set<string>(lanesToResume.map(l => l.name));
   
@@ -657,18 +541,9 @@ async function resumeAllLanes(
   logger.info(`Max concurrent: ${options.maxConcurrent}`);
   logger.info(`Mode: ${options.restart ? 'Restart from beginning' : 'Continue from last task'}`);
   
-  // Show dependency order
-  const lanesWithDeps = resolvableLanes.filter(l => l.dependsOn.length > 0);
-  if (lanesWithDeps.length > 0) {
-    logger.info(`Dependency-aware: ${lanesWithDeps.length} lane(s) have dependencies`);
-  }
-  console.log('');
-  
   // Run doctor check once if needed (check git status)
   if (!options.skipDoctor) {
     logger.info('Running pre-flight checks...');
-    
-    // Use the first lane's tasksDir for doctor check
     const firstLane = resolvableLanes[0]!;
     const tasksDir = path.dirname(firstLane.state!.tasksFile!);
     
@@ -695,18 +570,11 @@ async function resumeAllLanes(
   
   const succeeded: string[] = [];
   const failed: string[] = [];
-  
-  // Create a mutable set for tracking completed lanes (including those from this session)
   const sessionCompleted = new Set<string>(completedSet);
-  
-  // Queue management with dependency awareness
   const pending = new Set<string>(resolvableLanes.map(l => l.name));
   const active: Map<string, ChildProcess> = new Map();
   const laneMap = new Map<string, LaneInfo>(resolvableLanes.map(l => [l.name, l]));
   
-  /**
-   * Find the next lane that can be started (all dependencies met)
-   */
   const findReadyLane = (): LaneInfo | null => {
     for (const laneName of pending) {
       const lane = laneMap.get(laneName)!;
@@ -717,29 +585,20 @@ async function resumeAllLanes(
     return null;
   };
   
-  /**
-   * Process lanes with dependency awareness
-   */
   const processNext = (): void => {
     while (active.size < options.maxConcurrent) {
       const lane = findReadyLane();
-      
       if (!lane) {
-        // No lane ready to start
         if (pending.size > 0 && active.size === 0) {
-          // Deadlock: pending lanes exist but none can start and none are running
           const pendingList = Array.from(pending).join(', ');
           logger.error(`Deadlock detected! Lanes waiting: ${pendingList}`);
-          for (const ln of pending) {
-            failed.push(ln);
-          }
+          for (const ln of pending) failed.push(ln);
           pending.clear();
         }
         break;
       }
       
       pending.delete(lane.name);
-      
       const depsInfo = lane.dependsOn.length > 0 ? ` (after: ${lane.dependsOn.join(', ')})` : '';
       logger.info(`Starting: ${lane.name} (task ${lane.state!.currentTaskIndex}/${lane.state!.totalTasks})${depsInfo}`);
       
@@ -752,14 +611,12 @@ async function resumeAllLanes(
       
       active.set(lane.name, child);
       
-      // Handle completion
       waitForChild(child).then(code => {
         active.delete(lane.name);
-        
         if (code === 0) {
           logger.success(`✓ ${lane.name} completed`);
           succeeded.push(lane.name);
-          sessionCompleted.add(lane.name); // Mark as completed for dependency resolution
+          sessionCompleted.add(lane.name);
         } else if (code === 2) {
           logger.warn(`⚠ ${lane.name} blocked on dependency change`);
           failed.push(lane.name);
@@ -767,8 +624,6 @@ async function resumeAllLanes(
           logger.error(`✗ ${lane.name} failed (exit ${code})`);
           failed.push(lane.name);
         }
-        
-        // Try to start more lanes now that one completed
         processNext();
       }).catch(err => {
         active.delete(lane.name);
@@ -779,29 +634,20 @@ async function resumeAllLanes(
     }
   };
   
-  // Start initial batch
   processNext();
   
-  // Wait for all to complete
   while (active.size > 0 || pending.size > 0) {
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Check if we can start more (in case completion handlers haven't triggered processNext yet)
     if (active.size < options.maxConcurrent && pending.size > 0) {
       processNext();
     }
   }
   
-  // Summary
   console.log('');
   logger.section('📊 Resume Summary');
   logger.info(`Succeeded: ${succeeded.length}`);
-  if (failed.length > 0) {
-    logger.error(`Failed: ${failed.length} (${failed.join(', ')})`);
-  }
-  if (skippedLanes.length > 0) {
-    logger.warn(`Skipped: ${skippedLanes.length} (${skippedLanes.join(', ')})`);
-  }
+  if (failed.length > 0) logger.error(`Failed: ${failed.length} (${failed.join(', ')})`);
+  if (skippedLanes.length > 0) logger.warn(`Skipped: ${skippedLanes.length} (${skippedLanes.join(', ')})`);
   
   return { succeeded, failed, skipped: skippedLanes };
 }
@@ -817,7 +663,6 @@ async function resume(args: string[]): Promise<void> {
   const config = loadConfig();
   const logsDir = getLogsDir(config);
   
-  // Find run directory
   let runDir = options.runDir;
   if (!runDir) {
     runDir = findLatestRunDir(logsDir);
@@ -827,136 +672,69 @@ async function resume(args: string[]): Promise<void> {
     throw new Error(`Run directory not found: ${runDir || 'latest'}. Have you run any tasks yet?`);
   }
   
-  // Check for zombie lanes (running status but dead process) and fix them
+  const allLanes = getAllLaneStatuses(runDir);
+  let lanesToResume: LaneInfo[] = [];
+
+  // Check if the lane argument is actually a tasks directory
+  if (options.lane && fs.existsSync(options.lane) && fs.statSync(options.lane).isDirectory()) {
+    const tasksDir = path.resolve(options.lane);
+    lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile && path.resolve(l.state.tasksFile).startsWith(tasksDir));
+    
+    if (lanesToResume.length > 0) {
+      logger.info(`📂 Task directory detected: ${options.lane}`);
+      logger.info(`Resuming ${lanesToResume.length} lane(s) from this directory.`);
+    } else {
+      logger.warn(`No incomplete lanes found using tasks from directory: ${options.lane}`);
+      return;
+    }
+  } else if (options.all) {
+    lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
+  } else if (options.lane) {
+    const lane = allLanes.find(l => l.name === options.lane);
+    if (!lane) {
+      throw new Error(`Lane '${options.lane}' not found in run directory.`);
+    }
+    if (!lane.needsResume) {
+      logger.success(`Lane '${options.lane}' is already completed.`);
+      return;
+    }
+    lanesToResume = [lane];
+  }
+
+  // Check for zombie lanes
   const zombieCheck = checkAndFixZombieLanes(runDir);
   if (zombieCheck.fixed.length > 0) {
     logger.section('🔧 Zombie Lane Recovery');
     logger.info(`Fixed ${zombieCheck.fixed.length} zombie lane(s): ${zombieCheck.fixed.join(', ')}`);
-    if (zombieCheck.pofCreated) {
-      logger.info(`Post-mortem file created for debugging`);
-    }
     console.log('');
   }
   
-  // Status mode: just show status and exit
   if (options.status) {
     printAllLaneStatus(runDir);
     return;
   }
   
-  // All mode: resume all incomplete lanes
-  if (options.all) {
-    const result = await resumeAllLanes(runDir, {
-      restart: options.restart,
-      maxConcurrent: options.maxConcurrent,
-      skipDoctor: options.skipDoctor,
-      noGit: options.noGit,
-      executor: options.executor,
-      enhancedLogConfig: config.enhancedLogging,
-    });
-    
-    if (result.failed.length > 0) {
-      throw new Error(`${result.failed.length} lane(s) failed to complete`);
+  if (lanesToResume.length === 0) {
+    if (options.lane || options.all) {
+      logger.success('No lanes need to be resumed.');
+    } else {
+      printAllLaneStatus(runDir);
     }
     return;
   }
-  
-  // Single lane mode (original behavior)
-  if (!options.lane) {
-    // Show status by default if no lane specified
-    printAllLaneStatus(runDir);
-    console.log('');
-    console.log('Usage: cursorflow resume <lane> [options]');
-    console.log('       cursorflow resume --all           # Resume all incomplete lanes');
-    return;
-  }
-  
-  const laneDir = safeJoin(runDir, 'lanes', options.lane);
-  const statePath = safeJoin(laneDir, 'state.json');
-  
-  if (!fs.existsSync(statePath)) {
-    throw new Error(`Lane state not found at ${statePath}. Is the lane name correct?`);
-  }
-  
-  const state = loadState<LaneState>(statePath);
-  if (!state) {
-    throw new Error(`Failed to load state from ${statePath}`);
-  }
-  
-  if (!state.tasksFile || !fs.existsSync(state.tasksFile)) {
-    throw new Error(`Original tasks file not found: ${state.tasksFile}. Resume impossible without task definition.`);
-  }
-  
-  // Run doctor check before resuming (check branches, etc.)
-  if (!options.skipDoctor) {
-    const tasksDir = path.dirname(state.tasksFile);
-    logger.info('Running pre-flight checks...');
-    
-    const report = runDoctor({
-      cwd: process.cwd(),
-      tasksDir,
-      includeCursorAgentChecks: false, // Skip agent checks for resume
-    });
-    
-    // Only show blocking errors for resume
-    const blockingIssues = report.issues.filter(i => 
-      i.severity === 'error' && 
-      (i.id.startsWith('branch.') || i.id.startsWith('git.'))
-    );
-    
-    if (blockingIssues.length > 0) {
-      logger.section('🛑 Pre-resume check found issues');
-      for (const issue of blockingIssues) {
-        logger.error(`${issue.title} (${issue.id})`, '❌');
-        console.log(`   ${issue.message}`);
-        if (issue.details) console.log(`   Details: ${issue.details}`);
-        if (issue.fixes?.length) {
-          console.log('   Fix:');
-          for (const fix of issue.fixes) console.log(`     - ${fix}`);
-        }
-        console.log('');
-      }
-      throw new Error('Pre-resume checks failed. Use --skip-doctor to bypass (not recommended).');
-    }
-    
-    // Show warnings but don't block
-    const warnings = report.issues.filter(i => i.severity === 'warn' && i.id.startsWith('branch.'));
-    if (warnings.length > 0) {
-      logger.warn(`${warnings.length} warning(s) found. Run 'cursorflow doctor' for details.`);
-    }
-  }
-  
-  logger.section(`🔁 Resuming Lane: ${options.lane}`);
-  logger.info(`Run: ${path.basename(runDir)}`);
-  logger.info(`Tasks: ${state.tasksFile}`);
-  logger.info(`Starting from task index: ${options.restart ? 0 : state.currentTaskIndex}`);
-  
-  const { child } = spawnLaneResume(options.lane, laneDir, state, {
+
+  const result = await resumeLanes(lanesToResume, allLanes, {
     restart: options.restart,
+    maxConcurrent: options.maxConcurrent,
+    skipDoctor: options.skipDoctor,
     noGit: options.noGit,
     executor: options.executor,
     enhancedLogConfig: config.enhancedLogging,
   });
   
-  logger.info(`Spawning runner process...`);
-  
-  return new Promise((resolve, reject) => {
-    child.on('exit', (code) => {
-      if (code === 0) {
-        logger.success(`Lane ${options.lane} completed successfully`);
-        resolve();
-      } else if (code === 2) {
-        logger.warn(`Lane ${options.lane} blocked on dependency change`);
-        resolve();
-      } else {
-        reject(new Error(`Lane ${options.lane} failed with exit code ${code}`));
-      }
-    });
-    
-    child.on('error', (error) => {
-      reject(new Error(`Failed to start runner: ${error.message}`));
-    });
-  });
+  if (result.failed.length > 0) {
+    throw new Error(`${result.failed.length} lane(s) failed to complete`);
+  }
 }
 
 export = resume;

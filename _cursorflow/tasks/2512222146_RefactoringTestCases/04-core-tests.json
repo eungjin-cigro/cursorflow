@@ -1,0 +1,89 @@
+{
+  "repository": "https://github.com/eungjin-cigro/cursorflow",
+  "baseBranch": "main",
+  "branchPrefix": "refactor/core-tests-",
+  "executor": "cursor-agent",
+  "autoCreatePr": false,
+  "allowDependencyChange": false,
+  "lockfileReadOnly": true,
+  "pollInterval": 60,
+
+  "laneNumber": 4,
+  "devPort": 3004,
+
+  "enableReview": true,
+  "reviewModel": "gemini-3-flash",
+  "maxReviewIterations": 2,
+
+  "dependsOn": [
+    "02-logging-tests",
+    "03-git-validation-tests"
+  ],
+
+  "tasks": [
+    {
+      "name": "extract-runner-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Code extracted from phase-5-runner.md",
+        "Files created in src/core/runner/",
+        "All 7 files from documentation extracted"
+      ],
+      "prompt": "## Task: Extract Runner Code from Documentation\n\n### Goal\nExtract Runner module code from phase-5-runner.md documentation.\n\n### Instructions\n1. Read the documentation:\n   ```bash\n   cat docs/refactoring/phase-5-runner.md\n   ```\n\n2. Create directory structure:\n   ```bash\n   mkdir -p src/core/runner\n   ```\n\n3. The documentation defines these files:\n   - types.ts\n   - agent-client.ts\n   - task-executor.ts\n   - state-manager.ts\n   - dependency-waiter.ts\n   - branch-manager.ts\n   - index.ts\n\n4. Find and list all code blocks:\n   ```bash\n   grep -n '// src/core/runner/' docs/refactoring/phase-5-runner.md\n   ```\n\n5. Extract each file:\n   ```bash\n   # Find the section and extract\n   awk '/\\/\\/ src\\/core\\/runner\\/types.ts/,/^```$/' docs/refactoring/phase-5-runner.md | sed '1d;$d' > src/core/runner/types.ts\n   \n   # Repeat for each file...\n   ```\n\n6. Verify extraction:\n   ```bash\n   ls -la src/core/runner/\n   wc -l src/core/runner/*.ts\n   ```\n\n### Output\nList of created files with line counts."
+    },
+    {
+      "name": "extract-orchestrator-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Code extracted from phase-6-orchestrator.md",
+        "Files created in src/core/orchestrator/",
+        "All 6 files from documentation extracted"
+      ],
+      "prompt": "## Task: Extract Orchestrator Code from Documentation\n\n### Goal\nExtract Orchestrator module code from phase-6-orchestrator.md documentation.\n\n### Instructions\n1. Read the documentation:\n   ```bash\n   cat docs/refactoring/phase-6-orchestrator.md\n   ```\n\n2. Create directory structure:\n   ```bash\n   mkdir -p src/core/orchestrator\n   ```\n\n3. The documentation defines these files:\n   - types.ts\n   - scheduler.ts\n   - lane-manager.ts\n   - dependency-resolver.ts\n   - monitor.ts\n   - index.ts\n\n4. Find code blocks:\n   ```bash\n   grep -n '// src/core/orchestrator/' docs/refactoring/phase-6-orchestrator.md\n   ```\n\n5. Extract each file:\n   ```bash\n   awk '/\\/\\/ src\\/core\\/orchestrator\\/types.ts/,/^```$/' docs/refactoring/phase-6-orchestrator.md | sed '1d;$d' > src/core/orchestrator/types.ts\n   \n   # Continue for other files...\n   ```\n\n6. Verify:\n   ```bash\n   ls -la src/core/orchestrator/\n   wc -l src/core/orchestrator/*.ts\n   ```\n\n### Output\nList of created files with line counts."
+    },
+    {
+      "name": "review-core-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Runner and Orchestrator code reviewed",
+        "TypeScript compilation checked",
+        "Dependencies on services verified",
+        "Missing imports identified"
+      ],
+      "prompt": "## Task: Review Core Module Code\n\n### Goal\nReview extracted Runner and Orchestrator code.\n\n### Instructions\n1. Check Runner module:\n   ```bash\n   echo '=== Runner Module ==='\n   ls src/core/runner/\n   npx tsc --noEmit src/core/runner/*.ts 2>&1 | head -50\n   ```\n\n2. Check Orchestrator module:\n   ```bash\n   echo '=== Orchestrator Module ==='\n   ls src/core/orchestrator/\n   npx tsc --noEmit src/core/orchestrator/*.ts 2>&1 | head -50\n   ```\n\n3. Verify service dependencies:\n   ```bash\n   echo '=== Dependencies on Services ==='\n   grep -rh \"from '.*services\" src/core/runner/ src/core/orchestrator/ | sort | uniq\n   ```\n\n4. Check index exports:\n   ```bash\n   echo '=== Runner Exports ==='\n   cat src/core/runner/index.ts\n   \n   echo '=== Orchestrator Exports ==='\n   cat src/core/orchestrator/index.ts\n   ```\n\n5. Look for incomplete code:\n   ```bash\n   grep -rn 'TODO\\|FIXME\\|\\.\\.\\.' src/core/runner/ src/core/orchestrator/\n   ```\n\n### Output\n- Completeness status for each module\n- TypeScript errors found\n- Missing dependencies\n- Recommendations"
+    },
+    {
+      "name": "write-runner-tests",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Test file at src/core/runner/__tests__/runner.test.ts",
+        "Tests for task-executor, state-manager, agent-client",
+        "Mocked external dependencies",
+        "At least 15 test cases"
+      ],
+      "prompt": "## Task: Write Runner Module Test Cases\n\n### Goal\nWrite test cases for the Runner module.\n\n### Instructions\n1. Create test directory:\n   ```bash\n   mkdir -p src/core/runner/__tests__\n   ```\n\n2. Review Runner functions:\n   ```bash\n   grep -E '^export (function|async function|class)' src/core/runner/*.ts\n   ```\n\n3. Create test file:\n   ```bash\n   cat > src/core/runner/__tests__/runner.test.ts << 'EOF'\n   import * as runner from '../index';\n   import * as fs from 'fs';\n   import { spawn } from 'child_process';\n   \n   // Mock dependencies\n   jest.mock('fs');\n   jest.mock('child_process');\n   \n   const mockFs = fs as jest.Mocked<typeof fs>;\n   const mockSpawn = spawn as jest.MockedFunction<typeof spawn>;\n   \n   describe('Runner Module', () => {\n     beforeEach(() => {\n       jest.clearAllMocks();\n     });\n     \n     describe('Types', () => {\n       it('should export DEFAULT_TIMEOUT constant', () => {\n         expect(runner.DEFAULT_TIMEOUT).toBeGreaterThan(0);\n       });\n       \n       it('should export DEPENDENCY_POLL_INTERVAL constant', () => {\n         expect(runner.DEPENDENCY_POLL_INTERVAL).toBeGreaterThan(0);\n       });\n     });\n     \n     describe('State Manager', () => {\n       describe('loadLaneState', () => {\n         it('should return null when state file does not exist', () => {\n           mockFs.existsSync.mockReturnValue(false);\n           // Test implementation...\n         });\n         \n         it('should parse state from file when exists', () => {\n           mockFs.existsSync.mockReturnValue(true);\n           mockFs.readFileSync.mockReturnValue(JSON.stringify({\n             status: 'running',\n             currentTaskIndex: 0\n           }));\n           // Test implementation...\n         });\n       });\n     });\n     \n     describe('Agent Client', () => {\n       describe('extractDependencyRequest', () => {\n         it('should extract dependency request from output', () => {\n           const output = `\n           Some text\n           DEPENDENCY_CHANGE_REQUIRED\n           \\`\\`\\`json\n           {\"reason\": \"need axios\", \"changes\": [\"axios\"], \"commands\": [\"npm i axios\"]}\n           \\`\\`\\`\n           `;\n           // Test extraction logic\n         });\n         \n         it('should return null when no dependency request', () => {\n           const output = 'Normal output without dependency request';\n           // Test implementation...\n         });\n       });\n     });\n   });\n   EOF\n   ```\n\n4. Run tests:\n   ```bash\n   npm test -- --testPathPattern='core/runner' --verbose\n   ```\n\n### Output\n- Test file created\n- Number of test cases\n- Initial test results"
+    },
+    {
+      "name": "write-orchestrator-tests",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Test file at src/core/orchestrator/__tests__/orchestrator.test.ts",
+        "Tests for scheduler, lane-manager, monitor",
+        "Tests dependency graph building and scheduling",
+        "At least 15 test cases"
+      ],
+      "prompt": "## Task: Write Orchestrator Module Test Cases\n\n### Goal\nWrite test cases for the Orchestrator module.\n\n### Instructions\n1. Create test directory:\n   ```bash\n   mkdir -p src/core/orchestrator/__tests__\n   ```\n\n2. Review Orchestrator functions:\n   ```bash\n   grep -E '^export (function|async function|class)' src/core/orchestrator/*.ts\n   ```\n\n3. Create test file:\n   ```bash\n   cat > src/core/orchestrator/__tests__/orchestrator.test.ts << 'EOF'\n   import * as orchestrator from '../index';\n   import * as fs from 'fs';\n   \n   jest.mock('fs');\n   \n   const mockFs = fs as jest.Mocked<typeof fs>;\n   \n   describe('Orchestrator Module', () => {\n     beforeEach(() => {\n       jest.clearAllMocks();\n     });\n     \n     describe('Scheduler', () => {\n       describe('buildDependencyGraph', () => {\n         it('should build graph from lane files', () => {\n           mockFs.readdirSync.mockReturnValue(['01-lane-a.json', '02-lane-b.json'] as any);\n           mockFs.readFileSync\n             .mockReturnValueOnce(JSON.stringify({ tasks: [], dependsOn: [] }))\n             .mockReturnValueOnce(JSON.stringify({ tasks: [], dependsOn: ['lane-a'] }));\n           \n           const graph = orchestrator.buildDependencyGraph('/tasks');\n           expect(graph.nodes.size).toBe(2);\n           expect(graph.edges.get('lane-b')).toContain('lane-a');\n         });\n       });\n       \n       describe('getReadyLanes', () => {\n         it('should return lanes with no dependencies first', () => {\n           // Setup graph with dependencies\n           // Test that independent lanes are returned first\n         });\n         \n         it('should return dependent lanes after dependencies complete', () => {\n           // Test scheduling order\n         });\n       });\n       \n       describe('detectDeadlock', () => {\n         it('should detect deadlock when no lanes can progress', () => {\n           // Test deadlock detection\n         });\n       });\n     });\n     \n     describe('Monitor', () => {\n       describe('checkStalls', () => {\n         it('should detect stalled lanes', () => {\n           // Test stall detection\n         });\n       });\n     });\n   });\n   EOF\n   ```\n\n4. Run tests:\n   ```bash\n   npm test -- --testPathPattern='core/orchestrator' --verbose\n   ```\n\n### Output\n- Test file created\n- Number of test cases\n- Initial test results"
+    },
+    {
+      "name": "verify-core-tests",
+      "model": "opus-4.5",
+      "acceptanceCriteria": [
+        "All Runner tests pass",
+        "All Orchestrator tests pass",
+        "Combined coverage > 50%"
+      ],
+      "prompt": "## Task: Verify Core Module Tests\n\n### Goal\nRun and verify all core module tests.\n\n### Instructions\n1. Run Runner tests:\n   ```bash\n   npm test -- --testPathPattern='core/runner' --verbose 2>&1 | tail -30\n   ```\n\n2. Run Orchestrator tests:\n   ```bash\n   npm test -- --testPathPattern='core/orchestrator' --verbose 2>&1 | tail -30\n   ```\n\n3. Combined coverage:\n   ```bash\n   npm test -- --testPathPattern='core/(runner|orchestrator)' --coverage --collectCoverageFrom='src/core/**/*.ts'\n   ```\n\n4. Summary:\n   ```bash\n   echo '=== Runner Tests ==='\n   npm test -- --testPathPattern='core/runner' 2>&1 | grep -E '(Tests:|PASS|FAIL)'\n   \n   echo '=== Orchestrator Tests ==='\n   npm test -- --testPathPattern='core/orchestrator' 2>&1 | grep -E '(Tests:|PASS|FAIL)'\n   ```\n\n5. Total test count:\n   ```bash\n   grep -rh 'it(\\|test(' src/core/runner/__tests__ src/core/orchestrator/__tests__ | wc -l\n   ```\n\n### Output\n- Runner: X passed, X failed\n- Orchestrator: X passed, X failed\n- Coverage: X%\n- Issues to fix"
+    }
+  ]
+}
+
