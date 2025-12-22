@@ -21,12 +21,9 @@ const COMMANDS: Record<string, CommandFn> = {
   signal: require('./signal'),
   models: require('./models'),
   logs: require('./logs'),
-<<<<<<< HEAD
   runs: require('./runs'),
-  stop: require('./stop'),
-=======
   tasks: require('./tasks'),
->>>>>>> d3bd427 (feat: add tasks CLI command for task management)
+  stop: require('./stop'),
   setup: require('./setup-commands').main,
   'setup-commands': require('./setup-commands').main,
 };
@@ -44,18 +41,15 @@ function printHelp(): void {
   \x1b[33mprepare\x1b[0m <feature> [opts]    Prepare task directory and JSON files
   \x1b[33mrun\x1b[0m <tasks-dir> [options]   Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options] \x1b[36mInteractive\x1b[0m lane dashboard
-  \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs/tasks
+  \x1b[33mtasks\x1b[0m [name] [options]      Browse and validate prepared tasks
+  \x1b[33mruns\x1b[0m [run-id] [options]     List and view run details
   \x1b[33mstop\x1b[0m [run-id] [options]     Stop running workflows
+  \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs/tasks
   \x1b[33mresume\x1b[0m [lane] [options]     Resume lane(s) - use --all for batch resume
   \x1b[33mdoctor\x1b[0m [options]            Check environment and preflight
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]            List available AI models
   \x1b[33mlogs\x1b[0m [run-dir] [options]    View, export, and follow logs
-<<<<<<< HEAD
-  \x1b[33mruns\x1b[0m [run-id] [options]     List and view run details
-=======
-  \x1b[33mtasks\x1b[0m [name] [options]      List and validate prepared tasks
->>>>>>> d3bd427 (feat: add tasks CLI command for task management)
 
 \x1b[1mGLOBAL OPTIONS\x1b[0m
   --config <path>             Config file path
