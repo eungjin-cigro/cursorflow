@@ -112,7 +112,7 @@ async function signal(args: string[]): Promise<void> {
     fs.writeFileSync(interventionPath, options.message);
     
     // 2. Also append to conversation log for visibility and history
-    const entry = createConversationEntry('system', `[COMMANDER INTERVENTION]\n${options.message}`, {
+    const entry = createConversationEntry('intervention', `[HUMAN INTERVENTION]: ${options.message}`, {
       task: 'DIRECT_SIGNAL'
     });
     appendLog(convoPath, entry);

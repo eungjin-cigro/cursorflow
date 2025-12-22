@@ -17,6 +17,7 @@ import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
 import { runReviewLoop } from './reviewer';
 import { safeJoin } from '../utils/path';
+import { analyzeFailure, RecoveryAction, logFailure, withRetry } from './failure-policy';
 import { 
   RunnerConfig, 
   Task, 
@@ -174,19 +175,18 @@ export function validateTaskConfig(config: RunnerConfig): void {
 }
 
 /**
- * Execute cursor-agent command with streaming and better error handling
+ * Internal: Execute cursor-agent command with streaming
  */
-export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention, outputFormat }: { 
+async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention, outputFormat, taskName }: { 
   workspaceDir: string; 
   chatId: string; 
   prompt: string; 
   model?: string; 
   signalDir?: string;
   timeout?: number;
-  /** Enable stdin piping for intervention feature (may cause buffering issues on some systems) */
   enableIntervention?: boolean;
-  /** Output format for cursor-agent (default: 'stream-json') */
   outputFormat?: 'stream-json' | 'json' | 'plain';
+  taskName?: string;
 }): Promise<AgentSendResult> {
   // Use stream-json format for structured output with tool calls and results
   const format = outputFormat || 'stream-json';
@@ -202,24 +202,15 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
   ];
   
   const timeoutMs = timeout || DEFAULT_TIMEOUT_MS;
-  logger.info(`Executing cursor-agent... (timeout: ${Math.round(timeoutMs / 1000)}s)`);
   
   // Determine stdio mode based on intervention setting
-  // When intervention is enabled, we pipe stdin for message injection
-  // When disabled (default), we ignore stdin to avoid buffering issues
   const stdinMode = enableIntervention ? 'pipe' : 'ignore';
-  
-  if (enableIntervention) {
-    logger.info('Intervention mode enabled (stdin piped)');
-  }
   
   return new Promise((resolve) => {
     // Build environment, preserving user's NODE_OPTIONS but disabling problematic flags
     const childEnv = { ...process.env };
     
-    // Only filter out specific problematic NODE_OPTIONS, don't clear entirely
     if (childEnv.NODE_OPTIONS) {
-      // Remove flags that might interfere with cursor-agent
       const filtered = childEnv.NODE_OPTIONS
         .split(' ')
         .filter(opt => !opt.includes('--inspect') && !opt.includes('--debug'))
@@ -227,7 +218,6 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       childEnv.NODE_OPTIONS = filtered;
     }
     
-    // Disable Python buffering in case cursor-agent uses Python
     childEnv.PYTHONUNBUFFERED = '1';
     
     const child = spawn('cursor-agent', args, {
@@ -235,18 +225,15 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       env: childEnv,
     });
 
-    logger.info(`Executing cursor-agent... (timeout: ${Math.round(timeoutMs / 1000)}s)`);
-
-    // Save PID to state if possible (avoid TOCTOU by reading directly)
+    // Save PID to state if possible
     if (child.pid && signalDir) {
       try {
         const statePath = safeJoin(signalDir, 'state.json');
-        // Read directly without existence check to avoid race condition
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
         state.pid = child.pid;
         fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
       } catch {
-        // Best effort - file may not exist yet
+        // Best effort
       }
     }
 
@@ -254,24 +241,23 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     let fullStderr = '';
     let timeoutHandle: NodeJS.Timeout;
 
-    // Heartbeat logging to show progress
+    // Heartbeat logging
     let lastHeartbeat = Date.now();
     let bytesReceived = 0;
+    const startTime = Date.now();
     const heartbeatInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - lastHeartbeat) / 1000);
       const totalElapsed = Math.round((Date.now() - startTime) / 1000);
       logger.info(`⏱ Heartbeat: ${totalElapsed}s elapsed, ${bytesReceived} bytes received`);
     }, HEARTBEAT_INTERVAL_MS);
-    const startTime = Date.now();
 
-    // Watch for "intervention.txt" or "timeout.txt" signal files
+    // Signal watchers (intervention, timeout)
     const interventionPath = signalDir ? path.join(signalDir, 'intervention.txt') : null;
     const timeoutPath = signalDir ? path.join(signalDir, 'timeout.txt') : null;
     let signalWatcher: fs.FSWatcher | null = null;
 
     if (signalDir && fs.existsSync(signalDir)) {
       signalWatcher = fs.watch(signalDir, (event, filename) => {
-        // Handle intervention
         if (filename === 'intervention.txt' && interventionPath && fs.existsSync(interventionPath)) {
           try {
             const message = fs.readFileSync(interventionPath, 'utf8').trim();
@@ -279,59 +265,48 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
               if (enableIntervention && child.stdin) {
                 logger.info(`Injecting intervention: ${message}`);
                 child.stdin.write(message + '\n');
+                
+                // Log to conversation history for visibility in monitor/logs
+                if (signalDir) {
+                  const convoPath = path.join(signalDir, 'conversation.jsonl');
+                  appendLog(convoPath, createConversationEntry('intervention', `[HUMAN INTERVENTION]: ${message}`, {
+                    task: taskName || 'AGENT_TURN',
+                    model: 'manual'
+                  }));
+                }
               } else {
                 logger.warn(`Intervention requested but stdin not available: ${message}`);
-                logger.warn('To enable intervention, set enableIntervention: true in config');
               }
-              fs.unlinkSync(interventionPath); // Clear it
+              fs.unlinkSync(interventionPath);
             }
-          } catch (e) {
-            logger.warn('Failed to read intervention file');
-          }
+          } catch {}
         }
         
-        // Handle dynamic timeout update
         if (filename === 'timeout.txt' && timeoutPath && fs.existsSync(timeoutPath)) {
           try {
             const newTimeoutStr = fs.readFileSync(timeoutPath, 'utf8').trim();
             const newTimeoutMs = parseInt(newTimeoutStr);
-            
             if (!isNaN(newTimeoutMs) && newTimeoutMs > 0) {
               logger.info(`⏱ Dynamic timeout update: ${Math.round(newTimeoutMs / 1000)}s`);
-              
-              // Clear old timeout
               if (timeoutHandle) clearTimeout(timeoutHandle);
-              
-              // Set new timeout based on total elapsed time
               const elapsed = Date.now() - startTime;
               const remaining = Math.max(1000, newTimeoutMs - elapsed);
-              
               timeoutHandle = setTimeout(() => {
                 clearInterval(heartbeatInterval);
                 child.kill();
-                const totalSec = Math.round(newTimeoutMs / 1000);
-                resolve({
-                  ok: false,
-                  exitCode: -1,
-                  error: `cursor-agent timed out after updated limit of ${totalSec} seconds.`,
-                });
+                resolve({ ok: false, exitCode: -1, error: `cursor-agent timed out after updated limit.` });
               }, remaining);
-              
-              fs.unlinkSync(timeoutPath); // Clear it
+              fs.unlinkSync(timeoutPath);
             }
-          } catch (e) {
-            logger.warn('Failed to read timeout update file');
-          }
+          } catch {}
         }
       });
     }
 
     if (child.stdout) {
       child.stdout.on('data', (data) => {
-        const str = data.toString();
-        fullStdout += str;
+        fullStdout += data.toString();
         bytesReceived += data.length;
-        // Also pipe to our own stdout so it goes to terminal.log
         process.stdout.write(data);
       });
     }
@@ -339,7 +314,6 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     if (child.stderr) {
       child.stderr.on('data', (data) => {
         fullStderr += data.toString();
-        // Pipe to our own stderr so it goes to terminal.log
         process.stderr.write(data);
       });
     }
@@ -347,11 +321,10 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     timeoutHandle = setTimeout(() => {
       clearInterval(heartbeatInterval);
       child.kill();
-      const timeoutSec = Math.round(timeoutMs / 1000);
       resolve({
         ok: false,
         exitCode: -1,
-        error: `cursor-agent timed out after ${timeoutSec} seconds. The LLM request may be taking too long or there may be network issues.`,
+        error: `cursor-agent timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
       });
     }, timeoutMs);
 
@@ -364,21 +337,7 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
       
       if (code !== 0 || !json || json.type !== 'result') {
         let errorMsg = fullStderr.trim() || fullStdout.trim() || `exit=${code}`;
-        
-        // Check for common errors
-        if (errorMsg.includes('not authenticated') || errorMsg.includes('login') || errorMsg.includes('auth')) {
-          errorMsg = 'Authentication error. Please sign in to Cursor IDE.';
-        } else if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
-          errorMsg = 'API rate limit or quota exceeded.';
-        } else if (errorMsg.includes('model')) {
-          errorMsg = `Model error (requested: ${model || 'default'}). Check your subscription.`;
-        }
-        
-        resolve({
-          ok: false,
-          exitCode: code ?? -1,
-          error: errorMsg,
-        });
+        resolve({ ok: false, exitCode: code ?? -1, error: errorMsg });
       } else {
         resolve({
           ok: !json.is_error,
@@ -392,13 +351,33 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     child.on('error', (err) => {
       clearTimeout(timeoutHandle);
       clearInterval(heartbeatInterval);
-      resolve({
-        ok: false,
-        exitCode: -1,
-        error: `Failed to start cursor-agent: ${err.message}`,
-      });
+      resolve({ ok: false, exitCode: -1, error: `Failed to start cursor-agent: ${err.message}` });
     });
   });
+}
+
+/**
+ * Execute cursor-agent command with retries for transient errors
+ */
+export async function cursorAgentSend(options: { 
+  workspaceDir: string; 
+  chatId: string; 
+  prompt: string; 
+  model?: string; 
+  signalDir?: string;
+  timeout?: number;
+  enableIntervention?: boolean;
+  outputFormat?: 'stream-json' | 'json' | 'plain';
+  taskName?: string;
+}): Promise<AgentSendResult> {
+  const laneName = options.signalDir ? path.basename(path.dirname(options.signalDir)) : 'agent';
+  
+  return withRetry(
+    laneName,
+    () => cursorAgentSendRaw(options),
+    (res) => ({ ok: res.ok, error: res.error }),
+    { maxRetries: 3 }
+  );
 }
 
 /**
@@ -639,6 +618,7 @@ export async function runTask({
     timeout,
     enableIntervention: config.enableIntervention,
     outputFormat: config.agentOutputFormat,
+    taskName: task.name,
   });
   
   const duration = Date.now() - startTime;

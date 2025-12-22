@@ -4,10 +4,10 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
-import { loadState } from '../utils/state';
+import { loadState, saveState } from '../utils/state';
 import { LaneState } from '../utils/types';
 import { runDoctor } from '../utils/doctor';
 import { safeJoin } from '../utils/path';
@@ -191,6 +191,140 @@ interface LaneInfo {
   needsResume: boolean;
   dependsOn: string[];
   isCompleted: boolean;
+}
+
+/**
+ * Check if a process is alive by its PID
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    // On Unix-like systems, sending signal 0 checks if process exists
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check for zombie "running" lanes and fix them
+ * A zombie lane is one that has status "running" but its process is dead
+ */
+function checkAndFixZombieLanes(runDir: string): { fixed: string[]; pofCreated: boolean } {
+  const lanesDir = safeJoin(runDir, 'lanes');
+  if (!fs.existsSync(lanesDir)) {
+    return { fixed: [], pofCreated: false };
+  }
+  
+  const fixed: string[] = [];
+  const zombieDetails: Array<{
+    name: string;
+    pid: number;
+    taskIndex: number;
+    totalTasks: number;
+  }> = [];
+  
+  const laneDirs = fs.readdirSync(lanesDir)
+    .filter(f => fs.statSync(safeJoin(lanesDir, f)).isDirectory());
+  
+  for (const laneName of laneDirs) {
+    const dir = safeJoin(lanesDir, laneName);
+    const statePath = safeJoin(dir, 'state.json');
+    
+    if (!fs.existsSync(statePath)) continue;
+    
+    const state = loadState<LaneState>(statePath);
+    if (!state) continue;
+    
+    // Check for zombie: status is "running" but process is dead
+    if (state.status === 'running' && state.pid) {
+      const alive = isProcessAlive(state.pid);
+      
+      if (!alive) {
+        logger.warn(`🧟 Zombie lane detected: ${laneName} (PID ${state.pid} is dead)`);
+        
+        // Update state to failed
+        const updatedState: LaneState = {
+          ...state,
+          status: 'failed',
+          error: `Process terminated unexpectedly (PID ${state.pid} was running but is now dead)`,
+          endTime: Date.now(),
+        };
+        
+        saveState(statePath, updatedState);
+        fixed.push(laneName);
+        
+        zombieDetails.push({
+          name: laneName,
+          pid: state.pid,
+          taskIndex: state.currentTaskIndex,
+          totalTasks: state.totalTasks,
+        });
+        
+        logger.info(`  → Status changed to 'failed', ready for resume`);
+      }
+    }
+  }
+  
+  // Create POF file if any zombies were found
+  let pofCreated = false;
+  if (zombieDetails.length > 0) {
+    const pofPath = safeJoin(runDir, 'pof.json');
+    const existingPof = fs.existsSync(pofPath) 
+      ? JSON.parse(fs.readFileSync(pofPath, 'utf-8')) 
+      : null;
+    
+    const pof = {
+      title: 'Run Failure Post-mortem',
+      runId: path.basename(runDir),
+      failureTime: new Date().toISOString(),
+      detectedAt: new Date().toISOString(),
+      summary: `${zombieDetails.length} lane(s) found with dead processes (zombie state)`,
+      
+      rootCause: {
+        type: 'ZOMBIE_PROCESS',
+        description: 'Lane processes were marked as running but the processes are no longer alive',
+        symptoms: [
+          'Process PIDs no longer exist in the system',
+          'Lanes were stuck in "running" state',
+          'No completion or error was recorded before process death',
+        ],
+      },
+      
+      affectedLanes: zombieDetails.map(z => ({
+        name: z.name,
+        status: 'failed (was: running)',
+        task: `[${z.taskIndex + 1}/${z.totalTasks}]`,
+        taskIndex: z.taskIndex,
+        pid: z.pid,
+        reason: 'Process terminated unexpectedly',
+      })),
+      
+      possibleCauses: [
+        'System killed process due to memory pressure (OOM)',
+        'User killed process manually (Ctrl+C, kill command)',
+        'Agent timeout exceeded and process was terminated',
+        'System restart or crash',
+        'Agent hung and watchdog terminated it',
+      ],
+      
+      recovery: {
+        command: `cursorflow resume --all --run-dir ${runDir}`,
+        description: 'Resume all failed lanes from their last checkpoint',
+        alternativeCommand: `cursorflow resume --all --restart --run-dir ${runDir}`,
+        alternativeDescription: 'Restart all failed lanes from the beginning',
+      },
+      
+      // Merge with existing POF if present
+      previousFailures: existingPof ? [existingPof] : undefined,
+    };
+    
+    fs.writeFileSync(pofPath, JSON.stringify(pof, null, 2));
+    pofCreated = true;
+    logger.info(`📋 POF file created: ${pofPath}`);
+  }
+  
+  return { fixed, pofCreated };
 }
 
 /**
@@ -684,6 +818,17 @@ async function resume(args: string[]): Promise<void> {
   
   if (!runDir || !fs.existsSync(runDir)) {
     throw new Error(`Run directory not found: ${runDir || 'latest'}. Have you run any tasks yet?`);
+  }
+  
+  // Check for zombie lanes (running status but dead process) and fix them
+  const zombieCheck = checkAndFixZombieLanes(runDir);
+  if (zombieCheck.fixed.length > 0) {
+    logger.section('🔧 Zombie Lane Recovery');
+    logger.info(`Fixed ${zombieCheck.fixed.length} zombie lane(s): ${zombieCheck.fixed.join(', ')}`);
+    if (zombieCheck.pofCreated) {
+      logger.info(`Post-mortem file created for debugging`);
+    }
+    console.log('');
   }
   
   // Status mode: just show status and exit
