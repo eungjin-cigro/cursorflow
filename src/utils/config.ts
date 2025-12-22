@@ -44,6 +44,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     // Directories
     tasksDir: '_cursorflow/tasks',
     logsDir: '_cursorflow/logs',
+    pofDir: '_cursorflow/pof',
     
     // Git
     baseBranch: 'main',
@@ -126,6 +127,13 @@ export function getLogsDir(config: CursorFlowConfig): string {
 }
 
 /**
+ * Get absolute path for POF directory
+ */
+export function getPofDir(config: CursorFlowConfig): string {
+  return safeJoin(config.projectRoot, config.pofDir);
+}
+
+/**
  * Validate configuration
  */
 export function validateConfig(config: CursorFlowConfig): boolean {
@@ -164,6 +172,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Directory configuration
   tasksDir: '_cursorflow/tasks',
   logsDir: '_cursorflow/logs',
+  pofDir: '_cursorflow/pof',
   
   // Git configuration
   baseBranch: 'main',

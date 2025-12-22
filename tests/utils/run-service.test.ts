@@ -5,12 +5,13 @@ import { safeJoin } from '../../src/utils/path';
 
 describe('RunService', () => {
   const testLogsDir = path.join(__dirname, 'test-logs');
+  const runsDir = path.join(testLogsDir, 'runs');
 
   beforeEach(() => {
     if (fs.existsSync(testLogsDir)) {
       fs.rmSync(testLogsDir, { recursive: true, force: true });
     }
-    fs.mkdirSync(testLogsDir, { recursive: true });
+    fs.mkdirSync(runsDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -20,7 +21,7 @@ describe('RunService', () => {
   });
 
   it('should list runs in the logs directory', () => {
-    const runDir = safeJoin(testLogsDir, 'run-20251222-120000');
+    const runDir = safeJoin(runsDir, 'run-20251222-120000');
     fs.mkdirSync(runDir, { recursive: true });
     
     const service = new RunService(testLogsDir);
@@ -32,11 +33,12 @@ describe('RunService', () => {
 
   it('should correctly calculate run status from lanes', () => {
     const runId = 'run-20251222-120000';
-    const runPath = safeJoin(testLogsDir, runId);
-    const laneDir = safeJoin(runPath, 'lane-1');
+    const runPath = safeJoin(runsDir, runId);
+    const lanesDir = safeJoin(runPath, 'lanes');
+    const laneDir = safeJoin(lanesDir, 'lane-1');
     fs.mkdirSync(laneDir, { recursive: true });
     
-    // Create a mock state.json
+    // Create a mock state.json in lane directory
     const statePath = safeJoin(laneDir, 'state.json');
     fs.writeFileSync(statePath, JSON.stringify({
       label: 'lane-1',
@@ -56,28 +58,31 @@ describe('RunService', () => {
     expect(runInfo!.lanes[0]!.status).toBe('completed');
   });
 
-  it('should extract task name from meta.json', () => {
+  it('should extract task name from state.json', () => {
     const runId = 'run-20251222-120000';
-    const runPath = safeJoin(testLogsDir, runId);
+    const runPath = safeJoin(runsDir, runId);
     fs.mkdirSync(runPath, { recursive: true });
     
-    fs.writeFileSync(safeJoin(runPath, 'meta.json'), JSON.stringify({
+    // Create state.json with taskName
+    fs.writeFileSync(safeJoin(runPath, 'state.json'), JSON.stringify({
       taskName: 'MySpecialTask'
     }));
 
     const service = new RunService(testLogsDir);
     const runInfo = service.getRunInfo(runId);
     
+    expect(runInfo).not.toBeNull();
     expect(runInfo!.taskName).toBe('MySpecialTask');
   });
 
   it('should return unique branches and worktrees', () => {
     const runId = 'run-20251222-120000';
-    const runPath = safeJoin(testLogsDir, runId);
+    const runPath = safeJoin(runsDir, runId);
     
-    // Two lanes sharing same branch/worktree (unlikely but possible in some configs)
-    const lane1Dir = safeJoin(runPath, 'lane-1');
-    const lane2Dir = safeJoin(runPath, 'lane-2');
+    // Two lanes sharing same branch/worktree
+    const lanesDir = safeJoin(runPath, 'lanes');
+    const lane1Dir = safeJoin(lanesDir, 'lane-1');
+    const lane2Dir = safeJoin(lanesDir, 'lane-2');
     fs.mkdirSync(lane1Dir, { recursive: true });
     fs.mkdirSync(lane2Dir, { recursive: true });
     
@@ -98,6 +103,7 @@ describe('RunService', () => {
     const service = new RunService(testLogsDir);
     const runInfo = service.getRunInfo(runId);
     
+    expect(runInfo).not.toBeNull();
     expect(runInfo!.branches).toEqual([commonBranch]);
     expect(runInfo!.worktrees).toEqual([commonWorktree]);
   });

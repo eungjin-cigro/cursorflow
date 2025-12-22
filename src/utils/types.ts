@@ -10,6 +10,7 @@ export interface LaneConfig {
 export interface CursorFlowConfig {
   tasksDir: string;
   logsDir: string;
+  pofDir: string;
   baseBranch: string;
   branchPrefix: string;
   executor: 'cursor-agent' | 'cloud';

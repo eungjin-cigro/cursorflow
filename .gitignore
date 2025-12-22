@@ -46,6 +46,7 @@ temp/
 .cursor/
 _cursorflow/*
 !_cursorflow/handoffs/
+!_cursorflow/pof/
 _lifecycle-tests/
 _lifecycle_test/
 _comprehensive_test/
