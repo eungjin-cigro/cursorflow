@@ -57,7 +57,7 @@ export function pad(str: string, width: number, align: 'left' | 'right' | 'cente
  */
 export function renderProgressBar(current: number, total: number, width: number = 20): string {
   const ratio = total > 0 ? current / total : 0;
-  const filled = Math.round(ratio * width);
+  const filled = Math.min(width, Math.round(ratio * width));
   const empty = width - filled;
   
   const bar = `${'█'.repeat(filled)}${'░'.repeat(empty)}`;
@@ -247,6 +247,10 @@ export class SelectableList<T> {
 
   getSelected(): T | undefined {
     return this.items[this.selectedIndex];
+  }
+
+  getSelectedIndex(): number {
+    return this.selectedIndex;
   }
 
   setItems(items: T[]): void {
