@@ -23,6 +23,9 @@ cursorflow clean <type> [options]
 
 | Option | Description |
 |------|------|
+| `--run <id>` | Clean resources linked to a specific run |
+| `--older-than <time>` | Clean resources older than a specific time (e.g., `24h`, `7d`) |
+| `--orphaned` | Clean orphaned resources (worktrees without runs, etc.) |
 | `--dry-run` | Show what would be removed without actually deleting anything |
 | `--force` | Force removal (ignore uncommitted changes in worktrees) |
 | `--include-latest` | Also remove the most recent item (by default, latest is kept) |
@@ -48,6 +51,22 @@ cursorflow clean all --force --include-latest
 ### Remove all worktrees including the latest
 ```bash
 cursorflow clean worktrees --include-latest
+```
+
+### Clean resources for a specific run
+```bash
+cursorflow clean all --run run-1734873132
+```
+
+### Clean logs and tasks older than 7 days
+```bash
+cursorflow clean logs --older-than 7d
+cursorflow clean tasks --older-than 7d
+```
+
+### Clean orphaned worktrees and branches
+```bash
+cursorflow clean all --orphaned
 ```
 
 ## Notes
