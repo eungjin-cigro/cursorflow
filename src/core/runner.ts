@@ -256,7 +256,8 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     const heartbeatInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - lastHeartbeat) / 1000);
       const totalElapsed = Math.round((Date.now() - startTime) / 1000);
-      logger.info(`⏱ Heartbeat: ${totalElapsed}s elapsed, ${bytesReceived} bytes received`);
+      // Output without timestamp - orchestrator will add it
+      console.log(`⏱ Heartbeat: ${totalElapsed}s elapsed, ${bytesReceived} bytes received`);
     }, HEARTBEAT_INTERVAL_MS);
 
     // Signal watchers (intervention, timeout)

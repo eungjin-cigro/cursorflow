@@ -7,10 +7,16 @@ import * as child_process from 'child_process';
 // Mock git utilities
 jest.mock('../../src/utils/git', () => ({
   getRepoRoot: jest.fn().mockReturnValue('/mock/repo'),
+  getMainRepoRoot: jest.fn().mockReturnValue('/mock/repo'),
   runGit: jest.fn().mockReturnValue(''),
+  runGitResult: jest.fn().mockReturnValue({ success: true, output: '' }),
   push: jest.fn().mockReturnValue(''),
   getLatestRunDir: jest.fn().mockReturnValue('/mock/logs'),
   createWorktree: jest.fn().mockReturnValue('/mock/worktree'),
+  isGitRepo: jest.fn().mockReturnValue(true),
+  remoteExists: jest.fn().mockReturnValue(true),
+  hasUncommittedChanges: jest.fn().mockReturnValue(false),
+  getCurrentBranch: jest.fn().mockReturnValue('main'),
 }));
 
 // Mock child_process

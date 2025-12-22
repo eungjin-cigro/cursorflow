@@ -269,9 +269,12 @@ export function formatTimestamp(format: 'iso' | 'relative' | 'short', startTime?
 }
 
 /**
- * Regex to detect if a line already has an ISO timestamp at the start
+ * Regex to detect if a line already has a timestamp at the start
+ * Matches:
+ * - ISO format: [2024-01-01T12:34:56...]
+ * - Short format: [12:34:56]
  */
-const EXISTING_TIMESTAMP_REGEX = /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const EXISTING_TIMESTAMP_REGEX = /^\[(\d{4}-\d{2}-\d{2}T)?\d{2}:\d{2}:\d{2}/;
 
 /**
  * Check if a line already has a timestamp

@@ -1,9 +1,35 @@
 /**
  * Utility for formatting log messages for console display
+ * 
+ * Format: [HH:MM:SS] [lane-task] ICON TYPE content
+ * 
+ * Rules:
+ * - Box format only for: user, assistant, system, result
+ * - Compact format for: tool, tool_result, thinking (gray/dim)
+ * - Tool names simplified: ShellToolCall → Shell
+ * - Lane labels max 16 chars: [01-types-tests]
  */
 
 import { COLORS } from './log-constants';
 import { ParsedMessage, stripAnsi } from './enhanced-logger';
+
+// Types that should use box format
+const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
+
+// Types that should be displayed in gray/subdued
+const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking']);
+
+/**
+ * Simplify tool names (ShellToolCall → Shell, etc.)
+ */
+function simplifyToolName(name: string): string {
+  // Remove common suffixes
+  return name
+    .replace(/ToolCall$/i, '')
+    .replace(/Tool$/i, '')
+    .replace(/^run_terminal_cmd$/i, 'shell')
+    .replace(/^search_replace$/i, 'edit');
+}
 
 /**
  * Format a single parsed message into a human-readable string (compact or multi-line)
@@ -21,12 +47,20 @@ export function formatMessageForConsole(
   const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
-  // Handle context (e.g. from logger.info)
+  // Handle context (e.g. from logger.info) - max 16 chars
   const effectiveLaneLabel = laneLabel || (context ? `[${context}]` : '');
-  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel.padEnd(14)}${COLORS.reset} ` : ' '.repeat(15);
+  const truncatedLabel = effectiveLaneLabel.length > 16 
+    ? effectiveLaneLabel.substring(0, 16) 
+    : effectiveLaneLabel;
+  const labelPrefix = truncatedLabel ? `${COLORS.magenta}${truncatedLabel.padEnd(16)}${COLORS.reset} ` : '';
   
   let typePrefix = '';
   let content = msg.content;
+  let useGray = GRAY_TYPES.has(msg.type);
+  
+  // Determine if we should use box format
+  // Box format only for: user, assistant, system, result (and only when not compact)
+  const useBox = !compact && BOX_TYPES.has(msg.type);
 
   // Clean up wrapped prompts for user messages to hide internal instructions
   if (msg.type === 'user') {
@@ -34,13 +68,10 @@ export function formatMessageForConsole(
     const instructionsMarker = '### 📝 Final Instructions';
     
     if (content.includes(contextMarker)) {
-      // Find the end of the prefix (---)
       const parts = content.split('---\n');
       if (parts.length >= 3) {
-        // If it follows our wrapPrompt pattern: [PREFIX] --- [ORIGINAL] --- [SUFFIX]
         content = parts[1]!.trim();
       } else {
-        // Fallback: just strip the headers if present
         content = content.split(contextMarker).pop() || content;
         content = content.split(instructionsMarker)[0] || content;
         content = content.replace(/^.*---\n/s, '').trim();
@@ -48,30 +79,40 @@ export function formatMessageForConsole(
     }
   }
   
+  // For thinking: collapse multiple newlines into single space
+  if (msg.type === 'thinking') {
+    content = content.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
+  }
+  
+  // Color wrapper for gray types
+  const grayWrap = (s: string) => useGray ? `${COLORS.gray}${s}${COLORS.reset}` : s;
+  
   switch (msg.type) {
     case 'user':
-      typePrefix = `${COLORS.cyan}🧑 USER    ${COLORS.reset}`;
-      if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
+      typePrefix = `${COLORS.cyan}🧑 USER${COLORS.reset}`;
+      if (!useBox) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
       break;
     case 'assistant':
-      typePrefix = `${COLORS.green}🤖 ASST    ${COLORS.reset}`;
-      if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
+      typePrefix = `${COLORS.green}🤖 ASST${COLORS.reset}`;
+      if (!useBox) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
       break;
     case 'tool':
-      typePrefix = `${COLORS.yellow}🔧 TOOL    ${COLORS.reset}`;
+      // Tool calls are always compact and gray
+      typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
       const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
       if (toolMatch) {
-        const [, name, args] = toolMatch;
+        const [, rawName, args] = toolMatch;
+        const name = simplifyToolName(rawName!);
         try {
           const parsedArgs = JSON.parse(args!);
           let argStr = '';
-          if (name === 'read_file' && parsedArgs.target_file) {
+          if (rawName === 'read_file' && parsedArgs.target_file) {
             argStr = parsedArgs.target_file;
-          } else if (name === 'run_terminal_cmd' && parsedArgs.command) {
+          } else if (rawName === 'run_terminal_cmd' && parsedArgs.command) {
             argStr = parsedArgs.command;
-          } else if (name === 'write' && parsedArgs.file_path) {
+          } else if (rawName === 'write' && parsedArgs.file_path) {
             argStr = parsedArgs.file_path;
-          } else if (name === 'search_replace' && parsedArgs.file_path) {
+          } else if (rawName === 'search_replace' && parsedArgs.file_path) {
             argStr = parsedArgs.file_path;
           } else {
             const keys = Object.keys(parsedArgs);
@@ -79,56 +120,71 @@ export function formatMessageForConsole(
               argStr = String(parsedArgs[keys[0]]).substring(0, 50);
             }
           }
-          content = `${COLORS.bold}${name}${COLORS.reset}(${argStr})`;
+          content = `${COLORS.gray}${name}${COLORS.reset}(${COLORS.gray}${argStr}${COLORS.reset})`;
         } catch {
-          content = `${COLORS.bold}${name}${COLORS.reset}: ${args}`;
+          content = `${COLORS.gray}${name}${COLORS.reset}: ${args}`;
         }
       }
       break;
     case 'tool_result':
-      typePrefix = `${COLORS.gray}📄 RESL    ${COLORS.reset}`;
+      // Tool results are always compact and gray
+      typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
       const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
-      content = resMatch ? `${resMatch[1]} OK` : 'result';
+      if (resMatch) {
+        const simpleName = simplifyToolName(resMatch[1]!);
+        content = `${COLORS.gray}${simpleName} OK${COLORS.reset}`;
+      } else {
+        content = `${COLORS.gray}result${COLORS.reset}`;
+      }
       break;
     case 'result':
     case 'success':
-      typePrefix = `${COLORS.green}✅ SUCCESS ${COLORS.reset}`;
+      typePrefix = `${COLORS.green}✅ DONE${COLORS.reset}`;
       break;
     case 'system':
-      typePrefix = `${COLORS.gray}⚙️  SYS     ${COLORS.reset}`;
+      typePrefix = `${COLORS.gray}⚙️ SYS${COLORS.reset}`;
       break;
     case 'thinking':
-      typePrefix = `${COLORS.gray}🤔 THNK    ${COLORS.reset}`;
-      if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
+      // Thinking is always compact and gray
+      typePrefix = `${COLORS.gray}🤔 THNK${COLORS.reset}`;
+      content = `${COLORS.gray}${content.substring(0, 100)}${content.length > 100 ? '...' : ''}${COLORS.reset}`;
       break;
     case 'info':
-      typePrefix = `${COLORS.cyan}ℹ️  INFO    ${COLORS.reset}`;
+      typePrefix = `${COLORS.cyan}ℹ️ INFO${COLORS.reset}`;
       break;
     case 'warn':
-      typePrefix = `${COLORS.yellow}⚠️  WARN    ${COLORS.reset}`;
+      typePrefix = `${COLORS.yellow}⚠️ WARN${COLORS.reset}`;
       break;
     case 'error':
-      typePrefix = `${COLORS.red}❌ ERROR   ${COLORS.reset}`;
+      typePrefix = `${COLORS.red}❌ ERR${COLORS.reset}`;
       break;
   }
   
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${content}`;
 
-  if (compact) {
-    return `${tsPrefix}${labelPrefix}${typePrefix} ${content}`;
+  // Compact format (single line)
+  if (!useBox) {
+    return `${tsPrefix}${labelPrefix}${typePrefix.padEnd(12)} ${content}`;
   }
 
-  // Multi-line box format (as seen in orchestrator)
+  // Multi-line box format (only for user, assistant, system, result)
+  // Emoji width is 2, so we need to account for that in indent calculation
   const lines = content.split('\n');
   const fullPrefix = `${tsPrefix}${labelPrefix}`;
-  const header = `${typePrefix} ┌${'─'.repeat(60)}`;
+  const strippedPrefix = stripAnsi(typePrefix);
+  // Count emojis (they take 2 terminal columns but 1-2 chars in string)
+  const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
+  const visualWidth = strippedPrefix.length + emojiCount; // emoji adds 1 extra width
+  
+  const boxWidth = 60;
+  const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
   let result = `${fullPrefix}${header}\n`;
   
-  const indent = ' '.repeat(stripAnsi(typePrefix).length);
+  const indent = ' '.repeat(visualWidth);
   for (const line of lines) {
-    result += `${fullPrefix}${indent} │ ${line}\n`;
+    result += `${fullPrefix}${indent}│ ${line}\n`;
   }
-  result += `${fullPrefix}${indent} └${'─'.repeat(60)}`;
+  result += `${fullPrefix}${indent}└${'─'.repeat(boxWidth)}`;
   
   return result;
 }
@@ -166,13 +222,14 @@ export function formatPotentialJsonMessage(message: string): string {
         .join('');
       type = 'user';
     } else if (json.type === 'tool_call' && json.subtype === 'started') {
-      const toolName = Object.keys(json.tool_call)[0] || 'unknown';
-      const args = json.tool_call[toolName]?.args || {};
-      content = `[Tool: ${toolName}] ${JSON.stringify(args)}`;
+      const rawToolName = Object.keys(json.tool_call)[0] || 'unknown';
+      const args = json.tool_call[rawToolName]?.args || {};
+      // Tool name will be simplified in formatMessageForConsole
+      content = `[Tool: ${rawToolName}] ${JSON.stringify(args)}`;
       type = 'tool';
     } else if (json.type === 'tool_call' && json.subtype === 'completed') {
-      const toolName = Object.keys(json.tool_call)[0] || 'unknown';
-      content = `[Tool Result: ${toolName}]`;
+      const rawToolName = Object.keys(json.tool_call)[0] || 'unknown';
+      content = `[Tool Result: ${rawToolName}]`;
       type = 'tool_result';
     } else if (json.type === 'result') {
       content = json.result || 'Task completed';

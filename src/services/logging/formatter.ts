@@ -2,10 +2,21 @@
  * Log Formatter - Human-readable log formatting
  * 
  * Formats log messages for console display with various styles.
+ * 
+ * Rules:
+ * - Box format only for: user, assistant, system, result
+ * - Compact format for: tool, tool_result, thinking (gray/dim)
+ * - Tool names simplified: ShellToolCall → Shell
  */
 
 import { COLORS } from './console';
 import { ParsedMessage, MessageType } from '../../types/logging';
+
+// Types that should use box format
+const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
+
+// Types that should be displayed in gray/subdued
+const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking']);
 
 /**
  * Strip ANSI escape sequences from text
@@ -19,6 +30,17 @@ export function stripAnsi(text: string): string {
     .replace(ANSI_REGEX, '')
     .replace(/\r[^\n]/g, '\n')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+/**
+ * Simplify tool names (ShellToolCall → Shell, etc.)
+ */
+function simplifyToolName(name: string): string {
+  return name
+    .replace(/ToolCall$/i, '')
+    .replace(/Tool$/i, '')
+    .replace(/^run_terminal_cmd$/i, 'shell')
+    .replace(/^search_replace$/i, 'edit');
 }
 
 /**
@@ -44,57 +66,82 @@ export function formatMessageForConsole(
     ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) 
     : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
-  const labelPrefix = laneLabel 
-    ? `${COLORS.magenta}${laneLabel.padEnd(12)}${COLORS.reset} ` 
+  
+  // Lane label max 16 chars
+  const truncatedLabel = laneLabel.length > 16 ? laneLabel.substring(0, 16) : laneLabel;
+  const labelPrefix = truncatedLabel 
+    ? `${COLORS.magenta}${truncatedLabel.padEnd(16)}${COLORS.reset} ` 
     : '';
 
-  const { typePrefix, formattedContent } = formatMessageContent(msg, compact);
+  // Determine if should use box format
+  const useBox = !compact && showBorders && BOX_TYPES.has(msg.type);
+  const { typePrefix, formattedContent } = formatMessageContent(msg, !useBox);
 
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${formattedContent}`;
 
-  if (compact || !showBorders) {
-    return `${tsPrefix}${labelPrefix}${typePrefix} ${formattedContent}`;
+  if (!useBox) {
+    return `${tsPrefix}${labelPrefix}${typePrefix.padEnd(12)} ${formattedContent}`;
   }
 
-  // Multi-line box format
+  // Multi-line box format (only for user, assistant, system, result)
+  // Emoji width is 2, so we need to account for that in indent calculation
   const lines = formattedContent.split('\n');
   const fullPrefix = `${tsPrefix}${labelPrefix}`;
-  const header = `${typePrefix} ┌${'─'.repeat(60)}`;
+  const strippedPrefix = stripAnsi(typePrefix);
+  // Count emojis (they take 2 terminal columns but 1-2 chars in string)
+  const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
+  const visualWidth = strippedPrefix.length + emojiCount; // emoji adds 1 extra width
+  
+  const boxWidth = 60;
+  const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
   let result = `${fullPrefix}${header}\n`;
   
-  const indent = ' '.repeat(stripAnsi(typePrefix).length);
+  const indent = ' '.repeat(visualWidth);
   for (const line of lines) {
-    result += `${fullPrefix}${indent} │ ${line}\n`;
+    result += `${fullPrefix}${indent}│ ${line}\n`;
   }
-  result += `${fullPrefix}${indent} └${'─'.repeat(60)}`;
+  result += `${fullPrefix}${indent}└${'─'.repeat(boxWidth)}`;
   
   return result;
 }
 
-function formatMessageContent(msg: ParsedMessage, compact: boolean): { typePrefix: string; formattedContent: string } {
+function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { typePrefix: string; formattedContent: string } {
   let typePrefix = '';
   let formattedContent = msg.content;
+  const useGray = GRAY_TYPES.has(msg.type);
+
+  // For thinking: collapse multiple newlines
+  if (msg.type === 'thinking') {
+    formattedContent = formattedContent.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
+  }
 
   switch (msg.type) {
     case 'user':
       typePrefix = `${COLORS.cyan}🧑 USER${COLORS.reset}`;
-      if (compact) formattedContent = truncate(formattedContent.replace(/\n/g, ' '), 100);
+      if (forceCompact) formattedContent = truncate(formattedContent.replace(/\n/g, ' '), 100);
       break;
       
     case 'assistant':
       typePrefix = `${COLORS.green}🤖 ASST${COLORS.reset}`;
-      if (compact) formattedContent = truncate(formattedContent.replace(/\n/g, ' '), 100);
+      if (forceCompact) formattedContent = truncate(formattedContent.replace(/\n/g, ' '), 100);
       break;
       
     case 'tool':
-      typePrefix = `${COLORS.yellow}🔧 TOOL${COLORS.reset}`;
+      // Tool calls are always gray
+      typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
       formattedContent = formatToolCall(formattedContent);
       break;
       
     case 'tool_result':
+      // Tool results are always gray
       typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
       const resMatch = formattedContent.match(/\[Tool Result: ([^\]]+)\]/);
-      formattedContent = resMatch ? `${resMatch[1]} OK` : 'result';
+      if (resMatch) {
+        const simpleName = simplifyToolName(resMatch[1]!);
+        formattedContent = `${COLORS.gray}${simpleName} OK${COLORS.reset}`;
+      } else {
+        formattedContent = `${COLORS.gray}result${COLORS.reset}`;
+      }
       break;
       
     case 'result':
@@ -102,12 +149,13 @@ function formatMessageContent(msg: ParsedMessage, compact: boolean): { typePrefi
       break;
       
     case 'system':
-      typePrefix = `${COLORS.gray}⚙️  SYS${COLORS.reset}`;
+      typePrefix = `${COLORS.gray}⚙️ SYS${COLORS.reset}`;
       break;
       
     case 'thinking':
+      // Thinking is always gray and compact
       typePrefix = `${COLORS.gray}🤔 THNK${COLORS.reset}`;
-      if (compact) formattedContent = truncate(formattedContent.replace(/\n/g, ' '), 100);
+      formattedContent = `${COLORS.gray}${truncate(formattedContent, 100)}${COLORS.reset}`;
       break;
   }
 
@@ -118,18 +166,20 @@ function formatToolCall(content: string): string {
   const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
   if (!toolMatch) return content;
 
-  const [, name, args] = toolMatch;
+  const [, rawName, args] = toolMatch;
+  const name = simplifyToolName(rawName!);
+  
   try {
     const parsedArgs = JSON.parse(args!);
     let argStr = '';
     
-    if (name === 'read_file' && parsedArgs.target_file) {
+    if (rawName === 'read_file' && parsedArgs.target_file) {
       argStr = parsedArgs.target_file;
-    } else if (name === 'run_terminal_cmd' && parsedArgs.command) {
+    } else if (rawName === 'run_terminal_cmd' && parsedArgs.command) {
       argStr = parsedArgs.command;
-    } else if (name === 'write' && parsedArgs.file_path) {
+    } else if (rawName === 'write' && parsedArgs.file_path) {
       argStr = parsedArgs.file_path;
-    } else if (name === 'search_replace' && parsedArgs.file_path) {
+    } else if (rawName === 'search_replace' && parsedArgs.file_path) {
       argStr = parsedArgs.file_path;
     } else {
       const keys = Object.keys(parsedArgs);
@@ -138,9 +188,9 @@ function formatToolCall(content: string): string {
       }
     }
     
-    return `${COLORS.bold}${name}${COLORS.reset}(${argStr})`;
+    return `${COLORS.gray}${name}${COLORS.reset}(${COLORS.gray}${argStr}${COLORS.reset})`;
   } catch {
-    return `${COLORS.bold}${name}${COLORS.reset}: ${args}`;
+    return `${COLORS.gray}${name}${COLORS.reset}: ${args}`;
   }
 }
 

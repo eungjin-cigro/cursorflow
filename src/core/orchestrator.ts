@@ -176,14 +176,22 @@ export function spawnLane({
         
         for (const line of lines) {
           const trimmed = line.trim();
-          // Show if it's a timestamped log line (starts with [YYYY-MM-DD...)
+          // Show if it's a timestamped log line (starts with [YYYY-MM-DD... or [HH:MM:SS])
           // or if it's NOT a noisy JSON line
-          const isTimestamped = /^\[\d{4}-\d{2}-\d{2}T/.test(trimmed);
+          const hasTimestamp = /^\[\d{4}-\d{2}-\d{2}T|\^\[\d{2}:\d{2}:\d{2}\]/.test(trimmed);
           const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
           
-          if (trimmed && (isTimestamped || !isJson)) {
+          if (trimmed && !isJson) {
             if (onActivity) onActivity();
-            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
+            // If line already has timestamp format, just add lane prefix
+            if (hasTimestamp) {
+              // Insert lane name after first timestamp
+              const formatted = trimmed.replace(/^(\[[^\]]+\])/, `$1 ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset}`);
+              process.stdout.write(formatted + '\n');
+            } else {
+              // Add full prefix: timestamp + lane
+              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${line}\n`);
+            }
           }
         }
       });
@@ -203,11 +211,12 @@ export function spawnLane({
                              trimmed.startsWith('HEAD is now at') ||
                              trimmed.includes('actual output');
             
+            const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
             if (isStatus) {
-              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
+              process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${trimmed}\n`);
             } else {
               if (onActivity) onActivity();
-              process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
+              process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
             }
           }
         }
