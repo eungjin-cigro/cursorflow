@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 
 export interface ProcessInfo {
   pid: number;
@@ -51,26 +51,29 @@ export function checkProcess(pid: number): ProcessInfo {
     // Try to get more info on Linux/macOS
     if (process.platform !== 'win32') {
       try {
-        const psOutput = execSync(`ps -p ${pid} -o pid,stat,comm,etime,%cpu,%mem`, {
+        const psResult = spawnSync('ps', ['-p', pid.toString(), '-o', 'pid,stat,comm,etime,%cpu,%mem'], {
           encoding: 'utf8',
           timeout: 1000,
-        }).trim();
+        });
 
-        const lines = psOutput.split('\n');
-        if (lines.length > 1) {
-          const fields = lines[1]!.trim().split(/\s+/);
-          if (fields.length >= 4) {
-            result.command = fields[2];
-            
-            // Parse elapsed time (formats: MM:SS, HH:MM:SS, D-HH:MM:SS)
-            const etime = fields[3]!;
-            result.uptime = parseElapsedTime(etime);
-            
-            if (fields.length >= 5) {
-              result.cpuPercent = parseFloat(fields[4]!);
-            }
-            if (fields.length >= 6) {
-              result.memoryMb = parseFloat(fields[5]!);
+        if (psResult.status === 0) {
+          const psOutput = psResult.stdout.trim();
+          const lines = psOutput.split('\n');
+          if (lines.length > 1) {
+            const fields = lines[1]!.trim().split(/\s+/);
+            if (fields.length >= 4) {
+              result.command = fields[2];
+              
+              // Parse elapsed time (formats: MM:SS, HH:MM:SS, D-HH:MM:SS)
+              const etime = fields[3]!;
+              result.uptime = parseElapsedTime(etime);
+              
+              if (fields.length >= 5) {
+                result.cpuPercent = parseFloat(fields[4]!);
+              }
+              if (fields.length >= 6) {
+                result.memoryMb = parseFloat(fields[5]!);
+              }
             }
           }
         }

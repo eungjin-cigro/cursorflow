@@ -103,7 +103,8 @@ describe('Dependency Self-Healing E2E', () => {
       await orchestrate(testTasksDir, {
         runDir: testRunDir,
         pollInterval: 50,
-        autoResolveDependencies: true
+        autoResolveDependencies: true,
+        skipPreflight: true
       });
     } catch (e: any) {
       if (!e.message.includes('process.exit(0)')) {

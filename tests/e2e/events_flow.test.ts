@@ -57,6 +57,7 @@ describe('E2E Event Flow', () => {
       await orchestrate(testTasksDir, {
         runDir: testRunDir,
         pollInterval: 50,
+        skipPreflight: true,
       });
     } catch (e: any) {
       if (!e.message.includes('process.exit(0)')) {
