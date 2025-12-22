@@ -109,7 +109,6 @@ export class LogBufferService extends EventEmitter {
 
     for (const laneName of this.lanes) {
       const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
-      if (!fs.existsSync(jsonlPath)) continue;
 
       let fd: number | null = null;
       try {

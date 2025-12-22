@@ -635,11 +635,9 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   }
 
   let taskConfig;
-  let effectivePreset: EffectivePresetType = options.preset || (hasDependencies ? 'merge' : 'complex');
 
   if (template) {
     taskConfig = { ...template, laneNumber, devPort: 3000 + laneNumber };
-    effectivePreset = 'custom';
   } else {
     // Build tasks from options (auto-detects merge preset if has dependencies)
     const tasks = buildTasksFromOptions(options, laneNumber, featureName, hasDependencies);
@@ -660,6 +658,8 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   };
   
   // Use atomic write with wx flag to avoid TOCTOU race condition (unless force is set)
+  // SECURITY NOTE: Writing user-defined task configuration to the file system.
+  // The input is from CLI arguments and templates, used to generate CursorFlow lane files.
   try {
     const writeFlag = options.force ? 'w' : 'wx';
     fs.writeFileSync(filePath, JSON.stringify(finalConfig, null, 2) + '\n', { encoding: 'utf8', flag: writeFlag });
@@ -797,6 +797,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
       ...(dependsOn.length > 0 ? { dependsOn } : {}),
     };
     
+    // SECURITY NOTE: Writing generated lane configuration (containing user prompts) to file system.
     fs.writeFileSync(filePath, JSON.stringify(finalConfig, null, 2) + '\n', 'utf8');
     
     const taskSummary = finalConfig.tasks?.map((t: any) => t.name).join(' → ') || 'default';

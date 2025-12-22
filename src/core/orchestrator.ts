@@ -28,13 +28,11 @@ import {
   ParsedMessage
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
-import { analyzeFailure, analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig, FailureType } from './failure-policy';
+import { analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig, FailureType } from './failure-policy';
 import { 
-  AutoRecoveryManager, 
   getAutoRecoveryManager, 
   DEFAULT_AUTO_RECOVERY_CONFIG,
   AutoRecoveryConfig,
-  RecoveryStage,
   savePOF,
   createPOFFromRecoveryState,
   getGitPushFailureGuidance,
@@ -45,9 +43,6 @@ import { detectCyclicDependencies, validateDependencies, printDependencyGraph, D
 import { preflightCheck, printPreflightReport, autoRepair } from '../utils/health';
 import { getLatestCheckpoint } from '../utils/checkpoint';
 import { cleanStaleLocks, getLockDir } from '../utils/lock';
-
-/** Heartbeat interval: 30 seconds */
-const HEARTBEAT_INTERVAL_MS = 30000;
 
 /** Default stall detection configuration - 1 minute idle timeout for fast recovery */
 const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
@@ -877,7 +872,7 @@ export async function orchestrate(tasksDir: string, options: {
               logger.error(`[${laneName}] Running diagnostics due to persistent failures...`);
               
               // Import health check dynamically to avoid circular dependency
-              const { runHealthCheck, checkAgentHealth, checkAuthHealth } = await import('../utils/health');
+              const { checkAgentHealth, checkAuthHealth } = await import('../utils/health');
               
               const [agentHealth, authHealth] = await Promise.all([
                 checkAgentHealth(),

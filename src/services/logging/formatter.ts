@@ -15,9 +15,6 @@ import { ParsedMessage, MessageType } from '../../types/logging';
 // Types that should use box format
 const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
 
-// Types that should be displayed in gray/subdued
-const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking']);
-
 /**
  * Strip ANSI escape sequences from text
  */
@@ -108,7 +105,6 @@ export function formatMessageForConsole(
 function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { typePrefix: string; formattedContent: string } {
   let typePrefix = '';
   let formattedContent = msg.content;
-  const useGray = GRAY_TYPES.has(msg.type);
 
   // For thinking: collapse multiple newlines
   if (msg.type === 'thinking') {

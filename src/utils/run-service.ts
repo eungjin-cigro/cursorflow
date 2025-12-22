@@ -51,7 +51,6 @@ export class RunService {
     let runs: RunInfo[] = [];
 
     for (const runId of runDirs) {
-      const runPath = path.join(this.runsDir, runId);
       const runInfo = this.getRunInfo(runId);
       
       if (!runInfo) continue;

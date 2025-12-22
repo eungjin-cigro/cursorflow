@@ -22,7 +22,6 @@ import { registerWebhooks } from '../utils/webhook';
 import { runReviewLoop } from './reviewer';
 import { safeJoin } from '../utils/path';
 import { analyzeFailure, RecoveryAction, logFailure, withRetry } from './failure-policy';
-import { withEnhancedRetry } from '../utils/retry';
 import { createCheckpoint, getLatestCheckpoint, restoreFromCheckpoint } from '../utils/checkpoint';
 import { waitForTaskDependencies as waitForDeps, DependencyWaitOptions } from '../utils/dependency';
 import { preflightCheck, printPreflightReport } from '../utils/health';

@@ -16,9 +16,6 @@ import { ParsedMessage, stripAnsi } from './enhanced-logger';
 // Types that should use box format
 const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
 
-// Types that should be displayed in gray/subdued
-const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking']);
-
 /**
  * Simplify tool names (ShellToolCall → Shell, etc.)
  */
@@ -199,8 +196,8 @@ export function formatPotentialJsonMessage(message: string): string {
     if (!json.type) return message;
     
     // Convert JSON to a ParsedMessage-like structure for formatting
-    let content = trimmed;
-    let type = 'system';
+    let content: string;
+    let type: string;
     
     if (json.type === 'thinking' && json.text) {
       content = json.text;

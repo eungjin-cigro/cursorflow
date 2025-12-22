@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { LogBufferService, LogViewport } from '../../src/utils/log-buffer';
+import { LogBufferService } from '../../src/utils/log-buffer';
 import { LogImportance } from '../../src/utils/types';
 import { JsonLogEntry } from '../../src/utils/enhanced-logger';
 

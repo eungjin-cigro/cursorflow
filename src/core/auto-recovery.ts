@@ -10,11 +10,9 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import { ChildProcess } from 'child_process';
 
 import * as logger from '../utils/logger';
-import { loadState, saveState } from '../utils/state';
 import { LaneState } from '../utils/types';
 import { events } from '../utils/events';
 import { safeJoin } from '../utils/path';
@@ -740,14 +738,12 @@ export function savePOF(
 
   const pofPath = safeJoin(pofDir, `pof-${runId}.json`);
   
-  // Check if there's an existing POF for this run
   let existingPOF: POFEntry | null = null;
-  if (fs.existsSync(pofPath)) {
-    try {
-      existingPOF = JSON.parse(fs.readFileSync(pofPath, 'utf8'));
-    } catch {
-      // Ignore parse errors
-    }
+  try {
+    const data = fs.readFileSync(pofPath, 'utf8');
+    existingPOF = JSON.parse(data);
+  } catch {
+    // File doesn't exist or is invalid JSON - ignore
   }
 
   // If there's an existing POF, add it to previousFailures
@@ -756,7 +752,16 @@ export function savePOF(
     entry.previousFailures.unshift(existingPOF);
   }
 
-  fs.writeFileSync(pofPath, JSON.stringify(entry, null, 2));
+  // Use atomic write: write to temp file then rename
+  const tempPath = `${pofPath}.${Math.random().toString(36).substring(2, 7)}.tmp`;
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(entry, null, 2), 'utf8');
+    fs.renameSync(tempPath, pofPath);
+  } catch (err) {
+    // If temp file was created, try to clean it up
+    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch { /* ignore */ }
+    throw err;
+  }
   
   logger.info(`[POF] Saved post-mortem to ${pofPath}`);
   

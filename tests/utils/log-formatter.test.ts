@@ -4,7 +4,6 @@
 
 import { formatMessageForConsole, formatPotentialJsonMessage } from '../../src/utils/log-formatter';
 import { ParsedMessage } from '../../src/utils/enhanced-logger';
-import { COLORS } from '../../src/utils/log-constants';
 
 // Helper to strip ANSI codes for comparison
 function stripAnsi(text: string): string {

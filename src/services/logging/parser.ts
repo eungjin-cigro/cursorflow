@@ -188,7 +188,7 @@ function parseJsonToMessage(json: any): ParsedMessage | null {
   const type = json.type;
   if (!type) return null;
 
-  let messageType: MessageType = 'system';
+  let messageType: MessageType;
   let content = '';
 
   if (type === 'thinking' && (json.text || json.thought)) {

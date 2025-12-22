@@ -715,8 +715,6 @@ function followLogs(laneDir: string, options: LogsOptions): void {
   console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
   
   const checkInterval = setInterval(() => {
-    if (!fs.existsSync(logFile)) return;
-    
     // Use fstat on open fd to avoid TOCTOU race condition
     let fd: number | null = null;
     try {

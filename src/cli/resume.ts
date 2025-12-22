@@ -203,9 +203,13 @@ function checkAndFixZombieLanes(runDir: string): { fixed: string[]; pofCreated: 
     
     const runId = path.basename(runDir);
     const pofPath = safeJoin(pofDir, `pof-${runId}.json`);
-    const existingPof = fs.existsSync(pofPath) 
-      ? JSON.parse(fs.readFileSync(pofPath, 'utf-8')) 
-      : null;
+    
+    let existingPof = null;
+    try {
+      existingPof = JSON.parse(fs.readFileSync(pofPath, 'utf-8'));
+    } catch {
+      // Ignore errors (file might not exist)
+    }
     
     const pof = {
       title: 'Run Failure Post-mortem',
@@ -252,9 +256,18 @@ function checkAndFixZombieLanes(runDir: string): { fixed: string[]; pofCreated: 
       previousFailures: existingPof ? [existingPof] : undefined,
     };
     
-    fs.writeFileSync(pofPath, JSON.stringify(pof, null, 2));
-    pofCreated = true;
-    logger.info(`📋 POF file created: ${pofPath}`);
+    // Use atomic write: write to temp file then rename
+    const tempPath = `${pofPath}.${Math.random().toString(36).substring(2, 7)}.tmp`;
+    try {
+      fs.writeFileSync(tempPath, JSON.stringify(pof, null, 2), 'utf8');
+      fs.renameSync(tempPath, pofPath);
+      pofCreated = true;
+      logger.info(`📋 POF file created: ${pofPath}`);
+    } catch (err) {
+      // If temp file was created, try to clean it up
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch { /* ignore */ }
+      throw err;
+    }
   }
   
   return { fixed, pofCreated };
