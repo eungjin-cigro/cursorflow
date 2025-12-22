@@ -1,0 +1,39 @@
+{
+  "title": "Run Failure Post-mortem",
+  "runId": "run-1766389444238",
+  "failureTime": "2025-12-22T08:51:46.813Z",
+  "detectedAt": "2025-12-22T08:51:46.813Z",
+  "summary": "1 lane(s) found with dead processes (zombie state)",
+  "rootCause": {
+    "type": "ZOMBIE_PROCESS",
+    "description": "Lane processes were marked as running but the processes are no longer alive",
+    "symptoms": [
+      "Process PIDs no longer exist in the system",
+      "Lanes were stuck in \"running\" state",
+      "No completion or error was recorded before process death"
+    ]
+  },
+  "affectedLanes": [
+    {
+      "name": "06-tasks-command",
+      "status": "failed (was: running)",
+      "task": "[2/4]",
+      "taskIndex": 1,
+      "pid": 361348,
+      "reason": "Process terminated unexpectedly"
+    }
+  ],
+  "possibleCauses": [
+    "System killed process due to memory pressure (OOM)",
+    "User killed process manually (Ctrl+C, kill command)",
+    "Agent timeout exceeded and process was terminated",
+    "System restart or crash",
+    "Agent hung and watchdog terminated it"
+  ],
+  "recovery": {
+    "command": "cursorflow resume --all --run-dir /home/eugene/workbench/cursorflow/_cursorflow/logs/runs/run-1766389444238",
+    "description": "Resume all failed lanes from their last checkpoint",
+    "alternativeCommand": "cursorflow resume --all --restart --run-dir /home/eugene/workbench/cursorflow/_cursorflow/logs/runs/run-1766389444238",
+    "alternativeDescription": "Restart all failed lanes from the beginning"
+  }
+}

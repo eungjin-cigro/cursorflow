@@ -112,7 +112,7 @@ function createExampleTasks(projectRoot: string, config: CursorFlowConfig): void
   
   const exampleTask = {
     repository: "https://github.com/your-org/your-repo",
-    baseBranch: "main",
+    // baseBranch is auto-detected from current branch at runtime
     branchPrefix: "cursorflow/example-",
     executor: "cursor-agent",
     autoCreatePr: false,

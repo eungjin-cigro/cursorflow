@@ -7,13 +7,15 @@
  * - Lane filtering (tab to cycle, numbers for direct select)
  * - Importance filtering
  * - Text search
+ * - Readable format toggle
  */
 
 import * as readline from 'readline';
 import * as path from 'path';
 import * as logger from '../utils/logger';
-import { LogBufferService, BufferedLogEntry, LogViewport } from '../utils/log-buffer';
-import { LogImportance } from '../utils/types';
+import { LogBufferService, BufferedLogEntry } from '../services/logging/buffer';
+import { LogImportance } from '../types/logging';
+import { formatReadableEntry } from '../services/logging/formatter';
 
 interface LogViewerState {
   scrollOffset: number;           // 현재 스크롤 위치
@@ -23,6 +25,7 @@ interface LogViewerState {
   searchQuery: string | null;     // 검색어
   searchMode: boolean;            // 검색 입력 모드
   searchInput: string;            // 검색 입력 버퍼
+  readableFormat: boolean;        // 리더블 포맷 ON/OFF
 }
 
 export class LogViewer {
@@ -46,6 +49,7 @@ export class LogViewer {
       searchQuery: null,
       searchMode: false,
       searchInput: '',
+      readableFormat: false,
     };
     
     // 화면 높이 - 헤더/푸터 (6줄)
@@ -159,6 +163,11 @@ export class LogViewer {
     // Importance filter
     else if (str === 'f' || str === 'F') {
       this.cycleImportanceFilter();
+    }
+    
+    // Readable format toggle
+    else if (str === 'r' || str === 'R') {
+      this.state.readableFormat = !this.state.readableFormat;
     }
     
     // Search
@@ -357,9 +366,12 @@ export class LogViewer {
     const autoLabel = this.state.autoScroll ? 'ON' : 'OFF';
     const liveIndicator = bufferState.isStreaming ? '🔴 LIVE' : '⚫ STOPPED';
     
+    const readableLabel = this.state.readableFormat ? 'ON' : 'OFF';
+    
     output += `View: [${yellow}${laneLabel}${reset}]  `;
     output += `Entries: ${totalCount}  `;
     output += `Filter: ${filterLabel}  `;
+    output += `Readable: ${readableLabel}  `;
     output += `${liveIndicator} (Auto-scroll: ${autoLabel})`;
     
     // 새 로그 카운터 (자동 스크롤 OFF 시)
@@ -392,7 +404,7 @@ export class LogViewer {
     }
     
     // 푸터
-    const footer = `${gray}[↑/↓/PgUp/PgDn] Scroll  [Tab] Lane  [A] Auto-scroll  [F] Filter  [/] Search  [Q] Quit${reset}`;
+    const footer = `${gray}[↑/↓/PgUp/PgDn] Scroll  [Tab] Lane  [A] Auto-scroll  [F] Filter  [R] Readable  [/] Search  [Q] Quit${reset}`;
     output += footer;
     output += '\x1b[K'; // 현재 라인 끝까지 지우기
     
@@ -402,6 +414,18 @@ export class LogViewer {
 
   private formatLogEntry(entry: BufferedLogEntry, width: number): string {
     const { gray, reset } = logger.COLORS;
+    
+    // Use readable format if enabled
+    if (this.state.readableFormat) {
+      const msgType = (entry.type || entry.level) as any;
+      return formatReadableEntry(
+        entry.timestamp,
+        entry.laneName,
+        msgType,
+        entry.message,
+        { showLane: true, maxWidth: width - 30 }
+      );
+    }
     
     const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
     const lanePad = entry.laneName.substring(0, 12).padEnd(12);

@@ -1,9 +1,9 @@
 import { LogViewer } from '../../src/ui/log-viewer';
-import { LogBufferService } from '../../src/utils/log-buffer';
-import { LogImportance } from '../../src/utils/types';
+import { LogBufferService } from '../../src/services/logging/buffer';
+import { LogImportance } from '../../src/types/logging';
 
 // Mock LogBufferService
-jest.mock('../../src/utils/log-buffer');
+jest.mock('../../src/services/logging/buffer');
 
 describe('LogViewer', () => {
   let viewer: any;
@@ -47,6 +47,7 @@ describe('LogViewer', () => {
         searchQuery: null,
         searchMode: false,
         searchInput: '',
+        readableFormat: false,
       });
       expect(viewer['pageSize']).toBe(18); // 24 - 6
     });
