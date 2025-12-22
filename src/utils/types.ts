@@ -156,6 +156,15 @@ export interface AgentResponseReceivedPayload {
   error?: string;
 }
 
+export enum LogImportance {
+  CRITICAL = 'critical',
+  HIGH = 'high',
+  MEDIUM = 'medium',
+  LOW = 'low',
+  INFO = 'info',
+  DEBUG = 'debug'
+}
+
 export interface ReviewStartedPayload {
   taskName: string;
   taskBranch: string;
