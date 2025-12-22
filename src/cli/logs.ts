@@ -14,6 +14,7 @@ import {
   JsonLogEntry 
 } from '../utils/enhanced-logger';
 import { formatPotentialJsonMessage } from '../utils/log-formatter';
+import { startLogViewer } from '../ui/log-viewer';
 
 interface LogsOptions {
   runDir?: string;
@@ -23,6 +24,7 @@ interface LogsOptions {
   output?: string;
   tail?: number;
   follow: boolean;
+  interactive: boolean;
   filter?: string;
   level?: string;
   clean: boolean;
@@ -46,12 +48,14 @@ View and export lane logs.
 
 Options:
   [run-dir]              Run directory (default: latest)
+  --run <id>             Specific run directory
   --lane <name>          Filter to specific lane
   --all, -a              View all lanes merged (sorted by timestamp)
   --format <fmt>         Output format: text, json, markdown, html (default: text)
   --output <path>        Write output to file instead of stdout
   --tail <n>             Show last n lines/entries (default: all)
   --follow, -f           Follow log output in real-time
+  --interactive, -i      Open interactive log viewer
   --filter <pattern>     Filter entries by regex pattern
   --level <level>        Filter by log level: stdout, stderr, info, error, debug
   --readable, -r         Show readable log (parsed AI output) (default)
@@ -68,23 +72,26 @@ Examples:
   cursorflow logs --all --format json          # Export all lanes as JSON
   cursorflow logs --all --filter "error"       # Filter all lanes for errors
   cursorflow logs --format json --output out.json  # Export as JSON
+  cursorflow logs -i                              # Interactive log viewer
+  cursorflow logs -i --run <id>                   # Specific run in interactive mode
   `);
 }
 
 function parseArgs(args: string[]): LogsOptions {
   const laneIdx = args.indexOf('--lane');
+  const runIdx = args.indexOf('--run');
   const formatIdx = args.indexOf('--format');
   const outputIdx = args.indexOf('--output');
   const tailIdx = args.indexOf('--tail');
   const filterIdx = args.indexOf('--filter');
   const levelIdx = args.indexOf('--level');
   
-  // Find run directory (first non-option argument)
-  const runDir = args.find((arg, i) => {
+  // Find run directory (first non-option argument or --run value)
+  let runDir = runIdx >= 0 ? args[runIdx + 1] : args.find((arg, i) => {
     if (arg.startsWith('--') || arg.startsWith('-')) return false;
     // Skip values for options
     const prevArg = args[i - 1];
-    if (prevArg && ['--lane', '--format', '--output', '--tail', '--filter', '--level'].includes(prevArg)) {
+    if (prevArg && ['--lane', '--run', '--format', '--output', '--tail', '--filter', '--level'].includes(prevArg)) {
       return false;
     }
     return true;
@@ -102,6 +109,7 @@ function parseArgs(args: string[]): LogsOptions {
     output: outputIdx >= 0 ? args[outputIdx + 1] : undefined,
     tail: tailIdx >= 0 ? parseInt(args[tailIdx + 1] || '50') : undefined,
     follow: args.includes('--follow') || args.includes('-f'),
+    interactive: args.includes('--interactive') || args.includes('-i'),
     filter: filterIdx >= 0 ? args[filterIdx + 1] : undefined,
     level: levelIdx >= 0 ? args[levelIdx + 1] : undefined,
     raw,
@@ -804,13 +812,17 @@ async function logs(args: string[]): Promise<void> {
   let runDir = options.runDir;
   if (!runDir || runDir === 'latest') {
     runDir = findLatestRunDir(config.logsDir) || undefined;
-    if (!runDir) {
-      throw new Error('No run directories found');
-    }
   }
   
-  if (!fs.existsSync(runDir)) {
-    throw new Error(`Run directory not found: ${runDir}`);
+  if (!runDir || !fs.existsSync(runDir)) {
+    console.error('No run found');
+    process.exit(1);
+  }
+  
+  // Handle interactive mode
+  if (options.interactive) {
+    await startLogViewer(runDir);
+    return;
   }
   
   // Handle --all option (view all lanes merged)
