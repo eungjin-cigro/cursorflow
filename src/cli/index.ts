@@ -21,6 +21,7 @@ const COMMANDS: Record<string, CommandFn> = {
   signal: require('./signal'),
   models: require('./models'),
   logs: require('./logs'),
+  tasks: require('./tasks'),
   setup: require('./setup-commands').main,
   'setup-commands': require('./setup-commands').main,
 };
@@ -44,6 +45,7 @@ function printHelp(): void {
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]            List available AI models
   \x1b[33mlogs\x1b[0m [run-dir] [options]    View, export, and follow logs
+  \x1b[33mtasks\x1b[0m [name] [options]      List and validate prepared tasks
 
 \x1b[1mGLOBAL OPTIONS\x1b[0m
   --config <path>             Config file path

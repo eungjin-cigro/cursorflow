@@ -44,8 +44,8 @@ temp/
 # Cursor
 .cursorrules
 .cursor/
-_cursorflow/
-!_cursorflow/handoffs/**
+_cursorflow/*
+!_cursorflow/handoffs/
 _lifecycle-tests/
 _lifecycle_test/
 _comprehensive_test/
