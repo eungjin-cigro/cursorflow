@@ -23,6 +23,7 @@ interface LogsOptions {
   output?: string;
   tail?: number;
   follow: boolean;
+  interactive: boolean;
   filter?: string;
   level?: string;
   clean: boolean;
@@ -52,6 +53,7 @@ Options:
   --output <path>        Write output to file instead of stdout
   --tail <n>             Show last n lines/entries (default: all)
   --follow, -f           Follow log output in real-time
+  --interactive, -i      Open interactive log viewer
   --filter <pattern>     Filter entries by regex pattern
   --level <level>        Filter by log level: stdout, stderr, info, error, debug
   --readable, -r         Show readable log (parsed AI output) (default)
@@ -102,6 +104,7 @@ function parseArgs(args: string[]): LogsOptions {
     output: outputIdx >= 0 ? args[outputIdx + 1] : undefined,
     tail: tailIdx >= 0 ? parseInt(args[tailIdx + 1] || '50') : undefined,
     follow: args.includes('--follow') || args.includes('-f'),
+    interactive: args.includes('--interactive') || args.includes('-i'),
     filter: filterIdx >= 0 ? args[filterIdx + 1] : undefined,
     level: levelIdx >= 0 ? args[levelIdx + 1] : undefined,
     raw,
@@ -811,6 +814,13 @@ async function logs(args: string[]): Promise<void> {
   
   if (!fs.existsSync(runDir)) {
     throw new Error(`Run directory not found: ${runDir}`);
+  }
+  
+  // Handle interactive mode
+  if (options.interactive) {
+    const { startLogViewer } = require('../ui/log-viewer');
+    await startLogViewer(runDir);
+    return;
   }
   
   // Handle --all option (view all lanes merged)
