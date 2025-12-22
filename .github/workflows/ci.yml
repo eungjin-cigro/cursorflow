@@ -22,22 +22,20 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Install dependencies (if any)
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.0
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
 
       - name: Run linter (if available)
-        run: npm run lint || echo "No linter configured"
+        run: pnpm run lint || echo "No linter configured"
         continue-on-error: true
 
       - name: Run tests (if available)
-        run: npm test || echo "No tests configured"
+        run: pnpm test || echo "No tests configured"
         continue-on-error: true
 
       - name: Check package validity
-        run: npm pack --dry-run
+        run: pnpm pack
 

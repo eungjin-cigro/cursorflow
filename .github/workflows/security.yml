@@ -28,12 +28,16 @@ jobs:
         with:
           node-version: '20'
 
-      # 1. NPM 취약점 스캔
-      - name: NPM Audit
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.0
+
+      # 1. pnpm 취약점 스캔
+      - name: pnpm Audit
         id: npm-audit
         run: |
-          echo "::group::NPM Audit Report"
-          npm audit --audit-level=moderate || echo "npm_audit_failed=true" >> $GITHUB_OUTPUT
+          echo "::group::pnpm Audit Report"
+          pnpm install
+          pnpm audit --moderate || echo "npm_audit_failed=true" >> $GITHUB_OUTPUT
           echo "::endgroup::"
         continue-on-error: true
 

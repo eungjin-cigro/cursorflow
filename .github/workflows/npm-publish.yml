@@ -25,12 +25,15 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.0
+
       # NPM 취약점 검사 (critical/high 차단)
       - name: NPM Security Audit
         run: |
-          echo "🔒 Running npm security audit..."
-          npm install
-          npm audit --audit-level=high || true
+          echo "🔒 Running pnpm security audit..."
+          pnpm install
+          pnpm audit --audit-level=high || true
         continue-on-error: false
 
       # 시크릿 스캔
@@ -61,16 +64,14 @@ jobs:
         with:
           node-version: '18'
 
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.0
+
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: pnpm install --no-frozen-lockfile
 
       - name: Run tests (if available)
-        run: npm test || echo "No tests configured"
+        run: pnpm test || echo "No tests configured"
         continue-on-error: true
 
   publish:
@@ -89,20 +90,17 @@ jobs:
           node-version: '18'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.0
 
-      - name: Build (if needed)
-        run: npm run build || echo "No build script configured"
-        continue-on-error: true
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build and Validate
+        run: pnpm run build && pnpm run validate
 
       - name: Publish to NPM
-        run: npm publish --access public
+        run: pnpm publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
