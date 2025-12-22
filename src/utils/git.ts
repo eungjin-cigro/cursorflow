@@ -196,6 +196,24 @@ export function getRepoRoot(cwd?: string): string {
 }
 
 /**
+ * Get main repository root directory (for worktrees)
+ */
+export function getMainRepoRoot(cwd?: string): string {
+  try {
+    const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd });
+    if (result.success && result.stdout) {
+      const firstLine = result.stdout.split('\n')[0];
+      if (firstLine && firstLine.startsWith('worktree ')) {
+        return firstLine.slice(9).trim();
+      }
+    }
+  } catch {
+    // Fallback to normal repo root
+  }
+  return getRepoRoot(cwd);
+}
+
+/**
  * Check if directory is a git repository
  */
 export function isGitRepo(cwd?: string): boolean {

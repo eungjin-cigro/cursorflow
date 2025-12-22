@@ -13,7 +13,7 @@
     "test": "jest",
     "prepublishOnly": "pnpm run build && pnpm run validate",
     "postinstall": "node scripts/postinstall.js",
-    "validate": "pnpm pack --dry-run",
+    "validate": "pnpm pack",
     "release": "scripts/release.sh",
     "release:patch": "scripts/release.sh patch",
     "release:minor": "scripts/release.sh minor",

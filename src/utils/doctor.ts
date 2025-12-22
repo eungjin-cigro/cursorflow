@@ -74,9 +74,11 @@ function addIssue(issues: DoctorIssue[], issue: DoctorIssue): void {
 }
 
 function resolveRepoRoot(cwd: string): string | null {
-  const res = git.runGitResult(['rev-parse', '--show-toplevel'], { cwd });
-  if (!res.success || !res.stdout) return null;
-  return res.stdout;
+  try {
+    return git.getMainRepoRoot(cwd);
+  } catch {
+    return null;
+  }
 }
 
 function isInsideGitWorktree(cwd: string): boolean {

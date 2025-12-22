@@ -914,7 +914,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.success('✓ Cursor authentication OK');
   
   // In noGit mode, we don't need repoRoot - use current directory
-  const repoRoot = noGit ? process.cwd() : git.getRepoRoot();
+  const repoRoot = noGit ? process.cwd() : git.getMainRepoRoot();
   
   // Load existing state if resuming
   const statePath = safeJoin(runDir, 'state.json');

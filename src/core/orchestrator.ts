@@ -494,7 +494,7 @@ export async function orchestrate(tasksDir: string, options: {
   
   const laneRunDirs: Record<string, string> = {};
   const laneWorktreeDirs: Record<string, string> = {};
-  const repoRoot = git.getRepoRoot();
+  const repoRoot = git.getMainRepoRoot();
   
   for (const lane of lanes) {
     laneRunDirs[lane.name] = safeJoin(runRoot, 'lanes', lane.name);
