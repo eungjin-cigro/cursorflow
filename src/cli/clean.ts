@@ -10,6 +10,7 @@ import * as logger from '../utils/logger';
 import * as git from '../utils/git';
 import { loadConfig, getLogsDir, getTasksDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
+import { RunService } from '../utils/run-service';
 
 interface CleanOptions {
   type?: string;
@@ -20,6 +21,9 @@ interface CleanOptions {
   help: boolean;
   keepLatest: boolean;
   includeLatest: boolean;
+  run?: string;
+  olderThan?: number;
+  orphaned: boolean;
 }
 
 function printHelp(): void {
@@ -36,6 +40,9 @@ Types:
   all                    Remove all of the above (default)
 
 Options:
+  --run <id>             Clean resources linked to a specific run
+  --older-than <days>    Clean resources older than N days
+  --orphaned             Clean orphaned resources (not linked to any run)
   --dry-run              Show what would be removed without deleting
   --force                Force removal (ignore uncommitted changes)
   --include-latest       Also remove the most recent item (by default, latest is kept)
@@ -45,6 +52,9 @@ Options:
 
 function parseArgs(args: string[]): CleanOptions {
   const includeLatest = args.includes('--include-latest');
+  const runIdx = args.indexOf('--run');
+  const olderThanIdx = args.indexOf('--older-than');
+
   return {
     type: args.find(a => ['branches', 'worktrees', 'logs', 'tasks', 'all'].includes(a)),
     pattern: null,
@@ -54,6 +64,9 @@ function parseArgs(args: string[]): CleanOptions {
     help: args.includes('--help') || args.includes('-h'),
     keepLatest: !includeLatest, // Default: keep latest, unless --include-latest is specified
     includeLatest,
+    run: runIdx >= 0 ? args[runIdx + 1] : undefined,
+    olderThan: olderThanIdx >= 0 ? parseInt(args[olderThanIdx + 1] || '0') : undefined,
+    orphaned: args.includes('--orphaned'),
   };
 }
 
@@ -79,8 +92,32 @@ async function clean(args: string[]): Promise<void> {
 
   const config = loadConfig();
   const repoRoot = git.getRepoRoot();
+  const logsDir = getLogsDir(config);
+  const runsDir = safeJoin(logsDir, 'runs');
+  const runService = new RunService(runsDir);
 
   logger.section('🧹 Cleaning CursorFlow Resources');
+
+  // Handle specific run cleanup
+  if (options.run) {
+    await cleanRunResources(runService, options.run, repoRoot, options);
+    logger.success('\n✨ Run cleaning complete!');
+    return;
+  }
+
+  // Handle older-than cleanup
+  if (options.olderThan !== undefined) {
+    await cleanOlderRuns(runService, options.olderThan, repoRoot, options);
+    logger.success(`\n✨ Older than ${options.olderThan} days cleaning complete!`);
+    return;
+  }
+
+  // Handle orphaned cleanup
+  if (options.orphaned) {
+    await cleanOrphanedResources(runService, config, repoRoot, options);
+    logger.success('\n✨ Orphaned resources cleaning complete!');
+    return;
+  }
 
   const type = options.type || 'all';
 
@@ -333,6 +370,149 @@ async function cleanTasks(config: any, options: CleanOptions) {
         logger.info(`  Tasks cleared.`);
       } catch (e: any) {
         logger.error(`  Failed to clean tasks: ${e.message}`);
+      }
+    }
+  }
+}
+
+async function cleanRunResources(runService: RunService, runId: string, repoRoot: string, options: CleanOptions) {
+  const run = runService.getRunInfo(runId);
+  if (!run) {
+    logger.warn(`Run not found: ${runId}`);
+    return;
+  }
+
+  logger.info(`\nCleaning resources for run: ${runId} (${run.taskName})`);
+
+  // Clean branches
+  if (run.branches.length > 0) {
+    logger.info('  Cleaning branches...');
+    for (const branch of run.branches) {
+      if (options.dryRun) {
+        logger.info(`    [DRY RUN] Would delete branch: ${branch}`);
+      } else {
+        try {
+          git.deleteBranch(branch, { cwd: repoRoot, force: true });
+          logger.info(`    Deleted branch: ${branch}`);
+        } catch (e: any) {
+          logger.warn(`    Could not delete branch ${branch}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  // Clean worktrees
+  if (run.worktrees.length > 0) {
+    logger.info('  Cleaning worktrees...');
+    for (const wtPath of run.worktrees) {
+      if (options.dryRun) {
+        logger.info(`    [DRY RUN] Would remove worktree: ${wtPath}`);
+      } else {
+        try {
+          git.removeWorktree(wtPath, { cwd: repoRoot, force: true });
+          if (fs.existsSync(wtPath)) {
+            fs.rmSync(wtPath, { recursive: true, force: true });
+          }
+          logger.info(`    Removed worktree: ${wtPath}`);
+        } catch (e: any) {
+          logger.warn(`    Could not remove worktree ${wtPath}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  // Delete run directory
+  if (options.dryRun) {
+    logger.info(`  [DRY RUN] Would delete run directory: ${run.path}`);
+  } else {
+    try {
+      runService.deleteRun(runId, { force: options.force });
+      logger.info(`  Deleted run directory: ${run.path}`);
+    } catch (e: any) {
+      logger.error(`  Failed to delete run ${runId}: ${e.message}`);
+    }
+  }
+}
+
+async function cleanOlderRuns(runService: RunService, days: number, repoRoot: string, options: CleanOptions) {
+  const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+  const runs = runService.listRuns();
+  const olderRuns = runs.filter(run => run.startTime < cutoff);
+
+  if (olderRuns.length === 0) {
+    logger.info(`No runs found older than ${days} days.`);
+    return;
+  }
+
+  logger.info(`Found ${olderRuns.length} runs older than ${days} days.`);
+  for (const run of olderRuns) {
+    await cleanRunResources(runService, run.id, repoRoot, options);
+  }
+}
+
+async function cleanOrphanedResources(runService: RunService, config: any, repoRoot: string, options: CleanOptions) {
+  const runs = runService.listRuns();
+  const linkedWorktrees = new Set(runs.flatMap(r => r.worktrees));
+  const linkedBranches = new Set(runs.flatMap(r => r.branches));
+
+  // Clean orphaned worktrees
+  logger.info('\nChecking for orphaned worktrees...');
+  const worktrees = git.listWorktrees(repoRoot);
+  const worktreeRoot = safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees');
+  
+  const orphanedWorktrees = worktrees.filter(wt => {
+    if (wt.path === repoRoot) return false;
+    const isInsideRoot = wt.path.startsWith(worktreeRoot);
+    const hasPrefix = path.basename(wt.path).startsWith(config.worktreePrefix || 'cursorflow-');
+    return (isInsideRoot || hasPrefix) && !linkedWorktrees.has(wt.path);
+  });
+
+  if (orphanedWorktrees.length === 0) {
+    logger.info('  No orphaned worktrees found.');
+  } else {
+    for (const wt of orphanedWorktrees) {
+      if (options.dryRun) {
+        logger.info(`  [DRY RUN] Would remove orphaned worktree: ${wt.path}`);
+      } else {
+        try {
+          git.removeWorktree(wt.path, { cwd: repoRoot, force: true });
+          if (fs.existsSync(wt.path)) {
+            fs.rmSync(wt.path, { recursive: true, force: true });
+          }
+          logger.info(`  Removed orphaned worktree: ${wt.path}`);
+        } catch (e: any) {
+          logger.warn(`  Could not remove orphaned worktree ${wt.path}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  // Clean orphaned branches
+  logger.info('\nChecking for orphaned branches...');
+  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot });
+  if (result.success) {
+    const branches = result.stdout
+      .split('\n')
+      .map(b => b.replace(/\*/g, '').trim())
+      .filter(b => b && b !== 'main' && b !== 'master');
+
+    const prefix = config.branchPrefix || 'feature/';
+    const orphanedBranches = branches.filter(b => b.startsWith(prefix) && !linkedBranches.has(b));
+
+    if (orphanedBranches.length === 0) {
+      logger.info('  No orphaned branches found.');
+    } else {
+      for (const branch of orphanedBranches) {
+        if (options.dryRun) {
+          logger.info(`  [DRY RUN] Would delete orphaned branch: ${branch}`);
+        } else {
+          try {
+            git.deleteBranch(branch, { cwd: repoRoot, force: true });
+            logger.info(`  Deleted orphaned branch: ${branch}`);
+          } catch (e: any) {
+            logger.warn(`  Could not delete orphaned branch ${branch}: ${e.message}`);
+          }
+        }
       }
     }
   }
