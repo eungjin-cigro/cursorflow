@@ -8,45 +8,45 @@ describe('ProcessManager', () => {
     const pid = child.pid!;
     
     try {
-      expect(ProcessManager.isRunning(pid)).toBe(true);
+      expect(ProcessManager.isProcessRunning(pid)).toBe(true);
       
       // Kill it
-      ProcessManager.stop(pid);
+      ProcessManager.killProcess(pid);
       
       // Give it a moment to die
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      expect(ProcessManager.isRunning(pid)).toBe(false);
+      expect(ProcessManager.isProcessRunning(pid)).toBe(false);
     } finally {
-      if (ProcessManager.isRunning(pid)) {
+      if (ProcessManager.isProcessRunning(pid)) {
         child.kill('SIGKILL');
       }
     }
   });
 
-  it('should stop multiple processes', async () => {
-    const child1 = spawn('sleep', ['10']);
-    const child2 = spawn('sleep', ['10']);
-    const pids = [child1.pid!, child2.pid!];
+  it('should kill process tree', async () => {
+    // Start a shell that starts a sleep process
+    const child = spawn('sh', ['-c', 'sleep 10']);
+    const pid = child.pid!;
     
     try {
-      const result = ProcessManager.stopMultiple(pids);
-      expect(result.stopped).toBe(2);
-      expect(result.failed).toBe(0);
+      expect(ProcessManager.isProcessRunning(pid)).toBe(true);
       
-      await new Promise(resolve => setTimeout(resolve, 100));
-      expect(ProcessManager.isRunning(pids[0]!)).toBe(false);
-      expect(ProcessManager.isRunning(pids[1]!)).toBe(false);
+      // Kill the tree
+      ProcessManager.killProcessTree(pid);
+      
+      // Give it a moment to die
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      expect(ProcessManager.isProcessRunning(pid)).toBe(false);
     } finally {
-      pids.forEach(pid => {
-        if (ProcessManager.isRunning(pid)) process.kill(pid, 'SIGKILL');
-      });
+      if (ProcessManager.isProcessRunning(pid)) {
+        child.kill('SIGKILL');
+      }
     }
   });
 
   it('should find cursorflow processes (mocked test)', () => {
-    // Since we can't easily start a process named 'cursorflow' without more effort,
-    // we just check that it doesn't crash and returns an array
     const processes = ProcessManager.findCursorFlowProcesses();
     expect(Array.isArray(processes)).toBe(true);
   });
