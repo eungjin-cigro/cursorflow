@@ -525,7 +525,7 @@ function buildTasksFromOptions(
 function getDefaultConfig(laneNumber: number, featureName: string, tasks: Task[]) {
   return {
     // Git Configuration
-    baseBranch: 'main',
+    // baseBranch is auto-detected from current branch at runtime
     branchPrefix: `${featureName.toLowerCase()}/lane-${laneNumber}-`,
     
     // Execution Settings

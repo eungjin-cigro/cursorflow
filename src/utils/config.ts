@@ -47,7 +47,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     pofDir: '_cursorflow/pof',
     
     // Git
-    baseBranch: 'main',
+    // baseBranch is auto-detected from current branch at runtime
     branchPrefix: 'feature/',
     
     // Execution
@@ -175,7 +175,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   pofDir: '_cursorflow/pof',
   
   // Git configuration
-  baseBranch: 'main',
+  baseBranch: git.getCurrentBranch() || 'main',
   branchPrefix: 'feature/',
   
   // Execution configuration

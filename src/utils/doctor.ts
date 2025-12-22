@@ -163,8 +163,12 @@ function readLaneJsonFiles(tasksDir: string): { path: string; json: any; fileNam
 
 function collectBaseBranchesFromLanes(lanes: { path: string; json: any }[], defaultBaseBranch: string): string[] {
   const set = new Set<string>();
+  // CursorFlow now defaults to the current branch to maintain dependency structure
+  const currentBranch = git.getCurrentBranch();
+  set.add(currentBranch);
+  
   for (const lane of lanes) {
-    const baseBranch = String(lane.json?.baseBranch || defaultBaseBranch || 'main').trim();
+    const baseBranch = String(lane.json?.baseBranch || defaultBaseBranch || currentBranch).trim();
     if (baseBranch) set.add(baseBranch);
   }
   return Array.from(set);
@@ -896,7 +900,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
         });
       } else {
         // Validate base branches
-        const baseBranches = collectBaseBranchesFromLanes(lanes, 'main');
+        const baseBranches = collectBaseBranchesFromLanes(lanes, git.getCurrentBranch());
         for (const baseBranch of baseBranches) {
           if (!branchExists(gitCwd, baseBranch)) {
             addIssue(issues, {

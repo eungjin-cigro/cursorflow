@@ -1,5 +1,8 @@
+/**
+ * Event-related type definitions
+ */
 
-import { DependencyRequestPlan } from './agent';
+import type { DependencyRequestPlan } from './agent';
 
 export interface CursorFlowEvent<T = Record<string, any>> {
   id: string;
@@ -112,3 +115,4 @@ export interface ReviewRejectedPayload {
   reason: string;
   iterations: number;
 }
+

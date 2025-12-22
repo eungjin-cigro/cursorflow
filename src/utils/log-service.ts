@@ -18,7 +18,7 @@ export class LogService {
     if (entry.level === 'error') return LogImportance.CRITICAL;
     if (entry.level === 'stderr') return LogImportance.HIGH;
     
-    const msg = entry.message.toLowerCase();
+    const msg = (entry.message || '').toLowerCase();
     if (msg.includes('error') || msg.includes('fail')) return LogImportance.HIGH;
     if (msg.includes('warn')) return LogImportance.MEDIUM;
     if (msg.includes('success') || msg.includes('done') || msg.includes('completed')) return LogImportance.LOW;

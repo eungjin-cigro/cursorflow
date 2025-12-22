@@ -1,5 +1,12 @@
 /**
  * CursorFlow interactive monitor command
+ * 
+ * Features:
+ * - Lane dashboard with accurate process status
+ * - Unified log view for all lanes
+ * - Readable log format support
+ * - Multiple flows dashboard
+ * - Consistent layout across all views
  */
 
 import * as fs from 'fs';
@@ -10,6 +17,42 @@ import { loadState, readLog } from '../utils/state';
 import { LaneState, ConversationEntry } from '../utils/types';
 import { loadConfig } from '../utils/config';
 import { safeJoin } from '../utils/path';
+import { getLaneProcessStatus, getFlowSummary, LaneProcessStatus } from '../services/process';
+import { LogBufferService, BufferedLogEntry } from '../services/logging/buffer';
+import { formatReadableEntry, formatMessageForConsole, stripAnsi } from '../services/logging/formatter';
+import { MessageType } from '../types/logging';
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// UI Constants
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const UI = {
+  COLORS: {
+    reset: '\x1b[0m',
+    bold: '\x1b[1m',
+    dim: '\x1b[2m',
+    cyan: '\x1b[36m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    red: '\x1b[31m',
+    magenta: '\x1b[35m',
+    gray: '\x1b[90m',
+    white: '\x1b[37m',
+    bgGray: '\x1b[48;5;236m',
+    bgCyan: '\x1b[46m',
+  },
+  CHARS: {
+    hLine: '━',
+    vLine: '│',
+    corner: {
+      tl: '┌', tr: '┐', bl: '└', br: '┘'
+    },
+    arrow: {
+      right: '▶', left: '◀', up: '▲', down: '▼'
+    },
+    bullet: '•',
+    check: '✓',
+  },
+};
 
 interface LaneWithDeps {
   name: string;
@@ -43,7 +86,9 @@ enum View {
   FLOW,
   TERMINAL,
   INTERVENE,
-  TIMEOUT
+  TIMEOUT,
+  UNIFIED_LOG,
+  FLOWS_DASHBOARD
 }
 
 class InteractiveMonitor {
@@ -64,16 +109,97 @@ class InteractiveMonitor {
   private interventionInput: string = '';
   private timeoutInput: string = '';
   private notification: { message: string; type: 'info' | 'error' | 'success'; time: number } | null = null;
+  
+  // Process status tracking
+  private laneProcessStatuses: Map<string, LaneProcessStatus> = new Map();
+  
+  // Unified log buffer for all lanes
+  private unifiedLogBuffer: LogBufferService | null = null;
+  private unifiedLogScrollOffset: number = 0;
+  private unifiedLogFollowMode: boolean = true;
+  
+  // Multiple flows support
+  private allFlows: { runDir: string; runId: string; isAlive: boolean; summary: ReturnType<typeof getFlowSummary> }[] = [];
+  private selectedFlowIndex: number = 0;
+  private logsDir: string = '';
+  
+  // NEW: UX improvements
+  private readableFormat: boolean = true; // Toggle readable log format
+  private laneFilter: string | null = null; // Filter by lane name
+  private confirmAction: { type: 'delete-flow' | 'kill-lane'; target: string; time: number } | null = null;
+  
+  // Screen dimensions
+  private get screenWidth(): number {
+    return process.stdout.columns || 120;
+  }
+  private get screenHeight(): number {
+    return process.stdout.rows || 24;
+  }
 
-  constructor(runDir: string, interval: number) {
+  constructor(runDir: string, interval: number, logsDir?: string) {
     this.runDir = runDir;
     this.interval = interval;
+    
+    // Set logs directory for multiple flows discovery
+    if (logsDir) {
+      this.logsDir = logsDir;
+    } else {
+      const config = loadConfig();
+      this.logsDir = safeJoin(config.logsDir, 'runs');
+    }
+    
+    // Initialize unified log buffer
+    this.unifiedLogBuffer = new LogBufferService(runDir);
   }
 
   public async start() {
     this.setupTerminal();
+    
+    // Start unified log streaming
+    if (this.unifiedLogBuffer) {
+      this.unifiedLogBuffer.startStreaming();
+      this.unifiedLogBuffer.on('update', () => {
+        if (this.view === View.UNIFIED_LOG && this.unifiedLogFollowMode) {
+          this.render();
+        }
+      });
+    }
+    
+    // Discover all flows
+    this.discoverFlows();
+    
     this.refresh();
     this.timer = setInterval(() => this.refresh(), this.interval * 1000);
+  }
+  
+  /**
+   * Discover all run directories (flows) for multi-flow view
+   */
+  private discoverFlows(): void {
+    try {
+      if (!fs.existsSync(this.logsDir)) return;
+      
+      const runs = fs.readdirSync(this.logsDir)
+        .filter(d => d.startsWith('run-'))
+        .map(d => {
+          const runDir = safeJoin(this.logsDir, d);
+          const summary = getFlowSummary(runDir);
+          return {
+            runDir,
+            runId: d,
+            isAlive: summary.isAlive,
+            summary,
+          };
+        })
+        .sort((a, b) => {
+          // Sort by run ID (timestamp-based) descending
+          return b.runId.localeCompare(a.runId);
+        });
+      
+      this.allFlows = runs;
+    } catch {
+      // Ignore errors
+    }
   }
 
   private setupTerminal() {
@@ -105,6 +231,10 @@ class InteractiveMonitor {
         this.handleTimeoutKey(str, key);
       } else if (this.view === View.MESSAGE_DETAIL) {
         this.handleMessageDetailKey(keyName);
+      } else if (this.view === View.UNIFIED_LOG) {
+        this.handleUnifiedLogKey(keyName);
+      } else if (this.view === View.FLOWS_DASHBOARD) {
+        this.handleFlowsDashboardKey(keyName);
       }
     });
 
@@ -114,6 +244,12 @@ class InteractiveMonitor {
 
   private stop() {
     if (this.timer) clearInterval(this.timer);
+    
+    // Stop unified log streaming
+    if (this.unifiedLogBuffer) {
+      this.unifiedLogBuffer.stopStreaming();
+    }
+    
     // Show cursor and clear screen
     process.stdout.write('\x1B[?25h');
     process.stdout.write('\x1Bc');
@@ -146,6 +282,19 @@ class InteractiveMonitor {
       case 'left':
       case 'f':
         this.view = View.FLOW;
+        this.render();
+        break;
+      case 'u':
+        // Unified log view
+        this.view = View.UNIFIED_LOG;
+        this.unifiedLogScrollOffset = 0;
+        this.unifiedLogFollowMode = true;
+        this.render();
+        break;
+      case 'm':
+        // Multiple flows dashboard
+        this.discoverFlows();
+        this.view = View.FLOWS_DASHBOARD;
         this.render();
         break;
       case 'q':
@@ -236,23 +385,29 @@ class InteractiveMonitor {
   private handleTerminalKey(key: string) {
     switch (key) {
       case 'up':
-        this.followMode = false;  // Scrolling up disables follow mode
+        this.followMode = false;
         this.terminalScrollOffset++;
         this.render();
         break;
       case 'down':
         this.terminalScrollOffset = Math.max(0, this.terminalScrollOffset - 1);
         if (this.terminalScrollOffset === 0) {
-          this.followMode = true;  // Reached bottom, re-enable follow mode
+          this.followMode = true;
           this.unseenLineCount = 0;
         }
         this.render();
         break;
       case 'f':
-        // F key: Force follow mode on and scroll to bottom
         this.followMode = true;
         this.terminalScrollOffset = 0;
         this.unseenLineCount = 0;
+        this.render();
+        break;
+      case 'r':
+        // Toggle readable log format
+        this.readableFormat = !this.readableFormat;
+        this.terminalScrollOffset = 0;
+        this.lastTerminalTotalLines = 0;
         this.render();
         break;
       case 't':
@@ -348,6 +503,204 @@ class InteractiveMonitor {
     }
   }
 
+  private handleUnifiedLogKey(key: string) {
+    const pageSize = Math.max(10, this.screenHeight - 12);
+    
+    switch (key) {
+      case 'up':
+        this.unifiedLogFollowMode = false;
+        this.unifiedLogScrollOffset++;
+        this.render();
+        break;
+      case 'down':
+        this.unifiedLogScrollOffset = Math.max(0, this.unifiedLogScrollOffset - 1);
+        if (this.unifiedLogScrollOffset === 0) {
+          this.unifiedLogFollowMode = true;
+        }
+        this.render();
+        break;
+      case 'pageup':
+        this.unifiedLogFollowMode = false;
+        this.unifiedLogScrollOffset += pageSize;
+        this.render();
+        break;
+      case 'pagedown':
+        this.unifiedLogScrollOffset = Math.max(0, this.unifiedLogScrollOffset - pageSize);
+        if (this.unifiedLogScrollOffset === 0) {
+          this.unifiedLogFollowMode = true;
+        }
+        this.render();
+        break;
+      case 'f':
+        this.unifiedLogFollowMode = true;
+        this.unifiedLogScrollOffset = 0;
+        this.render();
+        break;
+      case 'r':
+        // Toggle readable format
+        this.readableFormat = !this.readableFormat;
+        this.render();
+        break;
+      case 'l':
+        // Cycle through lane filter
+        this.cycleLaneFilter();
+        this.unifiedLogScrollOffset = 0;
+        this.render();
+        break;
+      case 'escape':
+      case 'backspace':
+      case 'u':
+        this.view = View.LIST;
+        this.render();
+        break;
+      case 'q':
+        this.stop();
+        break;
+    }
+  }
+  
+  /**
+   * Cycle through available lanes for filtering
+   */
+  private cycleLaneFilter(): void {
+    const lanes = this.unifiedLogBuffer?.getLanes() || [];
+    if (lanes.length === 0) {
+      this.laneFilter = null;
+      return;
+    }
+    
+    if (this.laneFilter === null) {
+      // Show first lane
+      this.laneFilter = lanes[0]!;
+    } else {
+      const currentIndex = lanes.indexOf(this.laneFilter);
+      if (currentIndex === -1 || currentIndex === lanes.length - 1) {
+        // Reset to all lanes
+        this.laneFilter = null;
+      } else {
+        // Next lane
+        this.laneFilter = lanes[currentIndex + 1]!;
+      }
+    }
+  }
+
+  private handleFlowsDashboardKey(key: string) {
+    // Handle confirmation dialog first
+    if (this.confirmAction) {
+      if (key === 'y') {
+        this.executeConfirmedAction();
+        return;
+      } else if (key === 'n' || key === 'escape') {
+        this.confirmAction = null;
+        this.render();
+        return;
+      }
+      // Other keys cancel confirmation
+      this.confirmAction = null;
+      this.render();
+      return;
+    }
+    
+    switch (key) {
+      case 'up':
+        this.selectedFlowIndex = Math.max(0, this.selectedFlowIndex - 1);
+        this.render();
+        break;
+      case 'down':
+        this.selectedFlowIndex = Math.min(this.allFlows.length - 1, this.selectedFlowIndex + 1);
+        this.render();
+        break;
+      case 'right':
+      case 'return':
+      case 'enter':
+        // Switch to selected flow
+        if (this.allFlows[this.selectedFlowIndex]) {
+          const flow = this.allFlows[this.selectedFlowIndex]!;
+          this.runDir = flow.runDir;
+          
+          // Restart log buffer for new run
+          if (this.unifiedLogBuffer) {
+            this.unifiedLogBuffer.stopStreaming();
+          }
+          this.unifiedLogBuffer = new LogBufferService(this.runDir);
+          this.unifiedLogBuffer.startStreaming();
+          
+          this.lanes = [];
+          this.laneProcessStatuses.clear();
+          this.view = View.LIST;
+          this.showNotification(`Switched to flow: ${flow.runId}`, 'info');
+          this.refresh();
+        }
+        break;
+      case 'd':
+        // Delete flow (with confirmation)
+        if (this.allFlows[this.selectedFlowIndex]) {
+          const flow = this.allFlows[this.selectedFlowIndex]!;
+          if (flow.isAlive) {
+            this.showNotification('Cannot delete a running flow. Stop it first.', 'error');
+          } else if (flow.runDir === this.runDir) {
+            this.showNotification('Cannot delete the currently viewed flow.', 'error');
+          } else {
+            this.confirmAction = {
+              type: 'delete-flow',
+              target: flow.runId,
+              time: Date.now(),
+            };
+            this.render();
+          }
+        }
+        break;
+      case 'r':
+        // Refresh flows
+        this.discoverFlows();
+        this.showNotification('Flows refreshed', 'info');
+        this.render();
+        break;
+      case 'escape':
+      case 'backspace':
+      case 'm':
+        this.view = View.LIST;
+        this.render();
+        break;
+      case 'q':
+        this.stop();
+        break;
+    }
+  }
+  
+  /**
+   * Execute a confirmed action (delete flow, kill process, etc.)
+   */
+  private executeConfirmedAction(): void {
+    if (!this.confirmAction) return;
+    
+    const { type, target } = this.confirmAction;
+    this.confirmAction = null;
+    
+    if (type === 'delete-flow') {
+      const flow = this.allFlows.find(f => f.runId === target);
+      if (flow) {
+        try {
+          // Delete the flow directory
+          fs.rmSync(flow.runDir, { recursive: true, force: true });
+          this.showNotification(`Deleted flow: ${target}`, 'success');
+          
+          // Refresh the list
+          this.discoverFlows();
+          
+          // Adjust selection if needed
+          if (this.selectedFlowIndex >= this.allFlows.length) {
+            this.selectedFlowIndex = Math.max(0, this.allFlows.length - 1);
+          }
+        } catch (err) {
+          this.showNotification(`Failed to delete flow: ${err}`, 'error');
+        }
+      }
+    }
+    
+    this.render();
+  }
+
   private sendIntervention(message: string) {
     if (!this.selectedLaneName) return;
     const lane = this.lanes.find(l => l.name === this.selectedLaneName);
@@ -410,10 +763,33 @@ class InteractiveMonitor {
 
   private refresh() {
     this.lanes = this.listLanesWithDeps(this.runDir);
-    if (this.view !== View.LIST) {
+    
+    // Update process statuses for accurate display
+    this.updateProcessStatuses();
+    
+    if (this.view !== View.LIST && this.view !== View.UNIFIED_LOG && this.view !== View.FLOWS_DASHBOARD) {
       this.refreshLogs();
     }
+    
+    // Refresh flows list periodically
+    if (this.view === View.FLOWS_DASHBOARD) {
+      this.discoverFlows();
+    }
+    
     this.render();
+  }
+  
+  /**
+   * Update process statuses for all lanes
+   */
+  private updateProcessStatuses(): void {
+    const lanesDir = safeJoin(this.runDir, 'lanes');
+    if (!fs.existsSync(lanesDir)) return;
+    
+    for (const lane of this.lanes) {
+      const status = getLaneProcessStatus(lane.path, lane.name);
+      this.laneProcessStatuses.set(lane.name, status);
+    }
   }
 
   private killLane() {
@@ -439,6 +815,65 @@ class InteractiveMonitor {
     this.render();
   }
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // UI Layout Helpers - Consistent header/footer across all views
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
+  private renderHeader(title: string, breadcrumb: string[] = []): void {
+    const width = Math.min(this.screenWidth, 120);
+    const line = UI.CHARS.hLine.repeat(width);
+    
+    // Flow status
+    const flowSummary = getFlowSummary(this.runDir);
+    const flowStatusIcon = flowSummary.isAlive ? '🟢' : (flowSummary.completed === flowSummary.total && flowSummary.total > 0 ? '✅' : '🔴');
+    
+    // Breadcrumb
+    const crumbs = ['CursorFlow', ...breadcrumb].join(` ${UI.COLORS.gray}›${UI.COLORS.reset} `);
+    
+    // Time
+    const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
+    
+    process.stdout.write(`${UI.COLORS.cyan}${line}${UI.COLORS.reset}\n`);
+    process.stdout.write(`${UI.COLORS.bold}${crumbs}${UI.COLORS.reset}  ${flowStatusIcon}  `);
+    process.stdout.write(`${UI.COLORS.dim}${timeStr}${UI.COLORS.reset}\n`);
+    process.stdout.write(`${UI.COLORS.cyan}${line}${UI.COLORS.reset}\n`);
+  }
+  
+  private renderFooter(actions: string[]): void {
+    const width = Math.min(this.screenWidth, 120);
+    const line = UI.CHARS.hLine.repeat(width);
+    
+    // Notification area
+    if (this.notification && Date.now() - this.notification.time < 3000) {
+      const nColor = this.notification.type === 'error' ? UI.COLORS.red 
+        : this.notification.type === 'success' ? UI.COLORS.green 
+        : UI.COLORS.cyan;
+      process.stdout.write(`\n${nColor}🔔 ${this.notification.message}${UI.COLORS.reset}\n`);
+    }
+    
+    // Confirmation dialog area
+    if (this.confirmAction && Date.now() - this.confirmAction.time < 10000) {
+      const actionName = this.confirmAction.type === 'delete-flow' ? 'DELETE FLOW' : 'KILL PROCESS';
+      process.stdout.write(`\n${UI.COLORS.yellow}⚠️  Confirm ${actionName}: ${this.confirmAction.target}? [Y] Yes / [N] No${UI.COLORS.reset}\n`);
+    }
+    
+    process.stdout.write(`\n${UI.COLORS.cyan}${line}${UI.COLORS.reset}\n`);
+    const formattedActions = actions.map(a => {
+      const parts = a.split('] ');
+      if (parts.length === 2) {
+        return `${UI.COLORS.yellow}[${parts[0].replace('[', '')}]${UI.COLORS.reset} ${parts[1]}`;
+      }
+      return a;
+    });
+    process.stdout.write(` ${formattedActions.join('  ')}\n`);
+  }
+  
+  private renderSectionTitle(title: string, extra?: string): void {
+    const extraStr = extra ? `  ${UI.COLORS.dim}${extra}${UI.COLORS.reset}` : '';
+    process.stdout.write(`\n${UI.COLORS.bold}${title}${UI.COLORS.reset}${extraStr}\n`);
+    process.stdout.write(`${UI.COLORS.gray}${'─'.repeat(40)}${UI.COLORS.reset}\n`);
+  }
+  
   private render() {
     // Clear screen
     process.stdout.write('\x1Bc');
@@ -447,10 +882,10 @@ class InteractiveMonitor {
     if (this.notification && Date.now() - this.notification.time > 3000) {
       this.notification = null;
     }
-
-    if (this.notification) {
-      const color = this.notification.type === 'error' ? '\x1b[31m' : this.notification.type === 'success' ? '\x1b[32m' : '\x1b[36m';
-      console.log(`${color}🔔 ${this.notification.message}\x1b[0m\n`);
+    
+    // Clear old confirmation
+    if (this.confirmAction && Date.now() - this.confirmAction.time > 10000) {
+      this.confirmAction = null;
     }
     
     switch (this.view) {
@@ -475,72 +910,123 @@ class InteractiveMonitor {
       case View.TIMEOUT:
         this.renderTimeout();
         break;
+      case View.UNIFIED_LOG:
+        this.renderUnifiedLog();
+        break;
+      case View.FLOWS_DASHBOARD:
+        this.renderFlowsDashboard();
+        break;
     }
   }
 
   private renderList() {
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`📊 CursorFlow Monitor - Run: ${path.basename(this.runDir)}`);
-    console.log(`🕒 Updated: ${new Date().toLocaleTimeString()} | [↑/↓/→] Nav [←] Flow [Q] Quit`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    const flowSummary = getFlowSummary(this.runDir);
+    const runId = path.basename(this.runDir);
+    
+    this.renderHeader('Lane Dashboard', [runId]);
+    
+    // Summary line
+    const summaryParts = [
+      `${flowSummary.running} ${UI.COLORS.cyan}running${UI.COLORS.reset}`,
+      `${flowSummary.completed} ${UI.COLORS.green}done${UI.COLORS.reset}`,
+      `${flowSummary.failed} ${UI.COLORS.red}failed${UI.COLORS.reset}`,
+      `${flowSummary.dead} ${UI.COLORS.yellow}stale${UI.COLORS.reset}`,
+    ];
+    process.stdout.write(` ${UI.COLORS.dim}Lanes:${UI.COLORS.reset} ${summaryParts.join(' │ ')}\n`);
 
     if (this.lanes.length === 0) {
-      console.log('  No lanes found\n');
+      process.stdout.write(`\n ${UI.COLORS.dim}No lanes found${UI.COLORS.reset}\n`);
+      this.renderFooter(['[Q] Quit', '[M] All Flows']);
       return;
     }
 
     const laneStatuses: Record<string, any> = {};
     this.lanes.forEach(l => laneStatuses[l.name] = this.getLaneStatus(l.path, l.name));
 
-    const maxNameLen = Math.max(...this.lanes.map(l => l.name.length), 15);
-    console.log(`    ${'Lane'.padEnd(maxNameLen)}  Status              Progress  Time      Tasks   Next Action`);
-    console.log(`    ${'─'.repeat(maxNameLen)}  ${'─'.repeat(18)}  ${'─'.repeat(8)}  ${'─'.repeat(8)}  ${'─'.repeat(6)}  ${'─'.repeat(20)}`);
+    const maxNameLen = Math.max(...this.lanes.map(l => l.name.length), 12);
+    
+    process.stdout.write(`\n    ${'Lane'.padEnd(maxNameLen)}  ${'Status'.padEnd(12)}  ${'PID'.padEnd(7)}  ${'Time'.padEnd(8)}  ${'Tasks'.padEnd(6)}  Next\n`);
+    process.stdout.write(`    ${'─'.repeat(maxNameLen)}  ${'─'.repeat(12)}  ${'─'.repeat(7)}  ${'─'.repeat(8)}  ${'─'.repeat(6)}  ${'─'.repeat(25)}\n`);
 
     this.lanes.forEach((lane, i) => {
       const isSelected = i === this.selectedLaneIndex;
       const status = laneStatuses[lane.name];
-      const statusIcon = this.getStatusIcon(status.status);
-      const statusText = `${statusIcon} ${status.status}`.padEnd(18);
-      const progressText = status.progress.padEnd(8);
-      const timeText = this.formatDuration(status.duration).padEnd(8);
+      const processStatus = this.laneProcessStatuses.get(lane.name);
       
-      let tasksDisplay = '-';
-      if (typeof status.totalTasks === 'number') {
-        tasksDisplay = `${status.currentTask}/${status.totalTasks}`;
+      // Determine the accurate status based on process detection
+      let displayStatus = status.status;
+      let statusColor = UI.COLORS.gray;
+      let statusIcon = this.getStatusIcon(status.status);
+      
+      if (processStatus) {
+        if (processStatus.isStale) {
+          displayStatus = 'STALE';
+          statusIcon = '💀';
+          statusColor = UI.COLORS.yellow;
+        } else if (processStatus.actualStatus === 'dead' && status.status === 'running') {
+          displayStatus = 'DEAD';
+          statusIcon = '☠️';
+          statusColor = UI.COLORS.red;
+        } else if (processStatus.actualStatus === 'running') {
+          statusColor = UI.COLORS.cyan;
+        } else if (status.status === 'completed') {
+          statusColor = UI.COLORS.green;
+        } else if (status.status === 'failed') {
+          statusColor = UI.COLORS.red;
+        }
       }
-      const tasksText = tasksDisplay.padEnd(6);
       
-      // Determine "Next Action"
+      const statusText = `${statusIcon} ${displayStatus}`.padEnd(12);
+      
+      // Process indicator
+      let pidText = '-'.padEnd(7);
+      if (processStatus?.pid) {
+        const pidIcon = processStatus.processRunning ? '●' : '○';
+        const pidColor = processStatus.processRunning ? UI.COLORS.green : UI.COLORS.red;
+        pidText = `${pidColor}${pidIcon}${UI.COLORS.reset}${processStatus.pid}`.padEnd(7 + 9); // +9 for color codes
+      }
+      
+      // Duration
+      const duration = processStatus?.duration || status.duration;
+      const timeText = this.formatDuration(duration).padEnd(8);
+      
+      // Tasks
+      let tasksText = '-'.padEnd(6);
+      if (typeof status.totalTasks === 'number') {
+        tasksText = `${status.currentTask}/${status.totalTasks}`.padEnd(6);
+      }
+      
+      // Next action
       let nextAction = '-';
       if (status.status === 'completed') {
-        const dependents = this.lanes.filter(l => laneStatuses[l.name].dependsOn.includes(lane.name));
-        if (dependents.length > 0) {
-          nextAction = `Unlock: ${dependents.map(d => d.name).join(', ')}`;
-        } else {
-          nextAction = '🏁 Done';
-        }
+        const dependents = this.lanes.filter(l => laneStatuses[l.name]?.dependsOn?.includes(lane.name));
+        nextAction = dependents.length > 0 ? `→ ${dependents.map(d => d.name).join(', ')}` : '✓ Done';
       } else if (status.status === 'waiting') {
-        if (status.waitingFor && status.waitingFor.length > 0) {
-          nextAction = `Wait for task: ${status.waitingFor.join(', ')}`;
+        if (status.waitingFor?.length > 0) {
+          nextAction = `⏳ ${status.waitingFor.join(', ')}`;
         } else {
-          const missingDeps = status.dependsOn.filter((d: string) => laneStatuses[d] && laneStatuses[d].status !== 'completed');
-          nextAction = `Wait for lane: ${missingDeps.join(', ')}`;
+          const missingDeps = status.dependsOn.filter((d: string) => laneStatuses[d]?.status !== 'completed');
+          nextAction = missingDeps.length > 0 ? `⏳ ${missingDeps.join(', ')}` : '⏳ waiting';
         }
-      } else if (status.status === 'running') {
-        nextAction = '🚀 Working...';
+      } else if (processStatus?.actualStatus === 'running') {
+        nextAction = '🚀 working...';
+      } else if (processStatus?.isStale) {
+        nextAction = '⚠️ died unexpectedly';
       }
-
-      const prefix = isSelected ? '  ▶ ' : '    ';
-      const line = `${prefix}${lane.name.padEnd(maxNameLen)}  ${statusText}  ${progressText}  ${timeText}  ${tasksText}  ${nextAction}`;
       
-      if (isSelected) {
-        process.stdout.write(`\x1b[36m${line}\x1b[0m\n`);
-      } else {
-        process.stdout.write(`${line}\n`);
-      }
+      // Truncate next action
+      if (nextAction.length > 25) nextAction = nextAction.substring(0, 22) + '...';
+
+      const prefix = isSelected ? ` ${UI.COLORS.cyan}▶${UI.COLORS.reset} ` : '   ';
+      const rowBg = isSelected ? UI.COLORS.bgGray : '';
+      const rowEnd = isSelected ? UI.COLORS.reset : '';
+      
+      process.stdout.write(`${rowBg}${prefix}${lane.name.padEnd(maxNameLen)}  ${statusColor}${statusText}${UI.COLORS.reset}  ${pidText}  ${timeText}  ${tasksText}  ${nextAction}${rowEnd}\n`);
     });
 
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    this.renderFooter([
+      '[↑↓] Select', '[→/Enter] Details', '[F] Flow', '[U] Unified Logs', '[M] All Flows', '[Q] Quit'
+    ]);
   }
 
   private renderLaneDetail() {
@@ -552,86 +1038,105 @@ class InteractiveMonitor {
     }
 
     const status = this.getLaneStatus(lane.path, lane.name);
+    const processStatus = this.laneProcessStatuses.get(lane.name);
+    
+    this.renderHeader('Lane Detail', [path.basename(this.runDir), lane.name]);
+
+    // Status grid
+    const statusColor = status.status === 'completed' ? UI.COLORS.green 
+      : status.status === 'failed' ? UI.COLORS.red 
+      : status.status === 'running' ? UI.COLORS.cyan : UI.COLORS.gray;
+    
+    const actualStatus = processStatus?.actualStatus || status.status;
+    const isStale = processStatus?.isStale || false;
+    
+    process.stdout.write(`\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Status${UI.COLORS.reset}     ${statusColor}${this.getStatusIcon(actualStatus)} ${actualStatus.toUpperCase()}${UI.COLORS.reset}`);
+    if (isStale) process.stdout.write(` ${UI.COLORS.yellow}(stale)${UI.COLORS.reset}`);
+    process.stdout.write(`\n`);
+    
+    const pidDisplay = processStatus?.pid 
+      ? `${processStatus.processRunning ? UI.COLORS.green : UI.COLORS.red}${processStatus.pid}${UI.COLORS.reset}` 
+      : '-';
+    process.stdout.write(` ${UI.COLORS.dim}PID${UI.COLORS.reset}        ${pidDisplay}\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Progress${UI.COLORS.reset}   ${status.currentTask}/${status.totalTasks} tasks (${status.progress})\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Duration${UI.COLORS.reset}   ${this.formatDuration(processStatus?.duration || status.duration)}\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Branch${UI.COLORS.reset}     ${status.pipelineBranch}\n`);
+    
+    if (status.dependsOn && status.dependsOn.length > 0) {
+      process.stdout.write(` ${UI.COLORS.dim}Depends${UI.COLORS.reset}    ${status.dependsOn.join(', ')}\n`);
+    }
+    if (status.waitingFor && status.waitingFor.length > 0) {
+      process.stdout.write(` ${UI.COLORS.yellow}Waiting${UI.COLORS.reset}    ${status.waitingFor.join(', ')}\n`);
+    }
+    if (status.error) {
+      process.stdout.write(` ${UI.COLORS.red}Error${UI.COLORS.reset}      ${status.error}\n`);
+    }
+
+    // Live terminal preview
+    this.renderSectionTitle('Live Terminal', 'last 10 lines');
     const logPath = safeJoin(lane.path, 'terminal.log');
-    let liveLog = '(No live terminal output)';
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, 'utf8');
-      liveLog = content.split('\n').slice(-15).join('\n');
+      const lines = content.split('\n').slice(-10);
+      for (const line of lines) {
+        const formatted = this.formatTerminalLine(line);
+        process.stdout.write(` ${UI.COLORS.dim}${formatted.substring(0, this.screenWidth - 4)}${UI.COLORS.reset}\n`);
+      }
+    } else {
+      process.stdout.write(` ${UI.COLORS.dim}(No output yet)${UI.COLORS.reset}\n`);
     }
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`🔍 Lane: ${lane.name}`);
-    console.log(`🕒 Updated: ${new Date().toLocaleTimeString()} | [↑/↓] Browse [T] Term [I] Intervene [O] Timeout [Esc] Back`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    process.stdout.write(`  Status:    ${this.getStatusIcon(status.status)} ${status.status}\n`);
-    process.stdout.write(`  PID:       ${status.pid || '-'}\n`);
-    process.stdout.write(`  Progress:  ${status.progress} (${status.currentTask}/${status.totalTasks} tasks)\n`);
-    process.stdout.write(`  Time:      ${this.formatDuration(status.duration)}\n`);
-    process.stdout.write(`  Branch:    ${status.pipelineBranch}\n`);
-    process.stdout.write(`  Chat ID:   ${status.chatId}\n`);
-    process.stdout.write(`  Depends:   ${status.dependsOn.join(', ') || 'None'}\n`);
+    // Conversation preview
+    this.renderSectionTitle('Conversation', `${this.currentLogs.length} messages`);
     
-    if (status.waitingFor && status.waitingFor.length > 0) {
-      process.stdout.write(`\x1b[33m  Wait For:  ${status.waitingFor.join(', ')}\x1b[0m\n`);
+    const maxVisible = 8;
+    if (this.selectedMessageIndex < this.scrollOffset) {
+      this.scrollOffset = this.selectedMessageIndex;
+    } else if (this.selectedMessageIndex >= this.scrollOffset + maxVisible) {
+      this.scrollOffset = this.selectedMessageIndex - maxVisible + 1;
     }
-    
-    if (status.error) {
-      process.stdout.write(`\x1b[31m  Error:     ${status.error}\x1b[0m\n`);
-    }
-
-    console.log('\n🖥️  Live Terminal Output (Last 15 lines):');
-    console.log('─'.repeat(80));
-    console.log(`\x1b[90m${liveLog}\x1b[0m`);
-
-    console.log('\n💬 Conversation History (Select to see full details):');
-    console.log('─'.repeat(80));
-    process.stdout.write('  [↑/↓] Browse | [→/Enter] Full Msg | [I] Intervene | [K] Kill | [T] Live Terminal | [Esc/←] Back\n\n');
 
     if (this.currentLogs.length === 0) {
-      console.log('  (No messages yet)');
+      process.stdout.write(` ${UI.COLORS.dim}(No messages yet)${UI.COLORS.reset}\n`);
     } else {
-      // Simple windowed view for long histories
-      const maxVisible = 15; // Number of messages to show
-      if (this.selectedMessageIndex < this.scrollOffset) {
-        this.scrollOffset = this.selectedMessageIndex;
-      } else if (this.selectedMessageIndex >= this.scrollOffset + maxVisible) {
-        this.scrollOffset = this.selectedMessageIndex - maxVisible + 1;
-      }
-
       const visibleLogs = this.currentLogs.slice(this.scrollOffset, this.scrollOffset + maxVisible);
       
       visibleLogs.forEach((log, i) => {
         const actualIndex = i + this.scrollOffset;
         const isSelected = actualIndex === this.selectedMessageIndex;
-        let roleColor = '\x1b[32m'; // Default assistant green
-        if (log.role === 'user') roleColor = '\x1b[33m'; // Yellow
-        else if (log.role === 'reviewer') roleColor = '\x1b[35m'; // Magenta
-        else if (log.role === 'intervention') roleColor = '\x1b[31m\x1b[1m'; // Bold Red for interventions
-        else if (log.role === 'system') roleColor = '\x1b[36m'; // Cyan
         
-        const role = log.role.toUpperCase().padEnd(12);
+        const roleColor = this.getRoleColor(log.role);
+        const role = log.role.toUpperCase().padEnd(10);
+        const ts = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false });
         
-        const prefix = isSelected ? '▶ ' : '  ';
-        const header = `${prefix}${roleColor}${role}\x1b[0m [${new Date(log.timestamp).toLocaleTimeString()}]`;
+        const prefix = isSelected ? `${UI.COLORS.cyan}▶${UI.COLORS.reset}` : ' ';
+        const bg = isSelected ? UI.COLORS.bgGray : '';
+        const reset = isSelected ? UI.COLORS.reset : '';
         
-        if (isSelected) {
-          process.stdout.write(`\x1b[48;5;236m${header}\x1b[0m\n`);
-        } else {
-          process.stdout.write(`${header}\n`);
-        }
-        
-        const lines = log.fullText.split('\n').filter(l => l.trim());
-        const preview = lines[0]?.substring(0, 70) || '...';
-        process.stdout.write(`    ${preview}${log.fullText.length > 70 ? '...' : ''}\n\n`);
+        const preview = log.fullText.replace(/\n/g, ' ').substring(0, 60);
+        process.stdout.write(`${bg}${prefix} ${roleColor}${role}${UI.COLORS.reset} ${UI.COLORS.dim}${ts}${UI.COLORS.reset} ${preview}...${reset}\n`);
       });
-
+      
       if (this.currentLogs.length > maxVisible) {
-        console.log(`  -- (${this.currentLogs.length - maxVisible} more messages, use ↑/↓ to scroll) --`);
+        process.stdout.write(` ${UI.COLORS.dim}(${this.currentLogs.length - maxVisible} more messages)${UI.COLORS.reset}\n`);
       }
     }
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    this.renderFooter([
+      '[↑↓] Scroll', '[→/Enter] Full Msg', '[T] Terminal', '[I] Intervene', '[K] Kill', '[←/Esc] Back'
+    ]);
+  }
+  
+  private getRoleColor(role: string): string {
+    const colors: Record<string, string> = {
+      user: UI.COLORS.yellow,
+      assistant: UI.COLORS.green,
+      reviewer: UI.COLORS.magenta,
+      intervention: UI.COLORS.red,
+      system: UI.COLORS.cyan,
+    };
+    return colors[role] || UI.COLORS.gray;
   }
 
   private renderMessageDetail() {
@@ -642,59 +1147,163 @@ class InteractiveMonitor {
       return;
     }
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`📄 Full Message Detail - ${log.role.toUpperCase()}`);
-    console.log(`🕒 ${new Date(log.timestamp).toLocaleString()} | [Esc/←] Back to History`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    this.renderHeader('Message Detail', [path.basename(this.runDir), this.selectedLaneName || '', log.role.toUpperCase()]);
 
-    let roleColor = '\x1b[32m';
-    if (log.role === 'user') roleColor = '\x1b[33m';
-    else if (log.role === 'reviewer') roleColor = '\x1b[35m';
-    else if (log.role === 'intervention') roleColor = '\x1b[31m\x1b[1m';
-    else if (log.role === 'system') roleColor = '\x1b[36m';
+    const roleColor = this.getRoleColor(log.role);
+    const ts = new Date(log.timestamp).toLocaleString();
     
-    process.stdout.write(`${roleColor}ROLE: ${log.role.toUpperCase()}\x1b[0m\n`);
-    if (log.model) process.stdout.write(`MODEL: ${log.model}\n`);
-    if (log.task) process.stdout.write(`TASK: ${log.task}\n`);
-    console.log('─'.repeat(40));
-    console.log(log.fullText);
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    process.stdout.write(`\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Role${UI.COLORS.reset}      ${roleColor}${log.role.toUpperCase()}${UI.COLORS.reset}\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Time${UI.COLORS.reset}      ${ts}\n`);
+    if (log.model) process.stdout.write(` ${UI.COLORS.dim}Model${UI.COLORS.reset}     ${log.model}\n`);
+    if (log.task) process.stdout.write(` ${UI.COLORS.dim}Task${UI.COLORS.reset}      ${log.task}\n`);
+    
+    this.renderSectionTitle('Content');
+    
+    // Display message content with wrapping
+    const maxWidth = this.screenWidth - 4;
+    const lines = log.fullText.split('\n');
+    const maxLines = this.screenHeight - 16;
+    
+    let lineCount = 0;
+    for (const line of lines) {
+      if (lineCount >= maxLines) {
+        process.stdout.write(` ${UI.COLORS.dim}... (truncated, ${lines.length - lineCount} more lines)${UI.COLORS.reset}\n`);
+        break;
+      }
+      
+      // Word wrap long lines
+      if (line.length > maxWidth) {
+        const wrapped = this.wrapText(line, maxWidth);
+        for (const wl of wrapped) {
+          if (lineCount >= maxLines) break;
+          process.stdout.write(` ${wl}\n`);
+          lineCount++;
+        }
+      } else {
+        process.stdout.write(` ${line}\n`);
+        lineCount++;
+      }
+    }
+
+    this.renderFooter(['[←/Esc] Back']);
+  }
+  
+  /**
+   * Wrap text to specified width
+   */
+  private wrapText(text: string, maxWidth: number): string[] {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let currentLine = '';
+    
+    for (const word of words) {
+      if (currentLine.length + word.length + 1 <= maxWidth) {
+        currentLine += (currentLine ? ' ' : '') + word;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    
+    return lines;
   }
 
   private renderFlow() {
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`⛓️  Task Dependency Flow`);
-    console.log(`🕒 Updated: ${new Date().toLocaleTimeString()} | [→/Enter/Esc] Back to List`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    this.renderHeader('Dependency Flow', [path.basename(this.runDir), 'Flow']);
 
     const laneMap = new Map<string, any>();
     this.lanes.forEach(lane => {
       laneMap.set(lane.name, this.getLaneStatus(lane.path, lane.name));
     });
 
-    // Enhanced visualization with box-like structure and clear connections
-    this.lanes.forEach(lane => {
-      const status = laneMap.get(lane.name);
-      const statusIcon = this.getStatusIcon(status.status);
+    process.stdout.write('\n');
+    
+    // Group lanes by dependency level
+    const levels = this.calculateDependencyLevels();
+    const maxLevelWidth = Math.max(...levels.map(l => l.length));
+    
+    for (let level = 0; level < levels.length; level++) {
+      const lanesAtLevel = levels[level]!;
       
-      let statusColor = '\x1b[90m'; // Grey for pending/waiting
-      if (status.status === 'completed') statusColor = '\x1b[32m'; // Green
-      if (status.status === 'running') statusColor = '\x1b[36m'; // Cyan
-      if (status.status === 'failed') statusColor = '\x1b[31m'; // Red
+      // Level header
+      process.stdout.write(` ${UI.COLORS.dim}Level ${level}${UI.COLORS.reset}\n`);
+      
+      for (const laneName of lanesAtLevel) {
+        const status = laneMap.get(laneName);
+        const statusIcon = this.getStatusIcon(status?.status || 'pending');
+        
+        let statusColor = UI.COLORS.gray;
+        if (status?.status === 'completed') statusColor = UI.COLORS.green;
+        else if (status?.status === 'running') statusColor = UI.COLORS.cyan;
+        else if (status?.status === 'failed') statusColor = UI.COLORS.red;
 
-      // Render the node
-      const nodeText = `[ ${statusIcon} ${lane.name.padEnd(18)} ]`;
-      process.stdout.write(`  ${statusColor}${nodeText}\x1b[0m`);
-      
-      // Render dependencies
-      if (status.dependsOn && status.dependsOn.length > 0) {
-        process.stdout.write(` \x1b[90m◀───\x1b[0m \x1b[33m( ${status.dependsOn.join(', ')} )\x1b[0m`);
+        // Render the node
+        const nodeText = `${statusIcon} ${laneName}`;
+        process.stdout.write(`   ${statusColor}${nodeText.padEnd(20)}${UI.COLORS.reset}`);
+        
+        // Render dependencies
+        if (status?.dependsOn?.length > 0) {
+          process.stdout.write(` ${UI.COLORS.dim}←${UI.COLORS.reset} ${UI.COLORS.yellow}${status.dependsOn.join(', ')}${UI.COLORS.reset}`);
+        }
+        process.stdout.write('\n');
       }
-      process.stdout.write('\n');
-    });
+      
+      if (level < levels.length - 1) {
+        process.stdout.write(`   ${UI.COLORS.dim}│${UI.COLORS.reset}\n`);
+        process.stdout.write(`   ${UI.COLORS.dim}▼${UI.COLORS.reset}\n`);
+      }
+    }
 
-    console.log('\n\x1b[90m  (Lanes wait for their dependencies to complete before starting)\x1b[0m');
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    process.stdout.write(`\n ${UI.COLORS.dim}Lanes wait for dependencies to complete before starting${UI.COLORS.reset}\n`);
+    
+    this.renderFooter(['[←/Esc] Back']);
+  }
+  
+  /**
+   * Calculate dependency levels for visualization
+   */
+  private calculateDependencyLevels(): string[][] {
+    const levels: string[][] = [];
+    const assigned = new Set<string>();
+    
+    // First, find lanes with no dependencies
+    const noDeps = this.lanes.filter(l => !l.dependsOn || l.dependsOn.length === 0);
+    if (noDeps.length > 0) {
+      levels.push(noDeps.map(l => l.name));
+      noDeps.forEach(l => assigned.add(l.name));
+    }
+    
+    // Then assign remaining lanes by dependency completion
+    let maxIterations = 10;
+    while (assigned.size < this.lanes.length && maxIterations-- > 0) {
+      const nextLevel: string[] = [];
+      
+      for (const lane of this.lanes) {
+        if (assigned.has(lane.name)) continue;
+        
+        // Check if all dependencies are assigned
+        const allDepsAssigned = lane.dependsOn.every(d => assigned.has(d));
+        if (allDepsAssigned) {
+          nextLevel.push(lane.name);
+        }
+      }
+      
+      if (nextLevel.length === 0) {
+        // Remaining lanes have circular deps or missing deps
+        const remaining = this.lanes.filter(l => !assigned.has(l.name)).map(l => l.name);
+        if (remaining.length > 0) {
+          levels.push(remaining);
+        }
+        break;
+      }
+      
+      levels.push(nextLevel);
+      nextLevel.forEach(n => assigned.add(n));
+    }
+    
+    return levels;
   }
 
   private renderTerminal() {
@@ -705,24 +1314,35 @@ class InteractiveMonitor {
       return;
     }
 
-    const logPath = safeJoin(lane.path, 'terminal.log');
+    this.renderHeader('Live Terminal', [path.basename(this.runDir), lane.name, 'Terminal']);
+
+    // Get logs based on format mode
     let logLines: string[] = [];
-    if (fs.existsSync(logPath)) {
-      const content = fs.readFileSync(logPath, 'utf8');
-      logLines = content.split('\n');
+    let totalLines = 0;
+    
+    if (this.readableFormat) {
+      // Use JSONL for readable format
+      const jsonlPath = safeJoin(lane.path, 'terminal.jsonl');
+      logLines = this.getReadableLogLines(jsonlPath, lane.name);
+      totalLines = logLines.length;
+    } else {
+      // Use raw log
+      const logPath = safeJoin(lane.path, 'terminal.log');
+      if (fs.existsSync(logPath)) {
+        const content = fs.readFileSync(logPath, 'utf8');
+        logLines = content.split('\n');
+        totalLines = logLines.length;
+      }
     }
 
-    const maxVisible = 40;
-    const totalLines = logLines.length;
+    const maxVisible = this.screenHeight - 10;
 
     // Follow mode logic
     if (this.followMode) {
-      this.terminalScrollOffset = 0;  // Always show latest
+      this.terminalScrollOffset = 0;
     } else {
-      // Track new lines when not following
       if (this.lastTerminalTotalLines > 0 && totalLines > this.lastTerminalTotalLines) {
         this.unseenLineCount += (totalLines - this.lastTerminalTotalLines);
-        // Keep position stable
         this.terminalScrollOffset += (totalLines - this.lastTerminalTotalLines);
       }
     }
@@ -734,64 +1354,331 @@ class InteractiveMonitor {
       this.terminalScrollOffset = maxScroll;
     }
 
+    // Mode and status indicators
+    const formatMode = this.readableFormat 
+      ? `${UI.COLORS.green}[R] Readable ✓${UI.COLORS.reset}` 
+      : `${UI.COLORS.dim}[R] Raw${UI.COLORS.reset}`;
+    const followStatus = this.followMode 
+      ? `${UI.COLORS.green}[F] Follow ✓${UI.COLORS.reset}` 
+      : `${UI.COLORS.yellow}[F] Follow OFF${this.unseenLineCount > 0 ? ` (↓${this.unseenLineCount})` : ''}${UI.COLORS.reset}`;
+    
+    process.stdout.write(` ${formatMode}  ${followStatus}  ${UI.COLORS.dim}Lines: ${totalLines}${UI.COLORS.reset}\n\n`);
+
     // Slice based on scroll (0 means bottom, >0 means scrolled up)
     const end = totalLines - this.terminalScrollOffset;
     const start = Math.max(0, end - maxVisible);
     const visibleLines = logLines.slice(start, end);
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`🖥️  Full Live Terminal: ${lane.name}`);
-    const followStatus = this.followMode 
-      ? '\x1b[32m[F] Follow: ON ✓\x1b[0m' 
-      : `\x1b[33m[F] Follow: OFF${this.unseenLineCount > 0 ? ` (↓ ${this.unseenLineCount} new)` : ''}\x1b[0m`;
-    console.log(`🕒 Streaming... | ${followStatus} | [↑/↓] Scroll | [I] Intervene | [Esc] Back`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    visibleLines.forEach(line => {
-      let formattedLine = line;
-      // Highlight human intervention
-      if (line.includes('[HUMAN INTERVENTION]') || line.includes('Injecting intervention:')) {
-        formattedLine = `\x1b[33m\x1b[1m${line}\x1b[0m`;
-      } 
-      // Highlight agent execution starts
-      else if (line.includes('Executing cursor-agent')) {
-        formattedLine = `\x1b[36m\x1b[1m${line}\x1b[0m`;
-      }
-      // Highlight task headers
-      else if (line.includes('=== Task:')) {
-        formattedLine = `\x1b[32m\x1b[1m${line}\x1b[0m`;
-      }
-      // Highlight errors
-      else if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-        formattedLine = `\x1b[31m${line}\x1b[0m`;
-      }
-      
-      process.stdout.write(`  ${formattedLine}\n`);
-    });
+    for (const line of visibleLines) {
+      const formatted = this.readableFormat ? line : this.formatTerminalLine(line);
+      // Truncate to screen width
+      const displayLine = formatted.length > this.screenWidth - 2 
+        ? formatted.substring(0, this.screenWidth - 5) + '...' 
+        : formatted;
+      process.stdout.write(` ${displayLine}\n`);
+    }
     
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    if (visibleLines.length === 0) {
+      process.stdout.write(` ${UI.COLORS.dim}(No output yet)${UI.COLORS.reset}\n`);
+    }
+
+    this.renderFooter([
+      '[↑↓] Scroll', '[F] Follow', '[R] Toggle Readable', '[I] Intervene', '[←/Esc] Back'
+    ]);
+  }
+  
+  /**
+   * Format a raw terminal line with syntax highlighting
+   */
+  private formatTerminalLine(line: string): string {
+    // Highlight patterns
+    if (line.includes('[HUMAN INTERVENTION]') || line.includes('Injecting intervention:')) {
+      return `${UI.COLORS.yellow}${UI.COLORS.bold}${line}${UI.COLORS.reset}`;
+    }
+    if (line.includes('Executing cursor-agent')) {
+      return `${UI.COLORS.cyan}${UI.COLORS.bold}${line}${UI.COLORS.reset}`;
+    }
+    if (line.includes('=== Task:') || line.includes('Starting task:')) {
+      return `${UI.COLORS.green}${UI.COLORS.bold}${line}${UI.COLORS.reset}`;
+    }
+    if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
+      return `${UI.COLORS.red}${line}${UI.COLORS.reset}`;
+    }
+    if (line.toLowerCase().includes('success') || line.toLowerCase().includes('completed')) {
+      return `${UI.COLORS.green}${line}${UI.COLORS.reset}`;
+    }
+    return line;
+  }
+  
+  /**
+   * Get readable log lines from JSONL file
+   */
+  private getReadableLogLines(jsonlPath: string, laneName: string): string[] {
+    if (!fs.existsSync(jsonlPath)) {
+      // Fallback: try to read raw log
+      const rawPath = jsonlPath.replace('.jsonl', '.log');
+      if (fs.existsSync(rawPath)) {
+        return fs.readFileSync(rawPath, 'utf8').split('\n').map(l => this.formatTerminalLine(l));
+      }
+      return [];
+    }
+    
+    try {
+      const content = fs.readFileSync(jsonlPath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+      
+      return lines.map(line => {
+        try {
+          const entry = JSON.parse(line);
+          const ts = new Date(entry.timestamp || Date.now()).toLocaleTimeString('en-US', { hour12: false });
+          const type = (entry.type || 'info').toLowerCase();
+          const content = entry.content || entry.message || '';
+          
+          // Format based on type
+          const typeInfo = this.getLogTypeInfo(type);
+          const preview = content.replace(/\n/g, ' ').substring(0, 100);
+          
+          return `${UI.COLORS.dim}[${ts}]${UI.COLORS.reset} ${typeInfo.color}[${typeInfo.label}]${UI.COLORS.reset} ${preview}`;
+        } catch {
+          return this.formatTerminalLine(line);
+        }
+      });
+    } catch {
+      return [];
+    }
+  }
+  
+  /**
+   * Get log type display info
+   */
+  private getLogTypeInfo(type: string): { label: string; color: string } {
+    const typeMap: Record<string, { label: string; color: string }> = {
+      user: { label: 'USER  ', color: UI.COLORS.cyan },
+      assistant: { label: 'ASST  ', color: UI.COLORS.green },
+      tool: { label: 'TOOL  ', color: UI.COLORS.yellow },
+      tool_result: { label: 'RESULT', color: UI.COLORS.gray },
+      result: { label: 'DONE  ', color: UI.COLORS.green },
+      system: { label: 'SYSTEM', color: UI.COLORS.gray },
+      thinking: { label: 'THINK ', color: UI.COLORS.dim },
+      error: { label: 'ERROR ', color: UI.COLORS.red },
+      stderr: { label: 'STDERR', color: UI.COLORS.red },
+      stdout: { label: 'STDOUT', color: UI.COLORS.white },
+    };
+    return typeMap[type] || { label: type.toUpperCase().padEnd(6).substring(0, 6), color: UI.COLORS.gray };
   }
 
   private renderIntervene() {
-    console.clear();
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`🙋 HUMAN INTERVENTION: ${this.selectedLaneName}`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('\n Type your message to the agent. This will be sent as a direct prompt.');
-    console.log(` Press \x1b[1mENTER\x1b[0m to send, \x1b[1mESC\x1b[0m to cancel.\n`);
-    console.log(`\x1b[33m > \x1b[0m${this.interventionInput}\x1b[37m█\x1b[0m`);
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    this.renderHeader('Human Intervention', [path.basename(this.runDir), this.selectedLaneName || '', 'Intervene']);
+
+    process.stdout.write(`\n`);
+    process.stdout.write(` ${UI.COLORS.yellow}Send a message directly to the agent.${UI.COLORS.reset}\n`);
+    process.stdout.write(` ${UI.COLORS.dim}This will interrupt the current flow and inject your instruction.${UI.COLORS.reset}\n\n`);
+    
+    // Input box
+    const width = Math.min(this.screenWidth - 8, 80);
+    process.stdout.write(` ${UI.COLORS.cyan}┌${'─'.repeat(width)}┐${UI.COLORS.reset}\n`);
+    
+    // Wrap input text
+    const inputLines = this.wrapText(this.interventionInput || ' ', width - 4);
+    for (const line of inputLines) {
+      process.stdout.write(` ${UI.COLORS.cyan}│${UI.COLORS.reset} ${line.padEnd(width - 2)} ${UI.COLORS.cyan}│${UI.COLORS.reset}\n`);
+    }
+    if (inputLines.length === 0 || inputLines[inputLines.length - 1] === ' ') {
+      process.stdout.write(` ${UI.COLORS.cyan}│${UI.COLORS.reset} ${UI.COLORS.white}█${UI.COLORS.reset}${' '.repeat(width - 3)} ${UI.COLORS.cyan}│${UI.COLORS.reset}\n`);
+    }
+    
+    process.stdout.write(` ${UI.COLORS.cyan}└${'─'.repeat(width)}┘${UI.COLORS.reset}\n`);
+
+    this.renderFooter(['[Enter] Send', '[Esc] Cancel']);
   }
 
   private renderTimeout() {
-    console.clear();
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`⏱ UPDATE TIMEOUT: ${this.selectedLaneName}`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('\n Enter new timeout in milliseconds (e.g., 600000 for 10 minutes).');
-    console.log(` Press \x1b[1mENTER\x1b[0m to apply, \x1b[1mESC\x1b[0m to cancel.\n`);
-    console.log(`\x1b[33m > \x1b[0m${this.timeoutInput}\x1b[37m█\x1b[0m`);
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    this.renderHeader('Update Timeout', [path.basename(this.runDir), this.selectedLaneName || '', 'Timeout']);
+
+    process.stdout.write(`\n`);
+    process.stdout.write(` ${UI.COLORS.yellow}Update the task timeout for this lane.${UI.COLORS.reset}\n`);
+    process.stdout.write(` ${UI.COLORS.dim}Enter timeout in milliseconds (e.g., 600000 = 10 minutes)${UI.COLORS.reset}\n\n`);
+    
+    // Common presets
+    process.stdout.write(` ${UI.COLORS.dim}Presets: 300000 (5m) | 600000 (10m) | 1800000 (30m) | 3600000 (1h)${UI.COLORS.reset}\n\n`);
+    
+    // Input box
+    const width = 40;
+    process.stdout.write(` ${UI.COLORS.cyan}┌${'─'.repeat(width)}┐${UI.COLORS.reset}\n`);
+    process.stdout.write(` ${UI.COLORS.cyan}│${UI.COLORS.reset} ${(this.timeoutInput || '').padEnd(width - 2)}${UI.COLORS.white}█${UI.COLORS.reset} ${UI.COLORS.cyan}│${UI.COLORS.reset}\n`);
+    process.stdout.write(` ${UI.COLORS.cyan}└${'─'.repeat(width)}┘${UI.COLORS.reset}\n`);
+    
+    // Show human-readable interpretation
+    if (this.timeoutInput) {
+      const ms = parseInt(this.timeoutInput);
+      if (!isNaN(ms) && ms > 0) {
+        const formatted = this.formatDuration(ms);
+        process.stdout.write(`\n ${UI.COLORS.green}= ${formatted}${UI.COLORS.reset}\n`);
+      }
+    }
+
+    this.renderFooter(['[Enter] Apply', '[Esc] Cancel']);
+  }
+
+  /**
+   * Render unified log view - all lanes combined
+   */
+  private renderUnifiedLog() {
+    this.renderHeader('Unified Logs', [path.basename(this.runDir), 'All Lanes']);
+    
+    const bufferState = this.unifiedLogBuffer?.getState();
+    const totalEntries = bufferState?.totalEntries || 0;
+    const availableLanes = bufferState?.lanes || [];
+    
+    // Status bar
+    const formatMode = this.readableFormat 
+      ? `${UI.COLORS.green}[R] Readable ✓${UI.COLORS.reset}` 
+      : `${UI.COLORS.dim}[R] Compact${UI.COLORS.reset}`;
+    const followStatus = this.unifiedLogFollowMode
+      ? `${UI.COLORS.green}[F] Follow ✓${UI.COLORS.reset}`
+      : `${UI.COLORS.yellow}[F] Follow OFF${UI.COLORS.reset}`;
+    const filterStatus = this.laneFilter 
+      ? `${UI.COLORS.cyan}[L] ${this.laneFilter}${UI.COLORS.reset}`
+      : `${UI.COLORS.dim}[L] All Lanes${UI.COLORS.reset}`;
+    
+    process.stdout.write(` ${formatMode}  ${followStatus}  ${filterStatus}  ${UI.COLORS.dim}Total: ${totalEntries}${UI.COLORS.reset}\n`);
+    
+    // Lane list for filtering hint
+    if (availableLanes.length > 1) {
+      process.stdout.write(` ${UI.COLORS.dim}Lanes: ${availableLanes.join(', ')}${UI.COLORS.reset}\n`);
+    }
+    process.stdout.write('\n');
+
+    if (!this.unifiedLogBuffer) {
+      process.stdout.write(` ${UI.COLORS.dim}(No log buffer available)${UI.COLORS.reset}\n`);
+      this.renderFooter(['[U/Esc] Back', '[Q] Quit']);
+      return;
+    }
+
+    const pageSize = this.screenHeight - 12;
+    const filter = this.laneFilter ? { lane: this.laneFilter } : undefined;
+    
+    const entries = this.unifiedLogBuffer.getEntries({
+      offset: this.unifiedLogScrollOffset,
+      limit: pageSize,
+      filter,
+      fromEnd: true,
+    });
+
+    if (entries.length === 0) {
+      process.stdout.write(` ${UI.COLORS.dim}(No log entries yet)${UI.COLORS.reset}\n`);
+    } else {
+      for (const entry of entries) {
+        const formatted = this.formatUnifiedLogEntry(entry);
+        const displayLine = formatted.length > this.screenWidth - 2 
+          ? formatted.substring(0, this.screenWidth - 5) + '...' 
+          : formatted;
+        process.stdout.write(` ${displayLine}\n`);
+      }
+    }
+
+    this.renderFooter([
+      '[↑↓/PgUp/PgDn] Scroll', '[F] Follow', '[R] Readable', '[L] Filter Lane', '[U/Esc] Back'
+    ]);
+  }
+  
+  /**
+   * Format a unified log entry
+   */
+  private formatUnifiedLogEntry(entry: BufferedLogEntry): string {
+    const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
+    const lane = entry.laneName.padEnd(12);
+    const typeInfo = this.getLogTypeInfo(entry.type || 'info');
+    
+    if (this.readableFormat) {
+      // Readable format: show more context
+      const content = entry.message.replace(/\n/g, ' ');
+      return `${UI.COLORS.dim}[${ts}]${UI.COLORS.reset} ${entry.laneColor}[${lane}]${UI.COLORS.reset} ${typeInfo.color}[${typeInfo.label}]${UI.COLORS.reset} ${content}`;
+    } else {
+      // Compact format
+      const preview = entry.message.replace(/\n/g, ' ').substring(0, 60);
+      return `${UI.COLORS.dim}${ts}${UI.COLORS.reset} ${entry.laneColor}${entry.laneName.substring(0, 8).padEnd(8)}${UI.COLORS.reset} ${typeInfo.color}${typeInfo.label.trim().substring(0, 4)}${UI.COLORS.reset} ${preview}`;
+    }
+  }
+
+  /**
+   * Render multiple flows dashboard
+   */
+  private renderFlowsDashboard() {
+    this.renderHeader('All Flows', ['Flows Dashboard']);
+    
+    process.stdout.write(` ${UI.COLORS.dim}Total: ${this.allFlows.length} flows${UI.COLORS.reset}\n\n`);
+
+    if (this.allFlows.length === 0) {
+      process.stdout.write(` ${UI.COLORS.dim}No flow runs found.${UI.COLORS.reset}\n\n`);
+      process.stdout.write(` Run ${UI.COLORS.cyan}cursorflow run${UI.COLORS.reset} to start a new flow.\n`);
+      this.renderFooter(['[M/Esc] Back', '[Q] Quit']);
+      return;
+    }
+
+    // Header
+    process.stdout.write(`    ${'Status'.padEnd(8)}  ${'Run ID'.padEnd(32)}  ${'Lanes'.padEnd(12)}  Progress\n`);
+    process.stdout.write(`    ${'─'.repeat(8)}  ${'─'.repeat(32)}  ${'─'.repeat(12)}  ${'─'.repeat(20)}\n`);
+
+    const maxVisible = this.screenHeight - 14;
+    const startIdx = Math.max(0, this.selectedFlowIndex - Math.floor(maxVisible / 2));
+    const endIdx = Math.min(this.allFlows.length, startIdx + maxVisible);
+    
+    for (let i = startIdx; i < endIdx; i++) {
+      const flow = this.allFlows[i]!;
+      const isSelected = i === this.selectedFlowIndex;
+      const isCurrent = flow.runDir === this.runDir;
+      
+      // Status
+      let statusIcon = '⚪';
+      let statusColor = UI.COLORS.gray;
+      if (flow.isAlive) {
+        statusIcon = '🟢';
+        statusColor = UI.COLORS.green;
+      } else if (flow.summary.completed === flow.summary.total && flow.summary.total > 0) {
+        statusIcon = '✅';
+        statusColor = UI.COLORS.green;
+      } else if (flow.summary.failed > 0 || flow.summary.dead > 0) {
+        statusIcon = '🔴';
+        statusColor = UI.COLORS.red;
+      }
+      
+      // Lanes summary
+      const lanesSummary = [
+        flow.summary.running > 0 ? `${UI.COLORS.cyan}${flow.summary.running}R${UI.COLORS.reset}` : '',
+        flow.summary.completed > 0 ? `${UI.COLORS.green}${flow.summary.completed}C${UI.COLORS.reset}` : '',
+        flow.summary.failed > 0 ? `${UI.COLORS.red}${flow.summary.failed}F${UI.COLORS.reset}` : '',
+        flow.summary.dead > 0 ? `${UI.COLORS.yellow}${flow.summary.dead}D${UI.COLORS.reset}` : '',
+      ].filter(Boolean).join('/') || '0';
+      
+      // Progress bar
+      const total = flow.summary.total || 1;
+      const completed = flow.summary.completed;
+      const ratio = completed / total;
+      const barWidth = 12;
+      const filled = Math.round(ratio * barWidth);
+      const progressBar = `${UI.COLORS.green}${'█'.repeat(filled)}${UI.COLORS.reset}${UI.COLORS.gray}${'░'.repeat(barWidth - filled)}${UI.COLORS.reset}`;
+      const pct = `${Math.round(ratio * 100)}%`;
+      
+      // Display
+      const prefix = isSelected ? ` ${UI.COLORS.cyan}▶${UI.COLORS.reset} ` : '   ';
+      const currentTag = isCurrent ? ` ${UI.COLORS.cyan}●${UI.COLORS.reset}` : '';
+      const bg = isSelected ? UI.COLORS.bgGray : '';
+      const resetBg = isSelected ? UI.COLORS.reset : '';
+      
+      // Truncate run ID if needed
+      const runIdDisplay = flow.runId.length > 30 ? flow.runId.substring(0, 27) + '...' : flow.runId.padEnd(30);
+      
+      process.stdout.write(`${bg}${prefix}${statusIcon}       ${runIdDisplay}  ${lanesSummary.padEnd(12 + 30)}  ${progressBar} ${pct}${currentTag}${resetBg}\n`);
+    }
+    
+    if (this.allFlows.length > maxVisible) {
+      process.stdout.write(`\n ${UI.COLORS.dim}(${this.allFlows.length - maxVisible} more flows, scroll to see)${UI.COLORS.reset}\n`);
+    }
+
+    this.renderFooter([
+      '[↑↓] Select', '[→/Enter] Switch', '[D] Delete', '[R] Refresh', '[M/Esc] Back', '[Q] Quit'
+    ]);
   }
 
   private listLanesWithDeps(runDir: string): LaneWithDeps[] {
@@ -930,3 +1817,4 @@ async function monitor(args: string[]): Promise<void> {
 }
 
 export = monitor;
+

@@ -1,7 +1,11 @@
 /**
  * Core Runner - Execute tasks sequentially in a lane
  * 
- * Adapted from sequential-agent-runner.js
+ * Features:
+ * - Enhanced retry with circuit breaker
+ * - Checkpoint system for recovery
+ * - State validation and repair
+ * - Improved dependency management
  */
 
 import * as fs from 'fs';
@@ -11,13 +15,17 @@ import { execSync, spawn, spawnSync } from 'child_process';
 import * as git from '../utils/git';
 import * as logger from '../utils/logger';
 import { ensureCursorAgent, checkCursorAuth, printAuthHelp } from '../utils/cursor-agent';
-import { saveState, appendLog, createConversationEntry } from '../utils/state';
+import { saveState, appendLog, createConversationEntry, loadState, validateLaneState, repairLaneState, stateNeedsRecovery } from '../utils/state';
 import { events } from '../utils/events';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
 import { runReviewLoop } from './reviewer';
 import { safeJoin } from '../utils/path';
 import { analyzeFailure, RecoveryAction, logFailure, withRetry } from './failure-policy';
+import { withEnhancedRetry, getCircuitBreaker, isTransientError } from '../utils/retry';
+import { createCheckpoint, getLatestCheckpoint, restoreFromCheckpoint } from '../utils/checkpoint';
+import { waitForTaskDependencies as waitForDeps, DependencyWaitOptions } from '../utils/dependency';
+import { preflightCheck, printPreflightReport } from '../utils/health';
 import { 
   RunnerConfig, 
   Task, 
@@ -591,49 +599,38 @@ export function applyDependencyFilePermissions(worktreeDir: string, policy: Depe
 
 /**
  * Wait for task-level dependencies to be completed by other lanes
+ * Now uses the enhanced dependency module with timeout support
  */
-export async function waitForTaskDependencies(deps: string[], runDir: string): Promise<void> {
+export async function waitForTaskDependencies(
+  deps: string[], 
+  runDir: string,
+  options: DependencyWaitOptions = {}
+): Promise<void> {
   if (!deps || deps.length === 0) return;
 
   const lanesRoot = path.dirname(runDir);
-  const pendingDeps = new Set(deps);
-
-  logger.info(`Waiting for task dependencies: ${deps.join(', ')}`);
-
-  while (pendingDeps.size > 0) {
-    for (const dep of pendingDeps) {
-      const [laneName, taskName] = dep.split(':');
-      if (!laneName || !taskName) {
-        logger.warn(`Invalid dependency format: ${dep}. Expected "lane:task"`);
-        pendingDeps.delete(dep);
-        continue;
+  
+  const result = await waitForDeps(deps, lanesRoot, {
+    timeoutMs: options.timeoutMs || 30 * 60 * 1000, // 30 minutes default
+    pollIntervalMs: options.pollIntervalMs || 5000,
+    onTimeout: options.onTimeout || 'fail',
+    onProgress: (pending, completed) => {
+      if (completed.length > 0) {
+        logger.info(`Dependencies progress: ${completed.length}/${deps.length} completed`);
       }
-
-      const depStatePath = safeJoin(lanesRoot, laneName, 'state.json');
-      if (fs.existsSync(depStatePath)) {
-        try {
-          const state = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
-          if (state.completedTasks && state.completedTasks.includes(taskName)) {
-            logger.info(`✓ Dependency met: ${dep}`);
-            pendingDeps.delete(dep);
-          } else if (state.status === 'failed') {
-            throw new Error(`Dependency failed: ${dep} (Lane ${laneName} failed)`);
-          }
-        } catch (e: any) {
-          if (e.message.includes('Dependency failed')) throw e;
-          // Ignore parse errors, file might be being written
-        }
-      }
+    },
+  });
+  
+  if (!result.success) {
+    if (result.timedOut) {
+      throw new Error(`Dependency wait timed out after ${Math.round(result.elapsedMs / 1000)}s. Pending: ${result.failedDependencies.join(', ')}`);
     }
-
-    if (pendingDeps.size > 0) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Poll every 5 seconds
-    }
+    throw new Error(`Dependencies failed: ${result.failedDependencies.join(', ')}`);
   }
 }
 
 /**
- * Merge branches from dependency lanes
+ * Merge branches from dependency lanes with safe merge
  */
 export async function mergeDependencyBranches(deps: string[], runDir: string, worktreeDir: string): Promise<void> {
   if (!deps || deps.length === 0) return;
@@ -646,21 +643,34 @@ export async function mergeDependencyBranches(deps: string[], runDir: string, wo
     if (!fs.existsSync(depStatePath)) continue;
 
     try {
-      const state = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
-      if (state.pipelineBranch) {
-        logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
-        
-        // Ensure we have the latest
-        git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
-        
-        git.merge(state.pipelineBranch, {
-          cwd: worktreeDir,
-          noFf: true,
-          message: `chore: merge task dependency from ${laneName}`
-        });
+      const state = loadState<LaneState>(depStatePath);
+      if (!state?.pipelineBranch) continue;
+      
+      logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
+      
+      // Ensure we have the latest
+      git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
+      
+      // Use safe merge with conflict detection
+      const mergeResult = git.safeMerge(state.pipelineBranch, {
+        cwd: worktreeDir,
+        noFf: true,
+        message: `chore: merge task dependency from ${laneName}`,
+        abortOnConflict: true,
+      });
+      
+      if (!mergeResult.success) {
+        if (mergeResult.conflict) {
+          logger.error(`Merge conflict with ${laneName}: ${mergeResult.conflictingFiles.join(', ')}`);
+          throw new Error(`Merge conflict: ${mergeResult.conflictingFiles.join(', ')}`);
+        }
+        throw new Error(mergeResult.error || 'Merge failed');
       }
+      
+      logger.success(`✓ Merged ${laneName}`);
     } catch (e) {
       logger.error(`Failed to merge branch from ${laneName}: ${e}`);
+      throw e;
     }
   }
 }
@@ -867,7 +877,7 @@ export async function runTask({
 /**
  * Run all tasks in sequence
  */
-export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; noGit?: boolean } = {}): Promise<TaskExecutionResult[]> {
+export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; noGit?: boolean; skipPreflight?: boolean } = {}): Promise<TaskExecutionResult[]> {
   const startIndex = options.startIndex || 0;
   const noGit = options.noGit || config.noGit || false;
   
@@ -884,6 +894,33 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.error('❌ Configuration validation failed');
     logger.error(`   ${validationError.message}`);
     throw validationError;
+  }
+  
+  // Run preflight checks (can be skipped for resume)
+  if (!options.skipPreflight && startIndex === 0) {
+    logger.info('Running preflight checks...');
+    const preflight = await preflightCheck({
+      requireRemote: !noGit,
+      requireAuth: true,
+    });
+    
+    if (!preflight.canProceed) {
+      printPreflightReport(preflight);
+      throw new Error('Preflight check failed. Please fix the blockers above.');
+    }
+    
+    if (preflight.warnings.length > 0) {
+      for (const warning of preflight.warnings) {
+        logger.warn(`⚠️  ${warning}`);
+      }
+    }
+    
+    logger.success('✓ Preflight checks passed');
+  }
+  
+  // Warn if baseBranch is set in config (it will be ignored)
+  if (config.baseBranch) {
+    logger.warn(`⚠️  config.baseBranch="${config.baseBranch}" will be ignored. Using current branch instead.`);
   }
   
   // Ensure cursor-agent is installed
@@ -916,15 +953,45 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   // In noGit mode, we don't need repoRoot - use current directory
   const repoRoot = noGit ? process.cwd() : git.getMainRepoRoot();
   
+  // ALWAYS use current branch as base - ignore config.baseBranch
+  // This ensures dependency structure is maintained in the worktree
+  const currentBranch = noGit ? 'main' : git.getCurrentBranch(repoRoot);
+  logger.info(`📍 Base branch: ${currentBranch} (current branch)`);
+  
   // Load existing state if resuming
   const statePath = safeJoin(runDir, 'state.json');
   let state: LaneState | null = null;
   
   if (fs.existsSync(statePath)) {
-    try {
-      state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    } catch (e) {
-      logger.warn(`Failed to load existing state from ${statePath}: ${e}`);
+    // Check if state needs recovery
+    if (stateNeedsRecovery(statePath)) {
+      logger.warn('State file indicates incomplete previous run. Attempting recovery...');
+      const repairedState = repairLaneState(statePath);
+      if (repairedState) {
+        state = repairedState;
+        logger.success('✓ State recovered');
+      } else {
+        logger.warn('Could not recover state. Starting fresh.');
+      }
+    } else {
+      state = loadState<LaneState>(statePath);
+      
+      // Validate loaded state
+      if (state) {
+        const validation = validateLaneState(statePath, {
+          checkWorktree: !noGit,
+          checkBranch: !noGit,
+          autoRepair: true,
+        });
+        
+        if (!validation.valid) {
+          logger.warn(`State validation issues: ${validation.issues.join(', ')}`);
+          if (validation.repaired) {
+            logger.info('State was auto-repaired');
+            state = validation.repairedState || state;
+          }
+        }
+      }
     }
   }
   
@@ -966,8 +1033,9 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
             fs.mkdirSync(worktreeParent, { recursive: true });
           }
 
+          // Always use the current branch (already captured at start) as the base branch
           git.createWorktree(worktreeDir, pipelineBranch, { 
-            baseBranch: config.baseBranch || 'main',
+            baseBranch: currentBranch,
             cwd: repoRoot,
           });
           break; // Success
@@ -1128,10 +1196,21 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   // Run tasks
   const results: TaskExecutionResult[] = [];
+  const laneName = state.label || path.basename(runDir);
   
   for (let i = startIndex; i < config.tasks.length; i++) {
     const task = config.tasks[i]!;
     const taskBranch = `${pipelineBranch}--${String(i + 1).padStart(2, '0')}-${task.name}`;
+
+    // Create checkpoint before each task
+    try {
+      await createCheckpoint(laneName, runDir, noGit ? null : worktreeDir, {
+        description: `Before task ${i + 1}: ${task.name}`,
+        maxCheckpoints: 5,
+      });
+    } catch (e: any) {
+      logger.warn(`Failed to create checkpoint: ${e.message}`);
+    }
 
     // Handle task-level dependencies
     if (task.dependsOn && task.dependsOn.length > 0) {
@@ -1140,7 +1219,11 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       saveState(statePath, state);
 
       try {
-        await waitForTaskDependencies(task.dependsOn, runDir);
+        // Use enhanced dependency wait with timeout
+        await waitForTaskDependencies(task.dependsOn, runDir, {
+          timeoutMs: config.timeout || 30 * 60 * 1000,
+          onTimeout: 'fail',
+        });
         
         if (!noGit) {
           await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir);
@@ -1155,6 +1238,14 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         state.error = e.message;
         saveState(statePath, state);
         logger.error(`Task dependency wait/merge failed: ${e.message}`);
+        
+        // Try to restore from checkpoint
+        const latestCheckpoint = getLatestCheckpoint(runDir);
+        if (latestCheckpoint) {
+          logger.info(`💾 Checkpoint available: ${latestCheckpoint.id}`);
+          logger.info(`   Resume with: cursorflow resume --checkpoint ${latestCheckpoint.id}`);
+        }
+        
         process.exit(1);
       }
     }
@@ -1254,7 +1345,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.info(`Final Workspace Summary (noGit): ${summary.files} files, ${summary.dirs} directories created/modified`);
   } else {
     try {
-      const stats = git.runGit(['diff', '--stat', config.baseBranch || 'main', pipelineBranch], { cwd: repoRoot, silent: true });
+      // Always use current branch for comparison (already captured at start)
+      const stats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { cwd: repoRoot, silent: true });
       if (stats) {
         logger.info('Final Workspace Summary (Git):\n' + stats);
       }

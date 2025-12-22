@@ -1,0 +1,141 @@
+{
+  "title": "Run Failure Post-mortem",
+  "runId": "run-1766380847034",
+  "failureTime": "2025-12-22T08:32:03.518Z",
+  "detectedAt": "2025-12-22T08:32:03.518Z",
+  "summary": "1 lane(s) found with dead processes (zombie state)",
+  "rootCause": {
+    "type": "ZOMBIE_PROCESS",
+    "description": "Lane processes were marked as running but the processes are no longer alive",
+    "symptoms": [
+      "Process PIDs no longer exist in the system",
+      "Lanes were stuck in \"running\" state",
+      "No completion or error was recorded before process death"
+    ]
+  },
+  "affectedLanes": [
+    {
+      "name": "01-run-process-services",
+      "status": "failed (was: running)",
+      "task": "[1/5]",
+      "taskIndex": 0,
+      "pid": 99999,
+      "reason": "Process terminated unexpectedly"
+    }
+  ],
+  "possibleCauses": [
+    "System killed process due to memory pressure (OOM)",
+    "User killed process manually (Ctrl+C, kill command)",
+    "Agent timeout exceeded and process was terminated",
+    "System restart or crash",
+    "Agent hung and watchdog terminated it"
+  ],
+  "recovery": {
+    "command": "cursorflow resume --all --run-dir /home/eugene/workbench/cursorflow/_cursorflow/logs/runs/run-1766380847034",
+    "description": "Resume all failed lanes from their last checkpoint",
+    "alternativeCommand": "cursorflow resume --all --restart --run-dir /home/eugene/workbench/cursorflow/_cursorflow/logs/runs/run-1766380847034",
+    "alternativeDescription": "Restart all failed lanes from the beginning"
+  },
+  "previousFailures": [
+    {
+      "title": "Run Failure Post-mortem",
+      "runId": "run-1766380847034",
+      "failureTime": "2025-12-22T05:26:51.614Z",
+      "detectedAt": "2025-12-22T14:30:00.000Z",
+      "summary": "cursor-agent hung with no response - all 4 parallel lanes frozen",
+      "rootCause": {
+        "type": "AGENT_NO_RESPONSE",
+        "description": "cursor-agent was executed but received 0 bytes of response after 360+ seconds",
+        "model": "gemini-3-flash",
+        "symptoms": [
+          "Heartbeat logs showing '0 bytes received' continuously",
+          "Chat session created successfully (f97354bf-9efd-49f2-87db-22c8317b9618)",
+          "Agent process started but never produced output",
+          "All 4 independent lanes (01-04) experienced the same issue"
+        ]
+      },
+      "affectedLanes": [
+        {
+          "name": "01-run-process-services",
+          "status": "failed",
+          "task": "[1/5] read-spec",
+          "taskIndex": 0,
+          "pid": 88192,
+          "lastHeartbeat": "360s elapsed, 0 bytes received"
+        },
+        {
+          "name": "02-task-service",
+          "status": "failed",
+          "task": "[1/4] read-spec",
+          "taskIndex": 0,
+          "pid": 88007,
+          "lastHeartbeat": "360s elapsed, 0 bytes received"
+        },
+        {
+          "name": "03-log-buffer-service",
+          "status": "failed",
+          "task": "[1/4] read-spec",
+          "taskIndex": 0,
+          "pid": 88068,
+          "lastHeartbeat": "360s elapsed, 0 bytes received"
+        },
+        {
+          "name": "04-ui-components",
+          "status": "failed",
+          "task": "[1/4] read-spec",
+          "taskIndex": 0,
+          "pid": 88136,
+          "lastHeartbeat": "360s elapsed, 0 bytes received"
+        }
+      ],
+      "pendingLanes": [
+        {
+          "name": "05-runs-stop-clean-commands",
+          "dependsOn": [
+            "01-run-process-services"
+          ]
+        },
+        {
+          "name": "06-tasks-command",
+          "dependsOn": [
+            "02-task-service"
+          ]
+        },
+        {
+          "name": "07-log-viewer",
+          "dependsOn": [
+            "03-log-buffer-service",
+            "04-ui-components"
+          ]
+        },
+        {
+          "name": "08-final-integration",
+          "dependsOn": [
+            "05-runs-stop-clean-commands",
+            "06-tasks-command",
+            "07-log-viewer"
+          ]
+        }
+      ],
+      "possibleCauses": [
+        "Model API rate limiting or quota exceeded",
+        "gemini-3-flash API connection timeout",
+        "Cursor authentication token expired during long running task",
+        "Network connectivity issues to Gemini API",
+        "cursor-agent process stuck waiting for stdin/stdout pipe"
+      ],
+      "recommendations": [
+        "Try resume with different model: cursorflow resume --all --executor cursor-agent",
+        "Check Cursor authentication: cursorflow doctor",
+        "Kill stale processes before resuming: kill 88192 88007 88068 88136",
+        "Consider using claude-sonnet or gpt-4 model instead of gemini-3-flash"
+      ],
+      "recovery": {
+        "command": "cursorflow resume --all --restart",
+        "description": "Resume all failed lanes from the beginning",
+        "alternativeCommand": "cursorflow resume --all",
+        "alternativeDescription": "Resume from last checkpoint (task index 0 for all)"
+      }
+    }
+  ]
+}

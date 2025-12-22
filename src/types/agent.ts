@@ -1,3 +1,6 @@
+/**
+ * Agent-related type definitions
+ */
 
 export interface DependencyPolicy {
   allowDependencyChange: boolean;
@@ -18,3 +21,4 @@ export interface AgentSendResult {
   sessionId?: string;
   resultText?: string;
 }
+

@@ -1,3 +1,6 @@
+/**
+ * Logging-related type definitions
+ */
 
 export enum LogImportance {
   CRITICAL = 'critical',
@@ -15,7 +18,13 @@ export type MessageType =
   | 'tool' 
   | 'tool_result' 
   | 'result' 
-  | 'thinking';
+  | 'thinking'
+  | 'success'
+  | 'info'
+  | 'warn'
+  | 'error'
+  | 'stdout'
+  | 'stderr';
 
 export interface ParsedMessage {
   type: MessageType;
@@ -27,26 +36,33 @@ export interface ParsedMessage {
 
 export interface JsonLogEntry {
   timestamp: string;
-  level: 'stdout' | 'stderr' | 'info' | 'error' | 'debug' | 'session';
+  type?: string;
+  level?: 'stdout' | 'stderr' | 'info' | 'error' | 'debug' | 'session';
   source?: string;
   task?: string;
   lane?: string;
-  message: string;
+  message?: string;
+  content?: string;
   raw?: string;
   metadata?: Record<string, any>;
+  [key: string]: any;
 }
 
 export interface BufferedLogEntry {
-  id: string;
+  id: number;
   timestamp: Date;
   laneName: string;
   level: string;
+  type: MessageType | string;
   message: string;
-  raw?: string;
+  raw?: JsonLogEntry;
   importance: LogImportance;
   laneColor: string;
   metadata?: Record<string, any>;
 }
+
+// Re-export EnhancedLogConfig from config.ts
+export type { EnhancedLogConfig } from './config';
 
 export interface LogSession {
   id: string;
@@ -77,3 +93,4 @@ export interface EventEntry {
   event: string;
   [key: string]: any;
 }
+

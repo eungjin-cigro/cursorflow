@@ -1,3 +1,6 @@
+/**
+ * Review-related type definitions
+ */
 
 export interface ReviewIssue {
   severity: 'critical' | 'major' | 'minor';
@@ -14,3 +17,4 @@ export interface ReviewResult {
   summary: string;
   raw: string;
 }
+

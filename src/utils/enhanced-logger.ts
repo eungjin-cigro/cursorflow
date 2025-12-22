@@ -1224,8 +1224,10 @@ function exportToMarkdown(jsonLogPath: string, cleanLogPath: string): string {
     md += `### Task: ${task}\n\n`;
     md += '```\n';
     for (const entry of taskEntries) {
-      if (entry.level !== 'session') {
-        md += `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}\n`;
+      const level = entry.level || 'info';
+      const message = entry.message || '';
+      if (level !== 'session') {
+        md += `[${entry.timestamp}] [${level.toUpperCase()}] ${message}\n`;
       }
     }
     md += '```\n\n';
@@ -1264,11 +1266,13 @@ function exportToHtml(jsonLogPath: string, cleanLogPath: string): string {
 `;
   
   for (const entry of entries) {
-    html += `  <div class="entry ${entry.level}">
+    const level = entry.level || 'info';
+    const message = entry.message || '';
+    html += `  <div class="entry ${level}">
     <span class="timestamp">${entry.timestamp}</span>
-    <span class="level">[${entry.level}]</span>
+    <span class="level">[${level}]</span>
     ${entry.task ? `<span class="task">[${entry.task}]</span>` : ''}
-    <pre>${escapeHtml(entry.message)}</pre>
+    <pre>${escapeHtml(message)}</pre>
   </div>\n`;
   }
   

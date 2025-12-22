@@ -1,7 +1,11 @@
 /**
  * Orchestrator - Parallel lane execution with dependency management
  * 
- * Adapted from admin-domains-orchestrator.js
+ * Features:
+ * - Multi-layer stall detection
+ * - Cyclic dependency detection
+ * - Enhanced recovery strategies
+ * - Health checks before start
  */
 
 import * as fs from 'fs';
@@ -9,8 +13,8 @@ import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 
 import * as logger from '../utils/logger';
-import { loadState, saveState, createLaneState } from '../utils/state';
-import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../types';
+import { loadState, saveState, createLaneState, validateLaneState } from '../utils/state';
+import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../utils/types';
 import { events } from '../utils/events';
 import { registerWebhooks } from '../utils/webhook';
 import { loadConfig, getLogsDir } from '../utils/config';
@@ -25,16 +29,22 @@ import {
   stripAnsi
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
-import { analyzeFailure, RecoveryAction, logFailure } from './failure-policy';
+import { analyzeFailure, analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig } from './failure-policy';
+import { detectCyclicDependencies, validateDependencies, printDependencyGraph, DependencyInfo } from '../utils/dependency';
+import { preflightCheck, printPreflightReport, autoRepair } from '../utils/health';
+import { getLatestCheckpoint, restoreFromCheckpoint } from '../utils/checkpoint';
+import { cleanStaleLocks, getLockDir } from '../utils/lock';
 
 /** Heartbeat interval: 30 seconds */
 const HEARTBEAT_INTERVAL_MS = 30000;
 
-/** Stall timeout for continue message: 3 minutes */
-const STALL_TIMEOUT_CONTINUE = 3 * 60 * 1000;
-
-/** Stall timeout for restart after continue: 5 minutes (total 8) */
-const STALL_TIMEOUT_RESTART = 5 * 60 * 1000;
+/** Default stall detection configuration */
+const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
+  ...DEFAULT_STALL_CONFIG,
+  idleTimeoutMs: 3 * 60 * 1000,      // 3 minutes
+  progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes
+  maxRestarts: 2,
+};
 
 export interface LaneInfo {
   name: string;
@@ -42,6 +52,8 @@ export interface LaneInfo {
   dependsOn: string[];
   startIndex?: number; // Current task index to resume from
   restartCount?: number; // Number of times restarted due to stall
+  lastStateUpdate?: number; // Timestamp of last state file update
+  taskStartTime?: number; // When current task started
 }
 
 export interface SpawnLaneResult {
@@ -58,7 +70,11 @@ interface RunningLaneInfo {
   logPath: string;
   logManager?: EnhancedLogManager;
   lastActivity: number;
+  lastStateUpdate: number;
   stallPhase: number; // 0: normal, 1: continued, 2: restarted
+  taskStartTime: number;
+  lastOutput: string;
+  statePath: string;
 }
 
 /**
@@ -167,13 +183,7 @@ export function spawnLane({
           
           if (trimmed && (isTimestamped || !isJson)) {
             if (onActivity) onActivity();
-            const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
-            const label = `[${laneName}]`;
-            const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
-            
-            // Strip redundant timestamp from line if it exists (e.g., from child logger)
-            const cleanLine = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, '');
-            process.stdout.write(`${ts} ${labelPrefix}${cleanLine}\n`);
+            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
           }
         }
       });
@@ -194,16 +204,10 @@ export function spawnLane({
                              trimmed.includes('actual output');
             
             if (isStatus) {
-              const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
-              const label = `[${laneName}]`;
-              const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
-              process.stdout.write(`${ts} ${labelPrefix}${trimmed}\n`);
+              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
             } else {
               if (onActivity) onActivity();
-              const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
-              const label = `[${laneName}]`;
-              const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
-              process.stderr.write(`${ts} ${labelPrefix}${logger.COLORS.red}ERROR: ${trimmed}${logger.COLORS.reset}\n`);
+              process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
             }
           }
         }
@@ -344,7 +348,7 @@ async function resolveAllDependencies(
 
   if (!fs.existsSync(worktreeDir)) {
     logger.info(`Creating resolution worktree at ${worktreeDir}`);
-    git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: 'main' });
+    git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: git.getCurrentBranch() });
   }
 
   // 3. Resolve on pipeline branch
@@ -413,25 +417,6 @@ async function resolveAllDependencies(
   }
   
   git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
-  
-  // 5. Clear dependency request files from all blocked lanes
-  for (const laneName of blockedLanes.keys()) {
-    const laneDir = laneRunDirs[laneName];
-    if (!laneDir) continue;
-    
-    const laneState = loadState<LaneState>(safeJoin(laneDir, 'state.json'));
-    if (laneState?.worktreeDir) {
-      const depReqFile = safeJoin(laneState.worktreeDir, '_cursorflow/dependency-request.json');
-      if (fs.existsSync(depReqFile)) {
-        try {
-          fs.unlinkSync(depReqFile);
-          logger.info(`🗑️ Cleared dependency request file for ${laneName}`);
-        } catch {
-          // Best effort
-        }
-      }
-    }
-  }
 }
 
 /**
@@ -446,12 +431,69 @@ export async function orchestrate(tasksDir: string, options: {
   autoResolveDependencies?: boolean;
   enhancedLogging?: Partial<EnhancedLogConfig>;
   noGit?: boolean;
+  skipPreflight?: boolean;
+  stallConfig?: Partial<StallDetectionConfig>;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
   if (lanes.length === 0) {
     throw new Error(`No lane task files found in ${tasksDir}`);
   }
+  
+  // Run preflight checks
+  if (!options.skipPreflight) {
+    logger.section('🔍 Preflight Checks');
+    
+    const preflight = await preflightCheck({
+      requireRemote: !options.noGit,
+      requireAuth: true,
+    });
+    
+    if (!preflight.canProceed) {
+      printPreflightReport(preflight);
+      throw new Error('Preflight check failed. Please fix the blockers above.');
+    }
+    
+    // Auto-repair if there are warnings
+    if (preflight.warnings.length > 0) {
+      logger.info('Attempting auto-repair...');
+      const repair = await autoRepair();
+      if (repair.repaired.length > 0) {
+        for (const r of repair.repaired) {
+          logger.success(`✓ ${r}`);
+        }
+      }
+    }
+    
+    logger.success('✓ Preflight checks passed');
+  }
+  
+  // Validate dependencies and detect cycles
+  logger.section('📊 Dependency Analysis');
+  
+  const depInfos: DependencyInfo[] = lanes.map(l => ({
+    name: l.name,
+    dependsOn: l.dependsOn,
+  }));
+  
+  const depValidation = validateDependencies(depInfos);
+  
+  if (!depValidation.valid) {
+    logger.error('❌ Dependency validation failed:');
+    for (const err of depValidation.errors) {
+      logger.error(`   • ${err}`);
+    }
+    throw new Error('Invalid dependency configuration');
+  }
+  
+  if (depValidation.warnings.length > 0) {
+    for (const warn of depValidation.warnings) {
+      logger.warn(`⚠️  ${warn}`);
+    }
+  }
+  
+  // Print dependency graph
+  printDependencyGraph(depInfos);
   
   const config = loadConfig();
   const logsDir = getLogsDir(config);
@@ -462,9 +504,26 @@ export async function orchestrate(tasksDir: string, options: {
     : safeJoin(logsDir, 'runs', runId);
   
   fs.mkdirSync(runRoot, { recursive: true });
+  
+  // Clean stale locks before starting
+  try {
+    const lockDir = getLockDir(git.getRepoRoot());
+    const cleaned = cleanStaleLocks(lockDir);
+    if (cleaned > 0) {
+      logger.info(`Cleaned ${cleaned} stale lock(s)`);
+    }
+  } catch {
+    // Ignore lock cleanup errors
+  }
 
   const randomSuffix = Math.random().toString(36).substring(2, 7);
   const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}-${randomSuffix}`;
+
+  // Stall detection configuration
+  const stallConfig: StallDetectionConfig = {
+    ...DEFAULT_ORCHESTRATOR_STALL_CONFIG,
+    ...options.stallConfig,
+  };
 
   // Initialize event system
   events.setRunId(runId);
@@ -485,7 +544,7 @@ export async function orchestrate(tasksDir: string, options: {
   const completedLanes = new Set<string>();
   const failedLanes = new Set<string>();
   const blockedLanes: Map<string, DependencyRequestPlan> = new Map();
-
+  
   // Track start index for each lane (initially 0)
   for (const lane of lanes) {
     lane.startIndex = 0;
@@ -494,7 +553,7 @@ export async function orchestrate(tasksDir: string, options: {
   
   const laneRunDirs: Record<string, string> = {};
   const laneWorktreeDirs: Record<string, string> = {};
-  const repoRoot = git.getMainRepoRoot();
+  const repoRoot = git.getRepoRoot();
   
   for (const lane of lanes) {
     laneRunDirs[lane.name] = safeJoin(runRoot, 'lanes', lane.name);
@@ -561,27 +620,6 @@ export async function orchestrate(tasksDir: string, options: {
     logger.info('🚫 Git operations disabled (--no-git mode)');
   }
   
-  // Signal handlers for clean cleanup
-  const cleanup = () => {
-    if (running.size > 0) {
-      console.log('');
-      logger.info('🛑 Termination signal received. Cleaning up active lanes...');
-      for (const [name, info] of running) {
-        logger.info(`  - Stopping ${name} (PID ${info.child.pid})...`);
-        try {
-          // Use SIGTERM first for graceful exit
-          info.child.kill('SIGTERM');
-        } catch (e) {
-          // Ignore
-        }
-      }
-    }
-    process.exit(1);
-  };
-
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-  
   // Monitor lanes
   const monitorInterval = setInterval(() => {
     printLaneStatus(lanes, laneRunDirs);
@@ -618,7 +656,17 @@ export async function orchestrate(tasksDir: string, options: {
     for (const lane of readyToStart) {
       if (running.size >= maxConcurrent) break;
       
+      const laneStatePath = safeJoin(laneRunDirs[lane.name]!, 'state.json');
+      
+      // Validate and repair state before starting
+      const validation = validateLaneState(laneStatePath, { autoRepair: true });
+      if (!validation.valid && !validation.repaired) {
+        logger.warn(`[${lane.name}] State validation issues: ${validation.issues.join(', ')}`);
+      }
+      
       logger.info(`Lane started: ${lane.name}${lane.startIndex ? ` (resuming from ${lane.startIndex})` : ''}`);
+      
+      let lastOutput = '';
       const spawnResult = spawnLane({
         laneName: lane.name,
         tasksFile: lane.path,
@@ -631,15 +679,36 @@ export async function orchestrate(tasksDir: string, options: {
         noGit: options.noGit,
         onActivity: () => {
           const info = running.get(lane.name);
-          if (info) info.lastActivity = Date.now();
+          if (info) {
+            info.lastActivity = Date.now();
+          }
         }
       });
       
+      // Track last output for long operation detection
+      if (spawnResult.child.stdout) {
+        spawnResult.child.stdout.on('data', (data: Buffer) => {
+          const info = running.get(lane.name);
+          if (info) {
+            info.lastOutput = data.toString().trim().split('\n').pop() || '';
+          }
+        });
+      }
+      
+      const now = Date.now();
       running.set(lane.name, {
         ...spawnResult,
-        lastActivity: Date.now(),
+        lastActivity: now,
+        lastStateUpdate: now,
         stallPhase: 0,
+        taskStartTime: now,
+        lastOutput: '',
+        statePath: laneStatePath,
       });
+      
+      // Update lane tracking
+      lane.taskStartTime = now;
+      
       events.emit('lane.started', {
         laneName: lane.name,
         pid: spawnResult.child.pid,
@@ -664,18 +733,37 @@ export async function orchestrate(tasksDir: string, options: {
       if (pollTimeout) clearTimeout(pollTimeout);
       
       if (result.name === '__poll__') {
-        // Periodic stall check
+        // Periodic stall check with multi-layer detection
         for (const [laneName, info] of running.entries()) {
-          const idleTime = Date.now() - info.lastActivity;
+          const now = Date.now();
+          const idleTime = now - info.lastActivity;
           const lane = lanes.find(l => l.name === laneName)!;
           
-          // Use FailurePolicy to decide action
-          if (idleTime > STALL_TIMEOUT_CONTINUE || (info.stallPhase === 1 && idleTime > STALL_TIMEOUT_RESTART)) {
-            const analysis = analyzeFailure(null, { 
-              stallPhase: info.stallPhase, 
-              idleTimeMs: idleTime 
-            });
-            
+          // Check state file for progress updates
+          let progressTime = 0;
+          try {
+            const stateStat = fs.statSync(info.statePath);
+            const stateUpdateTime = stateStat.mtimeMs;
+            if (stateUpdateTime > info.lastStateUpdate) {
+              info.lastStateUpdate = stateUpdateTime;
+            }
+            progressTime = now - info.lastStateUpdate;
+          } catch {
+            // State file might not exist yet
+          }
+          
+          // Use multi-layer stall analysis
+          const analysis = analyzeStall({
+            stallPhase: info.stallPhase,
+            idleTimeMs: idleTime,
+            progressTimeMs: progressTime,
+            lastOutput: info.lastOutput,
+            restartCount: lane.restartCount || 0,
+            taskStartTimeMs: info.taskStartTime,
+          }, stallConfig);
+          
+          // Only act if action is not NONE
+          if (analysis.action !== RecoveryAction.NONE) {
             logFailure(laneName, analysis);
             info.logManager?.log('error', analysis.message);
 
@@ -684,17 +772,28 @@ export async function orchestrate(tasksDir: string, options: {
               try {
                 fs.writeFileSync(interventionPath, 'continue');
                 info.stallPhase = 1;
-                info.lastActivity = Date.now();
+                info.lastActivity = now;
+                logger.info(`[${laneName}] Sent continue signal`);
               } catch (e) {
                 logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
               }
-            } else if (analysis.action === RecoveryAction.RESTART_LANE) {
+            } else if (analysis.action === RecoveryAction.RESTART_LANE || 
+                       analysis.action === RecoveryAction.RESTART_LANE_FROM_CHECKPOINT) {
               lane.restartCount = (lane.restartCount || 0) + 1;
               info.stallPhase = 2;
+              
+              // Try to get checkpoint info
+              const checkpoint = getLatestCheckpoint(laneRunDirs[laneName]!);
+              if (checkpoint) {
+                logger.info(`[${laneName}] Checkpoint available: ${checkpoint.id} (task ${checkpoint.taskIndex})`);
+              }
+              
               info.child.kill('SIGKILL');
+              logger.info(`[${laneName}] Restarting lane (restart #${lane.restartCount})`);
             } else if (analysis.action === RecoveryAction.ABORT_LANE) {
               info.stallPhase = 3;
               info.child.kill('SIGKILL');
+              logger.error(`[${laneName}] Aborting lane due to repeated stalls`);
             }
           }
         }
@@ -796,8 +895,6 @@ export async function orchestrate(tasksDir: string, options: {
   }
   
   clearInterval(monitorInterval);
-  process.removeListener('SIGINT', cleanup);
-  process.removeListener('SIGTERM', cleanup);
   printLaneStatus(lanes, laneRunDirs);
   
   // Check for failures

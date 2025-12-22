@@ -1,5 +1,8 @@
+/**
+ * Lane-related type definitions
+ */
 
-import { DependencyRequestPlan } from './agent';
+import type { DependencyRequestPlan } from './agent';
 
 export type LaneStatus = 
   | 'pending' 
@@ -31,11 +34,15 @@ export interface LaneState {
   error: string | null;
   dependencyRequest: DependencyRequestPlan | null;
   updatedAt?: number;
-  tasksFile?: string;
+  tasksFile?: string; // Original tasks file path
   dependsOn?: string[];
   pid?: number;
+  /** List of completed task names in this lane */
   completedTasks?: string[];
+  /** Task-level dependencies currently being waited for (format: "lane:task") */
   waitingFor?: string[];
+  /** Chat session ID */
+  chatId?: string;
 }
 
 export interface LaneFileInfo {
@@ -46,3 +53,4 @@ export interface LaneFileInfo {
   taskFlow: string;
   dependsOn: string[];
 }
+

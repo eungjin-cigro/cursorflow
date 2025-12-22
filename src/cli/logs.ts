@@ -225,7 +225,7 @@ function displayJsonLogs(
   if (options.filter) {
     const filterLower = options.filter.toLowerCase();
     entries = entries.filter(e => 
-      e.message.toLowerCase().includes(filterLower) || 
+      (e.message || '').toLowerCase().includes(filterLower) || 
       (e.task && e.task.toLowerCase().includes(filterLower))
     );
   }
@@ -240,10 +240,12 @@ function displayJsonLogs(
   } else {
     // Display as formatted text
     for (const entry of entries) {
-      const levelColor = getLevelColor(entry.level);
+      const level = entry.level || 'info';
+      const message = entry.message || '';
+      const levelColor = getLevelColor(level);
       const ts = new Date(entry.timestamp).toLocaleTimeString();
-      const formattedMsg = formatPotentialJsonMessage(entry.message);
-      console.log(`${levelColor}[${ts}] [${entry.level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${formattedMsg}`);
+      const formattedMsg = formatPotentialJsonMessage(message);
+      console.log(`${levelColor}[${ts}] [${level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${formattedMsg}`);
     }
   }
 }
@@ -351,7 +353,7 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
   if (options.filter) {
     const filterLower = options.filter.toLowerCase();
     entries = entries.filter(e => 
-      e.message.toLowerCase().includes(filterLower) || 
+      (e.message || '').toLowerCase().includes(filterLower) || 
       (e.task && e.task.toLowerCase().includes(filterLower)) ||
       e.laneName.toLowerCase().includes(filterLower)
     );
@@ -386,22 +388,25 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
   // Display entries
   for (const entry of entries) {
     const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
-    const levelColor = getLevelColor(entry.level);
+    const level = entry.level || 'info';
+    const levelColor = getLevelColor(level);
     const laneColor = entry.laneColor;
     const lanePad = entry.laneName.substring(0, 12).padEnd(12);
-    const levelPad = entry.level.toUpperCase().padEnd(6);
+    const levelPad = level.toUpperCase().padEnd(6);
+    
+    const message = entry.message || '';
     
     // Skip session entries for cleaner output unless they're important
-    if (entry.level === 'session' && entry.message === 'Session started') {
+    if (level === 'session' && message === 'Session started') {
       console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${laneColor}[${lanePad}]${logger.COLORS.reset} ${logger.COLORS.cyan}── Session Started ──${logger.COLORS.reset}`);
       continue;
     }
-    if (entry.level === 'session' && entry.message === 'Session ended') {
+    if (level === 'session' && message === 'Session ended') {
       console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${laneColor}[${lanePad}]${logger.COLORS.reset} ${logger.COLORS.cyan}── Session Ended ──${logger.COLORS.reset}`);
       continue;
     }
     
-    const formattedMsg = formatPotentialJsonMessage(entry.message);
+    const formattedMsg = formatPotentialJsonMessage(message);
     console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${formattedMsg}`);
   }
   
@@ -485,13 +490,16 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
     
     // Apply filters and display
     for (let entry of newEntries) {
+      const level = entry.level || 'info';
+      const message = entry.message || '';
+      
       // Apply level filter
-      if (options.level && entry.level !== options.level) continue;
+      if (options.level && level !== options.level) continue;
       
       // Apply filter (case-insensitive string match to avoid ReDoS)
       if (options.filter) {
         const filterLower = options.filter.toLowerCase();
-        if (!entry.message.toLowerCase().includes(filterLower) && 
+        if (!message.toLowerCase().includes(filterLower) && 
             !(entry.task && entry.task.toLowerCase().includes(filterLower)) && 
             !entry.laneName.toLowerCase().includes(filterLower)) {
           continue;
@@ -499,21 +507,21 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       }
       
       const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
-      const levelColor = getLevelColor(entry.level);
+      const levelColor = getLevelColor(level);
       const lanePad = entry.laneName.substring(0, 12).padEnd(12);
-      const levelPad = entry.level.toUpperCase().padEnd(6);
+      const levelPad = level.toUpperCase().padEnd(6);
       
       // Skip verbose session entries
-      if (entry.level === 'session') {
-        if (entry.message === 'Session started') {
+      if (level === 'session') {
+        if (message === 'Session started') {
           console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${entry.laneColor}[${lanePad}]${logger.COLORS.reset} ${logger.COLORS.cyan}── Session Started ──${logger.COLORS.reset}`);
-        } else if (entry.message === 'Session ended') {
+        } else if (message === 'Session ended') {
           console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${entry.laneColor}[${lanePad}]${logger.COLORS.reset} ${logger.COLORS.cyan}── Session Ended ──${logger.COLORS.reset}`);
         }
         continue;
       }
       
-      const formattedMsg = formatPotentialJsonMessage(entry.message);
+      const formattedMsg = formatPotentialJsonMessage(message);
       console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${entry.laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${formattedMsg}`);
     }
   }, 100);
@@ -550,7 +558,9 @@ function exportMergedLogs(runDir: string, format: string, outputPath?: string): 
       // Text format
       for (const entry of entries) {
         const ts = new Date(entry.timestamp).toISOString();
-        output += `[${ts}] [${entry.laneName}] [${entry.level.toUpperCase()}] ${entry.message}\n`;
+        const level = entry.level || 'info';
+        const message = entry.message || '';
+        output += `[${ts}] [${entry.laneName}] [${level.toUpperCase()}] ${message}\n`;
       }
   }
   
@@ -578,8 +588,9 @@ function exportMergedToMarkdown(entries: MergedLogEntry[], runDir: string): stri
   
   for (const entry of entries) {
     const ts = new Date(entry.timestamp).toLocaleTimeString();
-    const message = entry.message.replace(/\|/g, '\\|').substring(0, 80);
-    md += `| ${ts} | ${entry.laneName} | ${entry.level} | ${message} |\n`;
+    const level = entry.level || 'info';
+    const message = (entry.message || '').replace(/\|/g, '\\|').substring(0, 80);
+    md += `| ${ts} | ${entry.laneName} | ${level} | ${message} |\n`;
   }
   
   return md;
@@ -633,12 +644,14 @@ function exportMergedToHtml(entries: MergedLogEntry[], runDir: string): string {
     const ts = new Date(entry.timestamp).toLocaleTimeString();
     const laneIndex = lanes.indexOf(entry.laneName);
     const color = colors[laneIndex % colors.length];
+    const level = entry.level || 'info';
+    const message = entry.message || '';
     
-    html += `  <div class="entry ${entry.level}">
+    html += `  <div class="entry ${level}">
     <span class="time">${ts}</span>
     <span class="lane" style="color: ${color}">${entry.laneName}</span>
-    <span class="level">[${entry.level.toUpperCase()}]</span>
-    <span class="message">${escapeHtml(entry.message)}</span>
+    <span class="level">[${level.toUpperCase()}]</span>
+    <span class="message">${escapeHtml(message)}</span>
   </div>\n`;
   }
   

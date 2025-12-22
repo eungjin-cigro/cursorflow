@@ -235,8 +235,17 @@ export function worktreeExists(worktreePath: string, cwd?: string): boolean {
  * Create worktree
  */
 export function createWorktree(worktreePath: string, branchName: string, options: { cwd?: string; baseBranch?: string } = {}): string {
-  const { cwd, baseBranch = 'main' } = options;
+  let { cwd, baseBranch } = options;
   
+  if (!baseBranch) {
+    baseBranch = getCurrentBranch(cwd) || 'refs/heads/main';
+  }
+
+  // Ensure baseBranch is unambiguous (branch name rather than tag)
+  const unambiguousBase = (baseBranch.startsWith('refs/') || baseBranch.includes('/')) 
+    ? baseBranch 
+    : `refs/heads/${baseBranch}`;
+
   // Use a file-based lock to prevent race conditions during worktree creation
   const lockDir = safeJoin(cwd || getRepoRoot(), '_cursorflow', 'locks');
   if (!fs.existsSync(lockDir)) {
@@ -273,7 +282,7 @@ export function createWorktree(worktreePath: string, branchName: string, options
       runGit(['worktree', 'add', worktreePath, branchName], { cwd });
     } else {
       // Create new branch from base
-      runGit(['worktree', 'add', '-b', branchName, worktreePath, baseBranch], { cwd });
+      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd });
     }
     
     return worktreePath;
@@ -514,4 +523,349 @@ export function getLastOperationStats(cwd?: string): string {
   } catch (e) {
     return '';
   }
+}
+
+// ============================================================================
+// Enhanced Git Functions for Robustness
+// ============================================================================
+
+/**
+ * Generate a unique branch name that doesn't conflict with existing branches
+ */
+export function generateUniqueBranchName(baseName: string, options: { cwd?: string; maxAttempts?: number } = {}): string {
+  const { cwd, maxAttempts = 10 } = options;
+  const timestamp = Date.now().toString(36);
+  const random = () => Math.random().toString(36).substring(2, 5);
+  
+  // First attempt: base name with timestamp
+  let candidate = `${baseName}-${timestamp}-${random()}`;
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (!branchExists(candidate, { cwd })) {
+      return candidate;
+    }
+    // Try with new random suffix
+    candidate = `${baseName}-${timestamp}-${random()}`;
+  }
+  
+  // Last resort: use full timestamp with random
+  return `${baseName}-${Date.now()}-${random()}`;
+}
+
+/**
+ * Safe merge result
+ */
+export interface SafeMergeResult {
+  success: boolean;
+  conflict: boolean;
+  conflictingFiles: string[];
+  error?: string;
+  aborted: boolean;
+}
+
+/**
+ * Safely merge a branch with conflict detection and auto-abort
+ */
+export function safeMerge(branchName: string, options: { 
+  cwd?: string; 
+  noFf?: boolean; 
+  message?: string | null;
+  abortOnConflict?: boolean;
+  strategy?: 'ours' | 'theirs' | null;
+} = {}): SafeMergeResult {
+  const { cwd, noFf = false, message = null, abortOnConflict = true, strategy = null } = options;
+  
+  const args = ['merge'];
+  
+  if (noFf) {
+    args.push('--no-ff');
+  }
+  
+  if (strategy) {
+    args.push('-X', strategy);
+  }
+  
+  if (message) {
+    args.push('-m', message);
+  }
+  
+  args.push(branchName);
+  
+  const result = runGitResult(args, { cwd });
+  
+  if (result.success) {
+    return {
+      success: true,
+      conflict: false,
+      conflictingFiles: [],
+      aborted: false,
+    };
+  }
+  
+  // Check for conflicts
+  const output = result.stdout + result.stderr;
+  const isConflict = output.includes('CONFLICT') || output.includes('Automatic merge failed');
+  
+  if (isConflict) {
+    // Get conflicting files
+    const conflictingFiles = getConflictingFiles(cwd);
+    
+    if (abortOnConflict) {
+      // Abort the merge
+      runGitResult(['merge', '--abort'], { cwd });
+      
+      return {
+        success: false,
+        conflict: true,
+        conflictingFiles,
+        error: 'Merge conflict detected and aborted',
+        aborted: true,
+      };
+    }
+    
+    return {
+      success: false,
+      conflict: true,
+      conflictingFiles,
+      error: 'Merge conflict - manual resolution required',
+      aborted: false,
+    };
+  }
+  
+  return {
+    success: false,
+    conflict: false,
+    conflictingFiles: [],
+    error: result.stderr || 'Merge failed',
+    aborted: false,
+  };
+}
+
+/**
+ * Get list of conflicting files
+ */
+export function getConflictingFiles(cwd?: string): string[] {
+  const result = runGitResult(['diff', '--name-only', '--diff-filter=U'], { cwd });
+  if (!result.success) return [];
+  
+  return result.stdout.split('\n').filter(f => f.trim());
+}
+
+/**
+ * Check if merge is in progress
+ */
+export function isMergeInProgress(cwd?: string): boolean {
+  const repoRoot = getRepoRoot(cwd);
+  return fs.existsSync(path.join(repoRoot, '.git', 'MERGE_HEAD'));
+}
+
+/**
+ * Abort ongoing merge
+ */
+export function abortMerge(cwd?: string): boolean {
+  const result = runGitResult(['merge', '--abort'], { cwd });
+  return result.success;
+}
+
+/**
+ * Get HEAD commit hash
+ */
+export function getHead(cwd?: string): string {
+  return runGit(['rev-parse', 'HEAD'], { cwd, silent: true });
+}
+
+/**
+ * Get short HEAD commit hash
+ */
+export function getHeadShort(cwd?: string): string {
+  return runGit(['rev-parse', '--short', 'HEAD'], { cwd, silent: true });
+}
+
+/**
+ * Stash changes with optional message
+ */
+export function stash(message?: string, options: { cwd?: string } = {}): boolean {
+  const args = ['stash', 'push'];
+  if (message) {
+    args.push('-m', message);
+  }
+  
+  const result = runGitResult(args, { cwd: options.cwd });
+  return result.success;
+}
+
+/**
+ * Pop stashed changes
+ */
+export function stashPop(options: { cwd?: string } = {}): boolean {
+  const result = runGitResult(['stash', 'pop'], { cwd: options.cwd });
+  return result.success;
+}
+
+/**
+ * Clean worktree (remove untracked files)
+ */
+export function cleanWorktree(options: { cwd?: string; force?: boolean; directories?: boolean } = {}): void {
+  const args = ['clean'];
+  if (options.force) args.push('-f');
+  if (options.directories) args.push('-d');
+  
+  runGit(args, { cwd: options.cwd });
+}
+
+/**
+ * Reset worktree to specific commit/branch
+ */
+export function reset(target: string, options: { cwd?: string; mode?: 'soft' | 'mixed' | 'hard' } = {}): void {
+  const args = ['reset'];
+  if (options.mode) args.push(`--${options.mode}`);
+  args.push(target);
+  
+  runGit(args, { cwd: options.cwd });
+}
+
+/**
+ * Checkout specific commit or branch
+ */
+export function checkout(target: string, options: { cwd?: string; force?: boolean; createBranch?: boolean } = {}): void {
+  const args = ['checkout'];
+  if (options.force) args.push('-f');
+  if (options.createBranch) args.push('-b');
+  args.push(target);
+  
+  runGit(args, { cwd: options.cwd });
+}
+
+/**
+ * Get commits between two refs
+ */
+export function getCommitsBetween(fromRef: string, toRef: string, options: { cwd?: string } = {}): CommitInfo[] {
+  const format = '%H|%h|%an|%ae|%at|%s';
+  const result = runGitResult(['log', '--format=' + format, `${fromRef}..${toRef}`], { cwd: options.cwd });
+  
+  if (!result.success) return [];
+  
+  return result.stdout.split('\n')
+    .filter(line => line.trim())
+    .map(line => {
+      const parts = line.split('|');
+      return {
+        hash: parts[0] || '',
+        shortHash: parts[1] || '',
+        author: parts[2] || '',
+        authorEmail: parts[3] || '',
+        timestamp: parseInt(parts[4] || '0'),
+        subject: parts[5] || '',
+      };
+    });
+}
+
+/**
+ * Enhanced worktree creation with async lock
+ */
+export async function createWorktreeAsync(
+  worktreePath: string, 
+  branchName: string, 
+  options: { cwd?: string; baseBranch?: string; timeout?: number } = {}
+): Promise<string> {
+  let { cwd, baseBranch, timeout = 30000 } = options;
+  
+  if (!baseBranch) {
+    baseBranch = getCurrentBranch(cwd) || 'refs/heads/main';
+  }
+
+  // Ensure baseBranch is unambiguous
+  const unambiguousBase = (baseBranch.startsWith('refs/') || baseBranch.includes('/')) 
+    ? baseBranch 
+    : `refs/heads/${baseBranch}`;
+
+  const { acquireLock, releaseLock } = await import('./lock');
+  const lockDir = safeJoin(cwd || getRepoRoot(), '_cursorflow', 'locks');
+  if (!fs.existsSync(lockDir)) {
+    fs.mkdirSync(lockDir, { recursive: true });
+  }
+  const lockFile = safeJoin(lockDir, 'worktree.lock');
+  
+  const acquired = await acquireLock(lockFile, { 
+    timeoutMs: timeout,
+    operation: `createWorktree:${branchName}`,
+  });
+  
+  if (!acquired) {
+    throw new Error('Failed to acquire worktree lock after timeout');
+  }
+  
+  try {
+    // Check if branch already exists
+    const branchExistsLocal = runGitResult(['rev-parse', '--verify', branchName], { cwd }).success;
+    
+    if (branchExistsLocal) {
+      runGit(['worktree', 'add', worktreePath, branchName], { cwd });
+    } else {
+      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd });
+    }
+    
+    return worktreePath;
+  } finally {
+    await releaseLock(lockFile);
+  }
+}
+
+/**
+ * Prune orphaned worktrees
+ */
+export function pruneWorktrees(options: { cwd?: string } = {}): void {
+  runGit(['worktree', 'prune'], { cwd: options.cwd });
+}
+
+/**
+ * Get worktree for a specific path
+ */
+export function getWorktreeForPath(targetPath: string, cwd?: string): WorktreeInfo | null {
+  const worktrees = listWorktrees(cwd);
+  return worktrees.find(wt => wt.path === targetPath) || null;
+}
+
+/**
+ * Sync branch with remote (fetch + merge or rebase)
+ */
+export function syncWithRemote(branch: string, options: { 
+  cwd?: string; 
+  strategy?: 'merge' | 'rebase';
+  createIfMissing?: boolean;
+} = {}): { success: boolean; error?: string } {
+  const { cwd, strategy = 'merge', createIfMissing = false } = options;
+  
+  // Fetch the branch
+  const fetchResult = runGitResult(['fetch', 'origin', branch], { cwd });
+  
+  if (!fetchResult.success) {
+    if (createIfMissing && fetchResult.stderr.includes('not found')) {
+      // Branch doesn't exist on remote, nothing to sync
+      return { success: true };
+    }
+    return { success: false, error: fetchResult.stderr };
+  }
+  
+  // Merge or rebase
+  if (strategy === 'rebase') {
+    const result = runGitResult(['rebase', `origin/${branch}`], { cwd });
+    if (!result.success) {
+      // Abort rebase on failure
+      runGitResult(['rebase', '--abort'], { cwd });
+      return { success: false, error: result.stderr };
+    }
+  } else {
+    const mergeResult = safeMerge(`origin/${branch}`, { 
+      cwd, 
+      message: `chore: sync with origin/${branch}`,
+      abortOnConflict: true,
+    });
+    
+    if (!mergeResult.success) {
+      return { success: false, error: mergeResult.error };
+    }
+  }
+  
+  return { success: true };
 }
