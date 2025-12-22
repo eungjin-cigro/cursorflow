@@ -10,7 +10,6 @@
 import * as logger from '../utils/logger';
 import { TaskService, TaskDirInfo, ValidationStatus } from '../utils/task-service';
 import { findProjectRoot, loadConfig, getTasksDir } from '../utils/config';
-import { DoctorReport } from '../utils/doctor';
 
 const COLORS = logger.COLORS;
 
@@ -62,19 +61,9 @@ function formatDate(date: Date): string {
 
 function getStatusLabel(info: TaskDirInfo): string {
   const status = info.validationStatus;
-  const icon = TaskService.getStatusIcon(status);
+  const icon = status === 'valid' ? '✅' : status === 'warnings' ? '⚠️' : status === 'errors' ? '❌' : '❓';
   
   if (status === 'valid') return `${icon} Valid`;
-  
-  const report = info.validationReport;
-  if (report) {
-    const errors = report.issues.filter(i => i.severity === 'error').length;
-    const warnings = report.issues.filter(i => i.severity === 'warn').length;
-    
-    if (errors > 0) return `${icon} ${errors} error${errors > 1 ? 's' : ''}`;
-    if (warnings > 0) return `${icon} ${warnings} warning${warnings > 1 ? 's' : ''}`;
-  }
-  
   if (status === 'warnings') return `${icon} Warnings`;
   if (status === 'errors') return `${icon} Errors`;
   
@@ -124,15 +113,6 @@ function printTaskDetail(info: TaskDirInfo): void {
     }
   }
 
-  if (info.validationReport && info.validationReport.issues.length > 0) {
-    console.log(`\n${COLORS.bold}Validation Issues:${COLORS.reset}`);
-    for (const issue of info.validationReport.issues) {
-      const icon = issue.severity === 'error' ? '❌' : '⚠️';
-      const color = issue.severity === 'error' ? COLORS.red : COLORS.yellow;
-      console.log(`${color}  ${icon} ${issue.title}${COLORS.reset}`);
-      console.log(`     ${issue.message}`);
-    }
-  }
 }
 
 async function tasks(args: string[]): Promise<void> {
