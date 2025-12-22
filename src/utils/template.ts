@@ -68,14 +68,16 @@ export async function resolveTemplate(templatePath: string): Promise<any> {
   }
 
   // Fallback for built-in templates relative to the module (for installed package)
-  const modulePath = path.resolve(__dirname, '../../templates', templatePath.endsWith('.json') ? templatePath : `${templatePath}.json`);
+  const templatesDir = path.resolve(__dirname, '../../templates');
+  const templateFileName = templatePath.endsWith('.json') ? templatePath : `${templatePath}.json`;
+  const modulePath = safeJoin(templatesDir, templateFileName);
   if (fs.existsSync(modulePath)) {
     logger.info(`Using module template: ${templatePath}`);
     return JSON.parse(fs.readFileSync(modulePath, 'utf8'));
   }
 
   // 3. Local file path
-  const localPath = path.resolve(process.cwd(), templatePath);
+  const localPath = safeJoin(process.cwd(), templatePath);
   if (fs.existsSync(localPath)) {
     logger.info(`Using local template: ${templatePath}`);
     try {

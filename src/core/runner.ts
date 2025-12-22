@@ -1105,7 +1105,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         
         if (entry.isDirectory()) {
           stats.dirs++;
-          const sub = getFileSummary(path.join(dir, entry.name));
+          const sub = getFileSummary(safeJoin(dir, entry.name));
           stats.files += sub.files;
           stats.dirs += sub.dirs;
         } else {

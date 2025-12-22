@@ -13,6 +13,7 @@ import {
   stripAnsi,
   JsonLogEntry 
 } from '../utils/enhanced-logger';
+import { formatPotentialJsonMessage } from '../utils/log-formatter';
 
 interface LogsOptions {
   runDir?: string;
@@ -233,7 +234,8 @@ function displayJsonLogs(
     for (const entry of entries) {
       const levelColor = getLevelColor(entry.level);
       const ts = new Date(entry.timestamp).toLocaleTimeString();
-      console.log(`${levelColor}[${ts}] [${entry.level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${entry.message}`);
+      const formattedMsg = formatPotentialJsonMessage(entry.message);
+      console.log(`${levelColor}[${ts}] [${entry.level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${formattedMsg}`);
     }
   }
 }
@@ -391,7 +393,8 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
       continue;
     }
     
-    console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${entry.message}`);
+    const formattedMsg = formatPotentialJsonMessage(entry.message);
+    console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${formattedMsg}`);
   }
   
   console.log(`\n${logger.COLORS.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${logger.COLORS.reset}`);
@@ -502,7 +505,8 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
         continue;
       }
       
-      console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${entry.laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${entry.message}`);
+      const formattedMsg = formatPotentialJsonMessage(entry.message);
+      console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${entry.laneColor}[${lanePad}]${logger.COLORS.reset} ${levelColor}[${levelPad}]${logger.COLORS.reset} ${formattedMsg}`);
     }
   }, 100);
   

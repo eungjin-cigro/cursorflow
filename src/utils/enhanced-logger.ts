@@ -725,8 +725,10 @@ export class EnhancedLogManager {
             let metadata = { ...json };
 
             // Extract cleaner text for significant AI message types
-            if (json.type === 'thinking' && json.text) {
-              displayMsg = json.text;
+            if ((json.type === 'thinking' || json.type === 'thought') && (json.text || json.thought)) {
+              displayMsg = json.text || json.thought;
+              // Clean up any double newlines at the end of deltas
+              displayMsg = displayMsg.replace(/\n+$/, '\n');
             } else if (json.type === 'assistant' && json.message?.content) {
               displayMsg = json.message.content
                 .filter((c: any) => c.type === 'text')
