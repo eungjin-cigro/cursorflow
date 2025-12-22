@@ -449,14 +449,14 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       const laneDir = safeJoin(runDir, 'lanes', lane);
       const jsonLogPath = safeJoin(laneDir, 'terminal.jsonl');
       
+      let fd: number | null = null;
       try {
-        // Use statSync directly to avoid TOCTOU race condition
-        const stats = fs.statSync(jsonLogPath);
+        // Use fstat on open fd to avoid TOCTOU race condition
+        fd = fs.openSync(jsonLogPath, 'r');
+        const stats = fs.fstatSync(fd);
         if (stats.size > lastPositions[lane]!) {
-          const fd = fs.openSync(jsonLogPath, 'r');
           const buffer = Buffer.alloc(stats.size - lastPositions[lane]!);
           fs.readSync(fd, buffer, 0, buffer.length, lastPositions[lane]!);
-          fs.closeSync(fd);
           
           const content = buffer.toString();
           const lines = content.split('\n').filter(l => l.trim());
@@ -478,6 +478,10 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
         }
       } catch {
         // Ignore errors
+      } finally {
+        if (fd !== null) {
+          try { fs.closeSync(fd); } catch { /* ignore */ }
+        }
       }
     }
     
@@ -589,7 +593,12 @@ function exportMergedToMarkdown(entries: MergedLogEntry[], runDir: string): stri
   for (const entry of entries) {
     const ts = new Date(entry.timestamp).toLocaleTimeString();
     const level = entry.level || 'info';
-    const message = (entry.message || '').replace(/\|/g, '\\|').substring(0, 80);
+    // Escape markdown table special characters: pipe, backslash, and newlines
+    const message = (entry.message || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\|/g, '\\|')
+      .replace(/\n/g, ' ')
+      .substring(0, 80);
     md += `| ${ts} | ${entry.laneName} | ${level} | ${message} |\n`;
   }
   
@@ -706,15 +715,16 @@ function followLogs(laneDir: string, options: LogsOptions): void {
   console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
   
   const checkInterval = setInterval(() => {
+    if (!fs.existsSync(logFile)) return;
+    
+    // Use fstat on open fd to avoid TOCTOU race condition
+    let fd: number | null = null;
     try {
-      if (!fs.existsSync(logFile)) return;
-      
-      const stats = fs.statSync(logFile);
+      fd = fs.openSync(logFile, 'r');
+      const stats = fs.fstatSync(fd);
       if (stats.size > lastSize) {
-        const fd = fs.openSync(logFile, 'r');
         const buffer = Buffer.alloc(stats.size - lastSize);
         fs.readSync(fd, buffer, 0, buffer.length, lastSize);
-        fs.closeSync(fd);
         
         let content = buffer.toString();
         
@@ -736,8 +746,12 @@ function followLogs(laneDir: string, options: LogsOptions): void {
         
         lastSize = stats.size;
       }
-    } catch (e) {
+    } catch {
       // Ignore errors (file might be rotating)
+    } finally {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch { /* ignore */ }
+      }
     }
   }, 100);
   

@@ -861,7 +861,8 @@ class InteractiveMonitor {
     const formattedActions = actions.map(a => {
       const parts = a.split('] ');
       if (parts.length === 2) {
-        return `${UI.COLORS.yellow}[${parts[0].replace('[', '')}]${UI.COLORS.reset} ${parts[1]}`;
+        // Use regex with global flag to replace all occurrences
+        return `${UI.COLORS.yellow}[${parts[0]!.replace(/\[/g, '')}]${UI.COLORS.reset} ${parts[1]}`;
       }
       return a;
     });
@@ -1629,18 +1630,14 @@ class InteractiveMonitor {
       const isSelected = i === this.selectedFlowIndex;
       const isCurrent = flow.runDir === this.runDir;
       
-      // Status
+      // Status icon based on flow state
       let statusIcon = '⚪';
-      let statusColor = UI.COLORS.gray;
       if (flow.isAlive) {
         statusIcon = '🟢';
-        statusColor = UI.COLORS.green;
       } else if (flow.summary.completed === flow.summary.total && flow.summary.total > 0) {
         statusIcon = '✅';
-        statusColor = UI.COLORS.green;
       } else if (flow.summary.failed > 0 || flow.summary.dead > 0) {
         statusIcon = '🔴';
-        statusColor = UI.COLORS.red;
       }
       
       // Lanes summary

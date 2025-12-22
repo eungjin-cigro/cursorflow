@@ -56,7 +56,6 @@ export function formatMessageForConsole(
   
   let typePrefix = '';
   let content = msg.content;
-  let useGray = GRAY_TYPES.has(msg.type);
   
   // Determine if we should use box format
   // Box format only for: user, assistant, system, result (and only when not compact)
@@ -83,9 +82,6 @@ export function formatMessageForConsole(
   if (msg.type === 'thinking') {
     content = content.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
   }
-  
-  // Color wrapper for gray types
-  const grayWrap = (s: string) => useGray ? `${COLORS.gray}${s}${COLORS.reset}` : s;
   
   switch (msg.type) {
     case 'user':

@@ -25,14 +25,13 @@ import {
   EnhancedLogManager, 
   createLogManager, 
   DEFAULT_LOG_CONFIG,
-  ParsedMessage,
-  stripAnsi
+  ParsedMessage
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
 import { analyzeFailure, analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig } from './failure-policy';
 import { detectCyclicDependencies, validateDependencies, printDependencyGraph, DependencyInfo } from '../utils/dependency';
 import { preflightCheck, printPreflightReport, autoRepair } from '../utils/health';
-import { getLatestCheckpoint, restoreFromCheckpoint } from '../utils/checkpoint';
+import { getLatestCheckpoint } from '../utils/checkpoint';
 import { cleanStaleLocks, getLockDir } from '../utils/lock';
 
 /** Heartbeat interval: 30 seconds */

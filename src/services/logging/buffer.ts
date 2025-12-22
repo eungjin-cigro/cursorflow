@@ -111,16 +111,17 @@ export class LogBufferService extends EventEmitter {
       const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
       if (!fs.existsSync(jsonlPath)) continue;
 
+      let fd: number | null = null;
       try {
-        const stat = fs.statSync(jsonlPath);
+        // Read file content atomically to avoid TOCTOU race condition
         const lastPos = this.filePositions.get(jsonlPath) || 0;
-
+        fd = fs.openSync(jsonlPath, 'r');
+        const stat = fs.fstatSync(fd); // Use fstat on open fd to avoid race
+        
         if (stat.size > lastPos) {
-          const fd = fs.openSync(jsonlPath, 'r');
           const buffer = Buffer.alloc(stat.size - lastPos);
           fs.readSync(fd, buffer, 0, buffer.length, lastPos);
-          fs.closeSync(fd);
-
+          
           const newContent = buffer.toString('utf-8');
           const lines = newContent.split('\n').filter(line => line.trim());
 
@@ -135,6 +136,11 @@ export class LogBufferService extends EventEmitter {
           this.filePositions.set(jsonlPath, stat.size);
         }
       } catch { /* File in use, skip */ }
+      finally {
+        if (fd !== null) {
+          try { fs.closeSync(fd); } catch { /* ignore */ }
+        }
+      }
     }
 
     if (newEntries.length > 0) {
