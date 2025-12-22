@@ -22,6 +22,7 @@ const COMMANDS: Record<string, CommandFn> = {
   models: require('./models'),
   logs: require('./logs'),
   runs: require('./runs'),
+  stop: require('./stop'),
   setup: require('./setup-commands').main,
   'setup-commands': require('./setup-commands').main,
 };
@@ -40,6 +41,7 @@ function printHelp(): void {
   \x1b[33mrun\x1b[0m <tasks-dir> [options]   Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options] \x1b[36mInteractive\x1b[0m lane dashboard
   \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs/tasks
+  \x1b[33mstop\x1b[0m [run-id] [options]     Stop running workflows
   \x1b[33mresume\x1b[0m [lane] [options]     Resume lane(s) - use --all for batch resume
   \x1b[33mdoctor\x1b[0m [options]            Check environment and preflight
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
