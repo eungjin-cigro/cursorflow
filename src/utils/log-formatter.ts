@@ -2,7 +2,7 @@
  * Utility for formatting log messages for console display
  */
 
-import * as logger from './logger';
+import { COLORS } from './log-constants';
 import { ParsedMessage, stripAnsi } from './enhanced-logger';
 
 /**
@@ -14,27 +14,51 @@ export function formatMessageForConsole(
     includeTimestamp?: boolean; 
     laneLabel?: string;
     compact?: boolean;
+    context?: string;
   } = {}
 ): string {
-  const { includeTimestamp = true, laneLabel = '', compact = false } = options;
+  const { includeTimestamp = true, laneLabel = '', compact = false, context = '' } = options;
   const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
-  const tsPrefix = ts ? `${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ` : '';
-  const labelPrefix = laneLabel ? `${logger.COLORS.magenta}${laneLabel.padEnd(12)}${logger.COLORS.reset} ` : '';
+  const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
+  
+  // Handle context (e.g. from logger.info)
+  const effectiveLaneLabel = laneLabel || (context ? `[${context}]` : '');
+  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel.padEnd(14)}${COLORS.reset} ` : ' '.repeat(15);
   
   let typePrefix = '';
   let content = msg.content;
+
+  // Clean up wrapped prompts for user messages to hide internal instructions
+  if (msg.type === 'user') {
+    const contextMarker = '### 🛠 Environment & Context';
+    const instructionsMarker = '### 📝 Final Instructions';
+    
+    if (content.includes(contextMarker)) {
+      // Find the end of the prefix (---)
+      const parts = content.split('---\n');
+      if (parts.length >= 3) {
+        // If it follows our wrapPrompt pattern: [PREFIX] --- [ORIGINAL] --- [SUFFIX]
+        content = parts[1]!.trim();
+      } else {
+        // Fallback: just strip the headers if present
+        content = content.split(contextMarker).pop() || content;
+        content = content.split(instructionsMarker)[0] || content;
+        content = content.replace(/^.*---\n/s, '').trim();
+      }
+    }
+  }
   
   switch (msg.type) {
     case 'user':
-      typePrefix = `${logger.COLORS.cyan}🧑 USER${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.cyan}🧑 USER    ${COLORS.reset}`;
       if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
       break;
     case 'assistant':
-      typePrefix = `${logger.COLORS.green}🤖 ASST${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.green}🤖 ASST    ${COLORS.reset}`;
       if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
       break;
     case 'tool':
-      typePrefix = `${logger.COLORS.yellow}🔧 TOOL${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.yellow}🔧 TOOL    ${COLORS.reset}`;
       const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
       if (toolMatch) {
         const [, name, args] = toolMatch;
@@ -55,26 +79,36 @@ export function formatMessageForConsole(
               argStr = String(parsedArgs[keys[0]]).substring(0, 50);
             }
           }
-          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}(${argStr})`;
+          content = `${COLORS.bold}${name}${COLORS.reset}(${argStr})`;
         } catch {
-          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}: ${args}`;
+          content = `${COLORS.bold}${name}${COLORS.reset}: ${args}`;
         }
       }
       break;
     case 'tool_result':
-      typePrefix = `${logger.COLORS.gray}📄 RESL${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.gray}📄 RESL    ${COLORS.reset}`;
       const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
       content = resMatch ? `${resMatch[1]} OK` : 'result';
       break;
     case 'result':
-      typePrefix = `${logger.COLORS.green}✅ DONE${logger.COLORS.reset}`;
+    case 'success':
+      typePrefix = `${COLORS.green}✅ SUCCESS ${COLORS.reset}`;
       break;
     case 'system':
-      typePrefix = `${logger.COLORS.gray}⚙️  SYS${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.gray}⚙️  SYS     ${COLORS.reset}`;
       break;
     case 'thinking':
-      typePrefix = `${logger.COLORS.gray}🤔 THNK${logger.COLORS.reset}`;
+      typePrefix = `${COLORS.gray}🤔 THNK    ${COLORS.reset}`;
       if (compact) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
+      break;
+    case 'info':
+      typePrefix = `${COLORS.cyan}ℹ️  INFO    ${COLORS.reset}`;
+      break;
+    case 'warn':
+      typePrefix = `${COLORS.yellow}⚠️  WARN    ${COLORS.reset}`;
+      break;
+    case 'error':
+      typePrefix = `${COLORS.red}❌ ERROR   ${COLORS.reset}`;
       break;
   }
   
@@ -159,4 +193,3 @@ export function formatPotentialJsonMessage(message: string): string {
     return message;
   }
 }
-

@@ -14,11 +14,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Transform, TransformCallback } from 'stream';
-import { EnhancedLogConfig } from './types';
+import * as logger from './logger';
+import { EnhancedLogConfig, ParsedMessage, JsonLogEntry, LogSession } from '../types';
+export { EnhancedLogConfig, ParsedMessage, JsonLogEntry, LogSession };
 import { safeJoin } from './path';
-
-// Re-export for backwards compatibility
-export { EnhancedLogConfig } from './types';
 
 export const DEFAULT_LOG_CONFIG: EnhancedLogConfig = {
   enabled: true,
@@ -27,6 +26,8 @@ export const DEFAULT_LOG_CONFIG: EnhancedLogConfig = {
   maxFileSize: 50 * 1024 * 1024, // 50MB
   maxFiles: 5,
   keepRawLogs: true,
+  keepAbsoluteRawLogs: false,
+  raw: false,
   writeJsonLog: true,
   timestampFormat: 'iso',
 };
@@ -208,14 +209,6 @@ export class StreamingMessageParser {
   }
 }
 
-export interface ParsedMessage {
-  type: 'system' | 'user' | 'assistant' | 'tool' | 'tool_result' | 'result' | 'thinking';
-  role: string;
-  content: string;
-  timestamp: number;
-  metadata?: Record<string, any>;
-}
-
 /**
  * ANSI escape sequence regex pattern
  * Matches:
@@ -273,32 +266,6 @@ export function formatTimestamp(format: 'iso' | 'relative' | 'short', startTime?
     default:
       return new Date(now).toISOString();
   }
-}
-
-/**
- * JSON log entry structure
- */
-export interface JsonLogEntry {
-  timestamp: string;
-  level: 'stdout' | 'stderr' | 'info' | 'error' | 'debug' | 'session';
-  source?: string;
-  task?: string;
-  lane?: string;
-  message: string;
-  raw?: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * Session context for logging
- */
-export interface LogSession {
-  id: string;
-  laneName: string;
-  taskName?: string;
-  model?: string;
-  startTime: number;
-  metadata?: Record<string, any>;
 }
 
 /**
@@ -388,16 +355,19 @@ export class EnhancedLogManager {
   
   private cleanLogPath: string;
   private rawLogPath: string;
+  private absoluteRawLogPath: string;
   private jsonLogPath: string;
   private readableLogPath: string;
   
   private cleanLogFd: number | null = null;
   private rawLogFd: number | null = null;
+  private absoluteRawLogFd: number | null = null;
   private jsonLogFd: number | null = null;
   private readableLogFd: number | null = null;
   
   private cleanLogSize: number = 0;
   private rawLogSize: number = 0;
+  private absoluteRawLogSize: number = 0;
   
   private cleanTransform: CleanLogTransform | null = null;
   private streamingParser: StreamingMessageParser | null = null;
@@ -406,6 +376,12 @@ export class EnhancedLogManager {
 
   constructor(logDir: string, session: LogSession, config: Partial<EnhancedLogConfig> = {}, onParsedMessage?: (msg: ParsedMessage) => void) {
     this.config = { ...DEFAULT_LOG_CONFIG, ...config };
+    
+    // Support 'raw' as alias for 'keepAbsoluteRawLogs'
+    if (this.config.raw) {
+      this.config.keepAbsoluteRawLogs = true;
+    }
+    
     this.session = session;
     this.logDir = logDir;
     this.onParsedMessage = onParsedMessage;
@@ -416,8 +392,13 @@ export class EnhancedLogManager {
     // Set up log file paths
     this.cleanLogPath = safeJoin(logDir, 'terminal.log');
     this.rawLogPath = safeJoin(logDir, 'terminal-raw.log');
+    this.absoluteRawLogPath = safeJoin(logDir, 'terminal-absolute-raw.log');
     this.jsonLogPath = safeJoin(logDir, 'terminal.jsonl');
     this.readableLogPath = safeJoin(logDir, 'terminal-readable.log');
+
+    if (this.config.raw) {
+      logger.info(`[${session.laneName}] 📄 Raw data capture enabled: ${this.absoluteRawLogPath}`);
+    }
     
     // Initialize log files
     this.initLogFiles();
@@ -432,12 +413,19 @@ export class EnhancedLogManager {
     if (this.config.keepRawLogs) {
       this.rotateIfNeeded(this.rawLogPath, 'raw');
     }
+    if (this.config.keepAbsoluteRawLogs) {
+      this.rotateIfNeeded(this.absoluteRawLogPath, 'raw');
+    }
     
     // Open file descriptors
     this.cleanLogFd = fs.openSync(this.cleanLogPath, 'a');
     
     if (this.config.keepRawLogs) {
       this.rawLogFd = fs.openSync(this.rawLogPath, 'a');
+    }
+
+    if (this.config.keepAbsoluteRawLogs) {
+      this.absoluteRawLogFd = fs.openSync(this.absoluteRawLogPath, 'a');
     }
     
     if (this.config.writeJsonLog) {
@@ -453,9 +441,13 @@ export class EnhancedLogManager {
       if (this.config.keepRawLogs) {
         this.rawLogSize = fs.statSync(this.rawLogPath).size;
       }
+      if (this.config.keepAbsoluteRawLogs) {
+        this.absoluteRawLogSize = fs.statSync(this.absoluteRawLogPath).size;
+      }
     } catch {
       this.cleanLogSize = 0;
       this.rawLogSize = 0;
+      this.absoluteRawLogSize = 0;
     }
     
     // Write session header
@@ -677,6 +669,25 @@ export class EnhancedLogManager {
   }
 
   /**
+   * Write to absolute raw log with size tracking
+   */
+  private writeToAbsoluteRawLog(data: string | Buffer): void {
+    if (this.absoluteRawLogFd === null) return;
+    
+    const buffer = typeof data === 'string' ? Buffer.from(data) : data;
+    fs.writeSync(this.absoluteRawLogFd, buffer);
+    this.absoluteRawLogSize += buffer.length;
+    
+    // Check if rotation needed
+    if (this.absoluteRawLogSize >= this.config.maxFileSize) {
+      fs.closeSync(this.absoluteRawLogFd);
+      this.rotateLog(this.absoluteRawLogPath);
+      this.absoluteRawLogFd = fs.openSync(this.absoluteRawLogPath, 'a');
+      this.absoluteRawLogSize = 0;
+    }
+  }
+
+  /**
    * Write a JSON log entry
    */
   private writeJsonEntry(entry: JsonLogEntry): void {
@@ -691,6 +702,11 @@ export class EnhancedLogManager {
    */
   public writeStdout(data: Buffer | string): void {
     const text = data.toString();
+    
+    // Write absolute raw log
+    if (this.config.keepAbsoluteRawLogs) {
+      this.writeToAbsoluteRawLog(data);
+    }
     
     // Write raw log
     if (this.config.keepRawLogs) {
@@ -711,7 +727,7 @@ export class EnhancedLogManager {
       const cleanLine = stripAnsi(line).trim();
       if (!cleanLine) continue;
 
-      // Handle streaming JSON messages (for boxes, etc. in readable log)
+      // Handle streaming JSON messages
       if (cleanLine.startsWith('{')) {
         if (this.streamingParser) {
           this.streamingParser.parseLine(cleanLine);
@@ -763,6 +779,25 @@ export class EnhancedLogManager {
             // Not valid JSON or error, fall through to regular logging
           }
         }
+      } else {
+        // Parse standard text logs into ParsedMessage
+        // Format: [HH:MM:SS] [LANE] ℹ️  INFO    message
+        const textLogRegex = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(.*?)\]\s+(.*?)\s+(INFO|WARN|ERROR|SUCCESS|DONE|PROGRESS)\s+(.*)/;
+        const match = cleanLine.match(textLogRegex);
+        
+        if (match && this.onParsedMessage) {
+          const [, time, lane, emoji, level, content] = match;
+          // Convert HH:MM:SS to a timestamp for today
+          const [h, m, s] = time!.split(':').map(Number);
+          const timestamp = new Date().setHours(h!, m!, s!, 0);
+          
+          this.onParsedMessage({
+            type: level!.toLowerCase().replace('done', 'result').replace('success', 'result') as any,
+            role: 'system',
+            content: `${emoji} ${content}`,
+            timestamp,
+          });
+        }
       }
 
       // Also include significant info/status lines in readable log (compact)
@@ -812,6 +847,11 @@ export class EnhancedLogManager {
   public writeStderr(data: Buffer | string): void {
     const text = data.toString();
     
+    // Write absolute raw log
+    if (this.config.keepAbsoluteRawLogs) {
+      this.writeToAbsoluteRawLog(data);
+    }
+    
     // Write raw log
     if (this.config.keepRawLogs) {
       this.writeToRawLog(text);
@@ -856,13 +896,17 @@ export class EnhancedLogManager {
    */
   public log(level: 'info' | 'error' | 'debug', message: string, metadata?: Record<string, any>): void {
     const ts = formatTimestamp(this.config.timestampFormat, this.session.startTime);
-    const prefix = level.toUpperCase().padEnd(5);
+    const prefix = level.toUpperCase().padEnd(8);
     
     const line = `[${ts}] [${prefix}] ${message}\n`;
     this.writeToCleanLog(line);
     
     if (this.config.keepRawLogs) {
       this.writeToRawLog(line);
+    }
+    
+    if (this.config.keepAbsoluteRawLogs) {
+      this.writeToAbsoluteRawLog(line);
     }
     
     // Write to readable log (compact)
@@ -896,6 +940,9 @@ export class EnhancedLogManager {
     this.writeToCleanLog(line);
     if (this.config.keepRawLogs) {
       this.writeToRawLog(line);
+    }
+    if (this.config.keepAbsoluteRawLogs) {
+      this.writeToAbsoluteRawLog(line);
     }
 
     // Write to readable log (compact)
@@ -954,10 +1001,11 @@ export class EnhancedLogManager {
   /**
    * Get paths to all log files
    */
-  public getLogPaths(): { clean: string; raw?: string; json?: string; readable: string } {
+  public getLogPaths(): { clean: string; raw?: string; absoluteRaw?: string; json?: string; readable: string } {
     return {
       clean: this.cleanLogPath,
       raw: this.config.keepRawLogs ? this.rawLogPath : undefined,
+      absoluteRaw: this.config.keepAbsoluteRawLogs ? this.absoluteRawLogPath : undefined,
       json: this.config.writeJsonLog ? this.jsonLogPath : undefined,
       readable: this.readableLogPath,
     };
@@ -1009,6 +1057,11 @@ export class EnhancedLogManager {
       fs.writeSync(this.rawLogFd, endMarker);
       fs.closeSync(this.rawLogFd);
       this.rawLogFd = null;
+    }
+    
+    if (this.absoluteRawLogFd !== null) {
+      fs.closeSync(this.absoluteRawLogFd);
+      this.absoluteRawLogFd = null;
     }
     
     if (this.jsonLogFd !== null) {
@@ -1231,4 +1284,3 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
-

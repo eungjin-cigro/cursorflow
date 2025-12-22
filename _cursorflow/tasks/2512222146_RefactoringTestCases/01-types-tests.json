@@ -1,0 +1,63 @@
+{
+  "repository": "https://github.com/eungjin-cigro/cursorflow",
+  "baseBranch": "main",
+  "branchPrefix": "refactor/types-tests-",
+  "executor": "cursor-agent",
+  "autoCreatePr": false,
+  "allowDependencyChange": false,
+  "lockfileReadOnly": true,
+  "pollInterval": 60,
+
+  "laneNumber": 1,
+  "devPort": 3001,
+
+  "enableReview": true,
+  "reviewModel": "gemini-3-flash",
+  "maxReviewIterations": 2,
+
+  "tasks": [
+    {
+      "name": "extract-types-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Code snippets extracted from phase-1-types.md",
+        "Extracted files saved to src/types/ directory structure",
+        "No manual code writing - only copy from documentation"
+      ],
+      "prompt": "## Task: Extract Types Code from Documentation\n\n### Goal\nExtract all TypeScript code blocks from the refactoring documentation and create the actual files.\n\n### Instructions\n1. Read the documentation file:\n   ```bash\n   cat docs/refactoring/phase-1-types.md\n   ```\n\n2. Create the types directory:\n   ```bash\n   mkdir -p src/types\n   ```\n\n3. Extract each code block using sed. For example, to extract the config.ts content:\n   ```bash\n   sed -n '/```typescript/,/```/p' docs/refactoring/phase-1-types.md | grep -A 1000 'src\\/types\\/config.ts' | sed -n '2,/```/p' | head -n -1\n   ```\n\n4. For each file mentioned in the documentation (config.ts, lane.ts, task.ts, events.ts, logging.ts, agent.ts, review.ts, run.ts, index.ts), extract the code block and save it.\n\n5. Use the following command pattern to create each file:\n   ```bash\n   # Example for extracting a specific code section\n   awk '/\\/\\/ src\\/types\\/config.ts/,/^```$/' docs/refactoring/phase-1-types.md | tail -n +2 | head -n -1 > src/types/config.ts\n   ```\n\n6. After extraction, verify the files exist:\n   ```bash\n   ls -la src/types/\n   ```\n\n### Important\n- DO NOT write code manually\n- ONLY use terminal commands to extract code from the documentation\n- If a code block cannot be extracted cleanly, report which section needs manual review\n\n### Output\nList all created files and their line counts."
+    },
+    {
+      "name": "review-extracted-types",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "All extracted files reviewed for completeness",
+        "Import statements verified",
+        "Type definitions are syntactically correct",
+        "Missing pieces identified and documented"
+      ],
+      "prompt": "## Task: Review Extracted Types\n\n### Goal\nReview all extracted type files from the previous task and ensure they are complete and correct.\n\n### Instructions\n1. List all extracted files:\n   ```bash\n   find src/types -name '*.ts' -exec wc -l {} \\;\n   ```\n\n2. For each file, check TypeScript syntax:\n   ```bash\n   npx tsc --noEmit src/types/*.ts 2>&1 | head -50\n   ```\n\n3. Compare against the documentation to identify any missing pieces:\n   ```bash\n   # Count code blocks in documentation\n   grep -c '```typescript' docs/refactoring/phase-1-types.md\n   \n   # Count created files\n   ls src/types/*.ts | wc -l\n   ```\n\n4. Check for import consistency:\n   ```bash\n   grep -h '^import' src/types/*.ts | sort | uniq\n   ```\n\n5. Verify index.ts exports all modules:\n   ```bash\n   cat src/types/index.ts\n   ```\n\n### Output\nCreate a review report listing:\n- Files that are complete\n- Files that need fixes\n- Specific issues found\n- Recommended fixes"
+    },
+    {
+      "name": "write-types-tests",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Test file created at src/types/__tests__/types.test.ts",
+        "Tests cover type exports from index.ts",
+        "Tests verify type structure using type guards",
+        "At least 10 test cases written"
+      ],
+      "prompt": "## Task: Write Test Cases for Types Module\n\n### Goal\nWrite comprehensive test cases for the types module based on the extracted code.\n\n### Instructions\n1. Create test directory:\n   ```bash\n   mkdir -p src/types/__tests__\n   ```\n\n2. Read existing types to understand structure:\n   ```bash\n   cat src/types/index.ts\n   ```\n\n3. Create test file with the following test categories:\n\n   a) **Export Tests**: Verify all types are exported from index.ts\n   b) **Type Guard Tests**: Create runtime type guards and test them\n   c) **Interface Tests**: Test that objects conform to interfaces\n   d) **Enum Tests**: Test enum values and reverse mapping\n\n4. Test file template (save to src/types/__tests__/types.test.ts):\n   ```typescript\n   import * as Types from '../index';\n   \n   describe('Types Module', () => {\n     describe('Exports', () => {\n       it('should export CursorFlowConfig type', () => {\n         // Type-only test - compile time check\n         const config: Types.CursorFlowConfig = {} as any;\n         expect(true).toBe(true);\n       });\n       \n       // Add more export tests...\n     });\n     \n     describe('Type Guards', () => {\n       // Add type guard tests\n     });\n     \n     describe('Interfaces', () => {\n       // Add interface conformance tests\n     });\n   });\n   ```\n\n5. Run tests to verify:\n   ```bash\n   npm test -- --testPathPattern=types --verbose\n   ```\n\n### Output\n- Test file path\n- Number of test cases\n- Test run results"
+    },
+    {
+      "name": "verify-types-tests",
+      "model": "opus-4.5",
+      "acceptanceCriteria": [
+        "All tests pass",
+        "Test coverage reported",
+        "No TypeScript errors in test files"
+      ],
+      "prompt": "## Task: Verify Types Tests\n\n### Goal\nRun and verify all types tests, ensuring they pass and provide adequate coverage.\n\n### Instructions\n1. Run TypeScript compilation check:\n   ```bash\n   npx tsc --noEmit src/types/__tests__/*.ts\n   ```\n\n2. Run tests with coverage:\n   ```bash\n   npm test -- --testPathPattern=types --coverage --coverageReporters=text\n   ```\n\n3. Check for any failing tests:\n   ```bash\n   npm test -- --testPathPattern=types 2>&1 | grep -E '(PASS|FAIL|✓|✕)'\n   ```\n\n4. If tests fail, analyze the error:\n   ```bash\n   npm test -- --testPathPattern=types --verbose 2>&1 | tail -100\n   ```\n\n5. Generate test summary:\n   ```bash\n   npm test -- --testPathPattern=types --json 2>/dev/null | jq '.numPassedTests, .numFailedTests'\n   ```\n\n### Output\n- Total test count\n- Pass/fail status\n- Coverage percentage\n- Any issues requiring attention"
+    }
+  ]
+}
+

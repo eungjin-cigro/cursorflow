@@ -1,0 +1,86 @@
+{
+  "repository": "https://github.com/eungjin-cigro/cursorflow",
+  "baseBranch": "main",
+  "branchPrefix": "refactor/cli-ui-tests-",
+  "executor": "cursor-agent",
+  "autoCreatePr": false,
+  "allowDependencyChange": false,
+  "lockfileReadOnly": true,
+  "pollInterval": 60,
+
+  "laneNumber": 5,
+  "devPort": 3005,
+
+  "enableReview": true,
+  "reviewModel": "gemini-3-flash",
+  "maxReviewIterations": 2,
+
+  "dependsOn": ["04-core-tests"],
+
+  "tasks": [
+    {
+      "name": "extract-cli-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Code extracted from phase-7-cli.md",
+        "Files created in src/cli/commands/ and src/cli/formatters/",
+        "Directory structure matches documentation"
+      ],
+      "prompt": "## Task: Extract CLI Code from Documentation\n\n### Goal\nExtract CLI module code from phase-7-cli.md documentation.\n\n### Instructions\n1. Read the documentation:\n   ```bash\n   cat docs/refactoring/phase-7-cli.md\n   ```\n\n2. Create directory structure:\n   ```bash\n   mkdir -p src/cli/commands\n   mkdir -p src/cli/formatters\n   ```\n\n3. The documentation defines these files:\n   - commands/run.ts\n   - commands/monitor.ts\n   - commands/resume.ts\n   - formatters/status.ts\n   - formatters/table.ts\n\n4. Find code blocks:\n   ```bash\n   grep -n '// src/cli/' docs/refactoring/phase-7-cli.md\n   ```\n\n5. Extract each file:\n   ```bash\n   # Example extraction\n   awk '/\\/\\/ src\\/cli\\/commands\\/run.ts/,/^```$/' docs/refactoring/phase-7-cli.md | sed '1d;$d' > src/cli/commands/run.ts\n   \n   # Continue for other files...\n   ```\n\n6. Verify:\n   ```bash\n   ls -laR src/cli/commands/ src/cli/formatters/\n   wc -l src/cli/commands/*.ts src/cli/formatters/*.ts\n   ```\n\n### Output\nList of created files with line counts."
+    },
+    {
+      "name": "extract-ui-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Code extracted from phase-8-ui.md",
+        "Files created in src/ui/components/, src/ui/utils/, src/ui/screens/",
+        "All component files extracted"
+      ],
+      "prompt": "## Task: Extract UI Code from Documentation\n\n### Goal\nExtract UI module code from phase-8-ui.md documentation.\n\n### Instructions\n1. Read the documentation:\n   ```bash\n   cat docs/refactoring/phase-8-ui.md\n   ```\n\n2. Create directory structure:\n   ```bash\n   mkdir -p src/ui/components\n   mkdir -p src/ui/utils\n   mkdir -p src/ui/screens\n   ```\n\n3. The documentation defines these files:\n   - utils/theme.ts\n   - utils/terminal.ts\n   - utils/ansi.ts\n   - components/box.ts\n   - components/progress.ts\n   - components/status.ts\n   - components/table.ts\n   - screens/dashboard.ts\n   - index.ts\n\n4. Find code blocks:\n   ```bash\n   grep -n '// src/ui/' docs/refactoring/phase-8-ui.md\n   ```\n\n5. Extract each file:\n   ```bash\n   awk '/\\/\\/ src\\/ui\\/utils\\/theme.ts/,/^```$/' docs/refactoring/phase-8-ui.md | sed '1d;$d' > src/ui/utils/theme.ts\n   \n   # Continue for other files...\n   ```\n\n6. Verify:\n   ```bash\n   ls -laR src/ui/\n   find src/ui -name '*.ts' | xargs wc -l\n   ```\n\n### Output\nList of created files with line counts."
+    },
+    {
+      "name": "review-cli-ui-code",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "CLI and UI code reviewed",
+        "TypeScript compilation checked",
+        "All exports verified",
+        "Missing pieces documented"
+      ],
+      "prompt": "## Task: Review CLI and UI Code\n\n### Goal\nReview extracted CLI and UI code.\n\n### Instructions\n1. Check CLI module:\n   ```bash\n   echo '=== CLI Module ==='\n   find src/cli/commands src/cli/formatters -name '*.ts' | xargs ls -la\n   npx tsc --noEmit src/cli/commands/*.ts src/cli/formatters/*.ts 2>&1 | head -50\n   ```\n\n2. Check UI module:\n   ```bash\n   echo '=== UI Module ==='\n   find src/ui -name '*.ts' | xargs ls -la\n   npx tsc --noEmit src/ui/**/*.ts 2>&1 | head -50\n   ```\n\n3. Verify imports:\n   ```bash\n   echo '=== CLI Imports ==='\n   grep -rh '^import' src/cli/commands/ src/cli/formatters/ | sort | uniq\n   \n   echo '=== UI Imports ==='\n   grep -rh '^import' src/ui/ | sort | uniq\n   ```\n\n4. Check UI index exports:\n   ```bash\n   cat src/ui/index.ts\n   ```\n\n5. Look for incomplete code:\n   ```bash\n   grep -rn 'TODO\\|FIXME\\|\\.\\.\\.' src/cli/commands/ src/cli/formatters/ src/ui/\n   ```\n\n### Output\n- Completeness status\n- TypeScript errors\n- Missing pieces\n- Recommendations"
+    },
+    {
+      "name": "write-cli-tests",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Test file at src/cli/__tests__/cli.test.ts",
+        "Tests for command parsing",
+        "Tests for formatters",
+        "At least 12 test cases"
+      ],
+      "prompt": "## Task: Write CLI Module Test Cases\n\n### Goal\nWrite test cases for the CLI module.\n\n### Instructions\n1. Create test directory:\n   ```bash\n   mkdir -p src/cli/__tests__\n   ```\n\n2. Review CLI functions:\n   ```bash\n   grep -E '^export (function|async function)' src/cli/commands/*.ts src/cli/formatters/*.ts\n   ```\n\n3. Create test file:\n   ```bash\n   cat > src/cli/__tests__/cli.test.ts << 'EOF'\n   import { printTable, printKeyValue } from '../formatters/table';\n   \n   describe('CLI Module', () => {\n     describe('Formatters', () => {\n       describe('printTable', () => {\n         it('should format table with columns', () => {\n           const data = [\n             { name: 'lane-1', status: 'running' },\n             { name: 'lane-2', status: 'completed' }\n           ];\n           const columns = [\n             { header: 'Name', key: 'name' as const },\n             { header: 'Status', key: 'status' as const }\n           ];\n           \n           // Capture console output\n           const consoleSpy = jest.spyOn(console, 'log').mockImplementation();\n           printTable(data, columns);\n           \n           expect(consoleSpy).toHaveBeenCalled();\n           consoleSpy.mockRestore();\n         });\n       });\n       \n       describe('printKeyValue', () => {\n         it('should print key-value pairs', () => {\n           const consoleSpy = jest.spyOn(console, 'log').mockImplementation();\n           printKeyValue({ key1: 'value1', key2: 'value2' });\n           \n           expect(consoleSpy).toHaveBeenCalledTimes(2);\n           consoleSpy.mockRestore();\n         });\n       });\n     });\n     \n     describe('Command Parsing', () => {\n       // Test option parsing logic\n       it('should parse --executor option', () => {\n         const args = ['tasks', '--executor', 'cursor-agent'];\n         // Test parsing logic\n       });\n       \n       it('should handle --help flag', () => {\n         const args = ['--help'];\n         // Test help flag\n       });\n     });\n   });\n   EOF\n   ```\n\n4. Run tests:\n   ```bash\n   npm test -- --testPathPattern='cli/__tests__' --verbose\n   ```\n\n### Output\n- Test file created\n- Number of test cases\n- Initial test results"
+    },
+    {
+      "name": "write-ui-tests",
+      "model": "gemini-3-flash",
+      "acceptanceCriteria": [
+        "Test files for UI components",
+        "Tests for theme, terminal utils, components",
+        "Snapshot tests for UI output",
+        "At least 15 test cases"
+      ],
+      "prompt": "## Task: Write UI Module Test Cases\n\n### Goal\nWrite test cases for the UI module.\n\n### Instructions\n1. Create test directories:\n   ```bash\n   mkdir -p src/ui/__tests__\n   mkdir -p src/ui/components/__tests__\n   mkdir -p src/ui/utils/__tests__\n   ```\n\n2. Review UI functions:\n   ```bash\n   grep -E '^export (function|class|const)' src/ui/**/*.ts\n   ```\n\n3. Create theme tests:\n   ```bash\n   cat > src/ui/utils/__tests__/theme.test.ts << 'EOF'\n   import { COLORS, ICONS, setTheme, getTheme, defaultTheme } from '../theme';\n   \n   describe('UI Theme', () => {\n     describe('COLORS', () => {\n       it('should have reset code', () => {\n         expect(COLORS.reset).toBe('\\x1b[0m');\n       });\n       \n       it('should have all standard colors', () => {\n         expect(COLORS.red).toBeDefined();\n         expect(COLORS.green).toBeDefined();\n         expect(COLORS.blue).toBeDefined();\n         expect(COLORS.yellow).toBeDefined();\n       });\n     });\n     \n     describe('ICONS', () => {\n       it('should have status icons', () => {\n         expect(ICONS.success).toBe('✅');\n         expect(ICONS.error).toBe('❌');\n         expect(ICONS.warning).toBe('⚠️');\n       });\n     });\n     \n     describe('Theme Management', () => {\n       it('should return default theme', () => {\n         const theme = getTheme();\n         expect(theme).toEqual(defaultTheme);\n       });\n       \n       it('should allow theme customization', () => {\n         setTheme({ colors: { ...defaultTheme.colors, primary: '\\x1b[35m' } });\n         const theme = getTheme();\n         expect(theme.colors.primary).toBe('\\x1b[35m');\n       });\n     });\n   });\n   EOF\n   ```\n\n4. Create component tests:\n   ```bash\n   cat > src/ui/components/__tests__/components.test.ts << 'EOF'\n   import { box } from '../box';\n   import { progressBar, spinner } from '../progress';\n   import { statusBadge } from '../status';\n   \n   describe('UI Components', () => {\n     describe('box', () => {\n       it('should render content in a box', () => {\n         const result = box('Hello World');\n         expect(result).toContain('Hello World');\n         expect(result).toContain('┌');\n         expect(result).toContain('┘');\n       });\n       \n       it('should include title when provided', () => {\n         const result = box('Content', { title: 'Title' });\n         expect(result).toContain('Title');\n       });\n     });\n     \n     describe('progressBar', () => {\n       it('should show progress', () => {\n         const result = progressBar(5, 10);\n         expect(result).toContain('[');\n         expect(result).toContain(']');\n         expect(result).toContain('50%');\n       });\n       \n       it('should handle 0/0 case', () => {\n         const result = progressBar(0, 0);\n         expect(result).toContain('0%');\n       });\n     });\n     \n     describe('spinner', () => {\n       it('should return spinner frame', () => {\n         const frame = spinner(0);\n         expect(frame.length).toBeGreaterThan(0);\n       });\n       \n       it('should cycle through frames', () => {\n         const frame0 = spinner(0);\n         const frame1 = spinner(1);\n         expect(frame0).not.toBe(frame1);\n       });\n     });\n     \n     describe('statusBadge', () => {\n       it('should render success badge', () => {\n         const result = statusBadge('success');\n         expect(result).toContain('✅');\n       });\n       \n       it('should render custom text', () => {\n         const result = statusBadge('running', 'In Progress');\n         expect(result).toContain('In Progress');\n       });\n     });\n   });\n   EOF\n   ```\n\n5. Run tests:\n   ```bash\n   npm test -- --testPathPattern='ui/' --verbose\n   ```\n\n### Output\n- Test files created\n- Number of test cases\n- Initial test results"
+    },
+    {
+      "name": "verify-cli-ui-tests",
+      "model": "opus-4.5",
+      "acceptanceCriteria": [
+        "All CLI tests pass",
+        "All UI tests pass",
+        "Combined coverage > 50%"
+      ],
+      "prompt": "## Task: Verify CLI and UI Tests\n\n### Goal\nRun and verify all CLI and UI tests.\n\n### Instructions\n1. Run CLI tests:\n   ```bash\n   npm test -- --testPathPattern='cli/__tests__' --verbose 2>&1 | tail -30\n   ```\n\n2. Run UI tests:\n   ```bash\n   npm test -- --testPathPattern='ui/' --verbose 2>&1 | tail -30\n   ```\n\n3. Combined coverage:\n   ```bash\n   npm test -- --testPathPattern='(cli|ui)' --coverage --collectCoverageFrom='src/cli/**/*.ts' --collectCoverageFrom='src/ui/**/*.ts'\n   ```\n\n4. Summary:\n   ```bash\n   echo '=== CLI Tests ==='\n   npm test -- --testPathPattern='cli/__tests__' 2>&1 | grep -E '(Tests:|PASS|FAIL)'\n   \n   echo '=== UI Tests ==='\n   npm test -- --testPathPattern='ui/' 2>&1 | grep -E '(Tests:|PASS|FAIL)'\n   ```\n\n5. Total test count:\n   ```bash\n   grep -rh 'it(\\|test(' src/cli/__tests__ src/ui/**/__tests__ | wc -l\n   ```\n\n### Output\n- CLI: X passed, X failed\n- UI: X passed, X failed\n- Coverage: X%\n- Final status"
+    }
+  ]
+}
+

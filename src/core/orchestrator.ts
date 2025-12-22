@@ -10,7 +10,7 @@ import { spawn, ChildProcess } from 'child_process';
 
 import * as logger from '../utils/logger';
 import { loadState, saveState, createLaneState } from '../utils/state';
-import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../utils/types';
+import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../types';
 import { events } from '../utils/events';
 import { registerWebhooks } from '../utils/webhook';
 import { loadConfig, getLogsDir } from '../utils/config';
@@ -167,7 +167,13 @@ export function spawnLane({
           
           if (trimmed && (isTimestamped || !isJson)) {
             if (onActivity) onActivity();
-            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
+            const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
+            const label = `[${laneName}]`;
+            const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
+            
+            // Strip redundant timestamp from line if it exists (e.g., from child logger)
+            const cleanLine = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, '');
+            process.stdout.write(`${ts} ${labelPrefix}${cleanLine}\n`);
           }
         }
       });
@@ -188,10 +194,16 @@ export function spawnLane({
                              trimmed.includes('actual output');
             
             if (isStatus) {
-              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
+              const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
+              const label = `[${laneName}]`;
+              const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
+              process.stdout.write(`${ts} ${labelPrefix}${trimmed}\n`);
             } else {
               if (onActivity) onActivity();
-              process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
+              const ts = `${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset}`;
+              const label = `[${laneName}]`;
+              const labelPrefix = `${logger.COLORS.magenta}${label.padEnd(12)}${logger.COLORS.reset} `;
+              process.stderr.write(`${ts} ${labelPrefix}${logger.COLORS.red}ERROR: ${trimmed}${logger.COLORS.reset}\n`);
             }
           }
         }
@@ -401,6 +413,25 @@ async function resolveAllDependencies(
   }
   
   git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  
+  // 5. Clear dependency request files from all blocked lanes
+  for (const laneName of blockedLanes.keys()) {
+    const laneDir = laneRunDirs[laneName];
+    if (!laneDir) continue;
+    
+    const laneState = loadState<LaneState>(safeJoin(laneDir, 'state.json'));
+    if (laneState?.worktreeDir) {
+      const depReqFile = safeJoin(laneState.worktreeDir, '_cursorflow/dependency-request.json');
+      if (fs.existsSync(depReqFile)) {
+        try {
+          fs.unlinkSync(depReqFile);
+          logger.info(`🗑️ Cleared dependency request file for ${laneName}`);
+        } catch {
+          // Best effort
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -454,7 +485,7 @@ export async function orchestrate(tasksDir: string, options: {
   const completedLanes = new Set<string>();
   const failedLanes = new Set<string>();
   const blockedLanes: Map<string, DependencyRequestPlan> = new Map();
-  
+
   // Track start index for each lane (initially 0)
   for (const lane of lanes) {
     lane.startIndex = 0;
@@ -529,6 +560,27 @@ export async function orchestrate(tasksDir: string, options: {
   if (options.noGit) {
     logger.info('🚫 Git operations disabled (--no-git mode)');
   }
+  
+  // Signal handlers for clean cleanup
+  const cleanup = () => {
+    if (running.size > 0) {
+      console.log('');
+      logger.info('🛑 Termination signal received. Cleaning up active lanes...');
+      for (const [name, info] of running) {
+        logger.info(`  - Stopping ${name} (PID ${info.child.pid})...`);
+        try {
+          // Use SIGTERM first for graceful exit
+          info.child.kill('SIGTERM');
+        } catch (e) {
+          // Ignore
+        }
+      }
+    }
+    process.exit(1);
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
   
   // Monitor lanes
   const monitorInterval = setInterval(() => {
@@ -744,6 +796,8 @@ export async function orchestrate(tasksDir: string, options: {
   }
   
   clearInterval(monitorInterval);
+  process.removeListener('SIGINT', cleanup);
+  process.removeListener('SIGTERM', cleanup);
   printLaneStatus(lanes, laneRunDirs);
   
   // Check for failures
