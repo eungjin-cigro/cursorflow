@@ -190,7 +190,7 @@ export class RunService {
     let stopped = false;
     for (const lane of run.lanes) {
       if (lane.pid) {
-        if (ProcessManager.stop(lane.pid)) {
+        if (ProcessManager.killProcess(lane.pid)) {
           stopped = true;
         }
       }
@@ -229,7 +229,7 @@ export class RunService {
       // Wait up to 2 seconds for processes to exit
       let attempts = 0;
       while (attempts < 20) {
-        const stillRunning = run.lanes.some(l => l.pid && ProcessManager.isRunning(l.pid));
+        const stillRunning = run.lanes.some(l => l.pid && ProcessManager.isProcessRunning(l.pid));
         if (!stillRunning) break;
         
         // Synchronous sleep

@@ -1,10 +1,11 @@
 import { spawnSync } from 'child_process';
+import * as os from 'os';
 
 export class ProcessManager {
   /**
-   * Check if a process is running
+   * Check if a process is running by its PID
    */
-  static isRunning(pid: number): boolean {
+  static isProcessRunning(pid: number): boolean {
     try {
       // Signal 0 checks for process existence without killing it
       process.kill(pid, 0);
@@ -15,53 +16,71 @@ export class ProcessManager {
   }
 
   /**
-   * Stop a process gracefully (SIGTERM)
+   * Kill a process by its PID
+   * @param pid Process ID
+   * @param signal Signal to send (default: SIGTERM)
    */
-  static stop(pid: number, signal: NodeJS.Signals = 'SIGTERM'): boolean {
+  static killProcess(pid: number, signal: string = 'SIGTERM'): boolean {
     try {
-      process.kill(pid, signal);
-      return true;
+      if (os.platform() === 'win32') {
+        // Windows doesn't support signals in the same way, use taskkill
+        const result = spawnSync('taskkill', ['/F', '/PID', String(pid)]);
+        return result.status === 0;
+      } else {
+        process.kill(pid, signal as NodeJS.Signals);
+        return true;
+      }
     } catch (e) {
       return false;
     }
   }
 
   /**
-   * Force stop a process (SIGKILL)
+   * Kill a process and all its child processes
+   * Cross-platform implementation
    */
-  static forceStop(pid: number): boolean {
-    return this.stop(pid, 'SIGKILL');
-  }
-
-  /**
-   * Stop multiple processes
-   */
-  static stopMultiple(pids: number[]): { stopped: number; failed: number } {
-    let stopped = 0;
-    let failed = 0;
-    
-    for (const pid of pids) {
-      if (this.stop(pid)) {
-        stopped++;
+  static killProcessTree(pid: number): boolean {
+    try {
+      if (os.platform() === 'win32') {
+        // Windows: /T flag kills child processes too
+        const result = spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)]);
+        return result.status === 0;
       } else {
-        failed++;
+        // Linux/macOS: Find and kill children recursively or use pkill
+        // A simple approach is to use pgrep to find children
+        const result = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
+        if (result.status === 0 && result.stdout) {
+          const children = result.stdout.split('\n').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+          for (const child of children) {
+            this.killProcessTree(child);
+          }
+        }
+        
+        // Kill the process itself
+        return this.killProcess(pid);
       }
+    } catch (e) {
+      // Fallback to simple kill
+      return this.killProcess(pid);
     }
-    
-    return { stopped, failed };
   }
 
   /**
-   * Find cursorflow related processes using pgrep
+   * Find cursorflow related processes using pgrep (Linux/macOS only)
    */
   static findCursorFlowProcesses(): number[] {
+    if (os.platform() === 'win32') {
+      // Basic Windows implementation using tasklist if needed, 
+      // but for now focusing on core requirements
+      return [];
+    }
+
     try {
       // Find processes with 'cursorflow' in their command line, 
-      // but avoid common unrelated matches by looking for the specific bin/index path 
-      // or common patterns used in our execution
+      // avoiding unrelated matches by looking for specific execution patterns
       const result = spawnSync('pgrep', ['-f', 'cursorflow.*(index|runner|orchestrator)'], { encoding: 'utf8' });
       if (result.status !== 0) {
-        // Fallback to simpler pattern if specific one fails
+        // Fallback to simpler pattern
         const fallback = spawnSync('pgrep', ['-f', 'cursorflow'], { encoding: 'utf8' });
         if (fallback.status !== 0) return [];
         return fallback.stdout
@@ -73,31 +92,9 @@ export class ProcessManager {
       return result.stdout
         .split('\n')
         .map(s => parseInt(s.trim()))
-        .filter(n => !isNaN(n) && n !== process.pid); // Exclude current process
+        .filter(n => !isNaN(n) && n !== process.pid);
     } catch (e) {
       return [];
-    }
-  }
-
-  /**
-   * Kill a process tree (if possible)
-   * Note: This is a simple implementation that tries to use pkill -P
-   */
-  static killProcessTree(pid: number): boolean {
-    try {
-      // First find children
-      const result = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
-      if (result.status === 0) {
-        const children = result.stdout.split('\n').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-        for (const child of children) {
-          this.killProcessTree(child);
-        }
-      }
-      
-      // Kill the process itself
-      return this.stop(pid);
-    } catch (e) {
-      return this.stop(pid);
     }
   }
 }
