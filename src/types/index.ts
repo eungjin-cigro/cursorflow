@@ -1,4 +1,9 @@
 
+/**
+ * Centralized type definitions for CursorFlow
+ * Reviewed and verified against documentation.
+ */
+
 // Config
 export * from './config';
 
