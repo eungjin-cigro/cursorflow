@@ -795,10 +795,12 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   const randomSuffix = Math.random().toString(36).substring(2, 7);
   const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}-${randomSuffix}`;
+  
   // In noGit mode, use a simple local directory instead of worktree
-  const worktreeDir = state?.worktreeDir || (noGit 
+  // Flatten the path by replacing slashes with hyphens to avoid race conditions in parent directory creation
+  const worktreeDir = state?.worktreeDir || config.worktreeDir || (noGit 
     ? safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/workdir', pipelineBranch.replace(/\//g, '-'))
-    : safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch));
+    : safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch.replace(/\//g, '-')));
   
   if (startIndex === 0) {
     logger.section('🚀 Starting Pipeline');
@@ -817,10 +819,37 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       logger.info(`Creating work directory: ${worktreeDir}`);
       fs.mkdirSync(worktreeDir, { recursive: true });
     } else {
-      git.createWorktree(worktreeDir, pipelineBranch, { 
-        baseBranch: config.baseBranch || 'main',
-        cwd: repoRoot,
-      });
+      // Use a simple retry mechanism for Git worktree creation to handle potential race conditions
+      let retries = 3;
+      let lastError: Error | null = null;
+      
+      while (retries > 0) {
+        try {
+          // Ensure parent directory exists before calling git worktree
+          const worktreeParent = path.dirname(worktreeDir);
+          if (!fs.existsSync(worktreeParent)) {
+            fs.mkdirSync(worktreeParent, { recursive: true });
+          }
+
+          git.createWorktree(worktreeDir, pipelineBranch, { 
+            baseBranch: config.baseBranch || 'main',
+            cwd: repoRoot,
+          });
+          break; // Success
+        } catch (e: any) {
+          lastError = e;
+          retries--;
+          if (retries > 0) {
+            const delay = Math.floor(Math.random() * 1000) + 500;
+            logger.warn(`Worktree creation failed, retrying in ${delay}ms... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+      
+      if (retries === 0 && lastError) {
+        throw new Error(`Failed to create Git worktree after retries: ${lastError.message}`);
+      }
     }
   } else if (!noGit) {
     // If it exists but we are in Git mode, ensure it's actually a worktree and on the right branch
@@ -859,6 +888,9 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     state.status = 'running';
     state.error = null;
     state.dependencyRequest = null;
+    state.pipelineBranch = pipelineBranch;
+    state.worktreeDir = worktreeDir;
+    state.label = state.label || pipelineBranch;
     state.dependsOn = config.dependsOn || [];
     state.completedTasks = state.completedTasks || [];
   }
@@ -1115,11 +1147,13 @@ if (require.main === module) {
   const runDirIdx = args.indexOf('--run-dir');
   const startIdxIdx = args.indexOf('--start-index');
   const pipelineBranchIdx = args.indexOf('--pipeline-branch');
+  const worktreeDirIdx = args.indexOf('--worktree-dir');
   const noGit = args.includes('--no-git');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
   const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
   const forcedPipelineBranch = pipelineBranchIdx >= 0 ? args[pipelineBranchIdx + 1] : null;
+  const forcedWorktreeDir = worktreeDirIdx >= 0 ? args[worktreeDirIdx + 1] : null;
 
   // Extract runId from runDir (format: .../runs/run-123/lanes/lane-name)
   const parts = runDir.split(path.sep);
@@ -1150,6 +1184,9 @@ if (require.main === module) {
     config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
     if (forcedPipelineBranch) {
       config.pipelineBranch = forcedPipelineBranch;
+    }
+    if (forcedWorktreeDir) {
+      config.worktreeDir = forcedWorktreeDir;
     }
   } catch (error: any) {
     console.error(`Failed to load tasks file: ${error.message}`);

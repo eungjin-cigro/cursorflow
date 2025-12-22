@@ -81,18 +81,25 @@ export function readLog<T = any>(logPath: string): T[] {
 /**
  * Create initial lane state
  */
-export function createLaneState(laneName: string, config: RunnerConfig): LaneState {
+export function createLaneState(
+  laneName: string, 
+  config: RunnerConfig, 
+  tasksFile?: string,
+  options: { pipelineBranch?: string; worktreeDir?: string } = {}
+): LaneState {
   return {
     label: laneName,
     status: 'pending',
     currentTaskIndex: 0,
     totalTasks: config.tasks ? config.tasks.length : 0,
-    worktreeDir: null,
-    pipelineBranch: null,
+    worktreeDir: options.worktreeDir || null,
+    pipelineBranch: options.pipelineBranch || null,
     startTime: Date.now(),
     endTime: null,
     error: null,
     dependencyRequest: null,
+    tasksFile,
+    dependsOn: config.dependsOn || [],
   };
 }
 

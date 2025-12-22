@@ -200,6 +200,7 @@ export interface RunnerConfig {
   tasks: Task[];
   dependsOn?: string[];
   pipelineBranch?: string;
+  worktreeDir?: string;
   branchPrefix?: string;
   worktreeRoot?: string;
   baseBranch?: string;

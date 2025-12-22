@@ -3,6 +3,77 @@
  */
 
 import { execSync, spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import { safeJoin } from './path';
+
+/**
+ * Acquire a file-based lock for Git operations
+ */
+function acquireLock(lockName: string, cwd?: string): string | null {
+  const repoRoot = cwd || getRepoRoot();
+  const lockDir = safeJoin(repoRoot, '_cursorflow', 'locks');
+  if (!fs.existsSync(lockDir)) {
+    fs.mkdirSync(lockDir, { recursive: true });
+  }
+  
+  const lockFile = safeJoin(lockDir, `${lockName}.lock`);
+  
+  try {
+    // wx flag ensures atomic creation
+    fs.writeFileSync(lockFile, String(process.pid), { flag: 'wx' });
+    return lockFile;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Release a file-based lock
+ */
+function releaseLock(lockFile: string | null): void {
+  if (lockFile && fs.existsSync(lockFile)) {
+    try {
+      fs.unlinkSync(lockFile);
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+/**
+ * Run Git command with locking
+ */
+async function runGitWithLock<T>(
+  lockName: string,
+  fn: () => T,
+  options: { cwd?: string; maxRetries?: number; retryDelay?: number } = {}
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? 10;
+  const retryDelay = options.retryDelay ?? 500;
+  
+  let retries = 0;
+  let lockFile = null;
+  
+  while (retries < maxRetries) {
+    lockFile = acquireLock(lockName, options.cwd);
+    if (lockFile) break;
+    
+    retries++;
+    const delay = Math.floor(Math.random() * retryDelay) + retryDelay / 2;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  
+  if (!lockFile) {
+    throw new Error(`Failed to acquire lock: ${lockName}`);
+  }
+  
+  try {
+    return fn();
+  } finally {
+    releaseLock(lockFile);
+  }
+}
 
 export interface GitRunOptions {
   cwd?: string;
@@ -148,18 +219,53 @@ export function worktreeExists(worktreePath: string, cwd?: string): boolean {
 export function createWorktree(worktreePath: string, branchName: string, options: { cwd?: string; baseBranch?: string } = {}): string {
   const { cwd, baseBranch = 'main' } = options;
   
-  // Check if branch already exists
-  const branchExists = runGitResult(['rev-parse', '--verify', branchName], { cwd }).success;
+  // Use a file-based lock to prevent race conditions during worktree creation
+  const lockDir = safeJoin(cwd || getRepoRoot(), '_cursorflow', 'locks');
+  if (!fs.existsSync(lockDir)) {
+    fs.mkdirSync(lockDir, { recursive: true });
+  }
+  const lockFile = safeJoin(lockDir, 'worktree.lock');
   
-  if (branchExists) {
-    // Branch exists, checkout to worktree
-    runGit(['worktree', 'add', worktreePath, branchName], { cwd });
-  } else {
-    // Create new branch from base
-    runGit(['worktree', 'add', '-b', branchName, worktreePath, baseBranch], { cwd });
+  let retries = 20;
+  let acquired = false;
+  
+  while (retries > 0 && !acquired) {
+    try {
+      fs.writeFileSync(lockFile, String(process.pid), { flag: 'wx' });
+      acquired = true;
+    } catch {
+      retries--;
+      const delay = Math.floor(Math.random() * 500) + 200;
+      // Use synchronous sleep to keep the function signature synchronous
+      const end = Date.now() + delay;
+      while (Date.now() < end) { /* wait */ }
+    }
   }
   
-  return worktreePath;
+  if (!acquired) {
+    throw new Error('Failed to acquire worktree lock after multiple retries');
+  }
+  
+  try {
+    // Check if branch already exists
+    const branchExists = runGitResult(['rev-parse', '--verify', branchName], { cwd }).success;
+    
+    if (branchExists) {
+      // Branch exists, checkout to worktree
+      runGit(['worktree', 'add', worktreePath, branchName], { cwd });
+    } else {
+      // Create new branch from base
+      runGit(['worktree', 'add', '-b', branchName, worktreePath, baseBranch], { cwd });
+    }
+    
+    return worktreePath;
+  } finally {
+    try {
+      fs.unlinkSync(lockFile);
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 /**

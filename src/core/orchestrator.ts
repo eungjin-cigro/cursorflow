@@ -9,7 +9,7 @@ import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 
 import * as logger from '../utils/logger';
-import { loadState } from '../utils/state';
+import { loadState, saveState, createLaneState } from '../utils/state';
 import { LaneState, RunnerConfig, WebhookConfig, DependencyRequestPlan, EnhancedLogConfig } from '../utils/types';
 import { events } from '../utils/events';
 import { registerWebhooks } from '../utils/webhook';
@@ -48,6 +48,7 @@ export function spawnLane({
   executor, 
   startIndex = 0, 
   pipelineBranch,
+  worktreeDir,
   enhancedLogConfig,
   noGit = false,
 }: { 
@@ -57,6 +58,7 @@ export function spawnLane({
   executor: string; 
   startIndex?: number;
   pipelineBranch?: string;
+  worktreeDir?: string;
   enhancedLogConfig?: Partial<EnhancedLogConfig>;
   noGit?: boolean;
 }): SpawnLaneResult {
@@ -75,6 +77,10 @@ export function spawnLane({
 
   if (pipelineBranch) {
     args.push('--pipeline-branch', pipelineBranch);
+  }
+
+  if (worktreeDir) {
+    args.push('--worktree-dir', worktreeDir);
   }
   
   if (noGit) {
@@ -500,9 +506,45 @@ export async function orchestrate(tasksDir: string, options: {
   }
   
   const laneRunDirs: Record<string, string> = {};
+  const laneWorktreeDirs: Record<string, string> = {};
+  const repoRoot = git.getRepoRoot();
+  
   for (const lane of lanes) {
     laneRunDirs[lane.name] = safeJoin(runRoot, 'lanes', lane.name);
-    fs.mkdirSync(laneRunDirs[lane.name], { recursive: true });
+    fs.mkdirSync(laneRunDirs[lane.name]!, { recursive: true });
+    
+    // Create initial state for ALL lanes so resume can find them even if they didn't start
+    try {
+      const taskConfig = JSON.parse(fs.readFileSync(lane.path, 'utf8')) as RunnerConfig;
+      
+      // Calculate unique branch and worktree for this lane
+      const lanePipelineBranch = `${pipelineBranch}/${lane.name}`;
+      
+      // Use a flat worktree directory name to avoid race conditions in parent directory creation
+      // repoRoot/_cursorflow/worktrees/cursorflow-run-xxx-lane-name
+      const laneWorktreeDir = safeJoin(
+        repoRoot, 
+        taskConfig.worktreeRoot || '_cursorflow/worktrees', 
+        lanePipelineBranch.replace(/\//g, '-')
+      );
+      
+      // Ensure the parent directory exists before spawning the runner
+      // to avoid race conditions in git worktree add or fs operations
+      const worktreeParent = path.dirname(laneWorktreeDir);
+      if (!fs.existsSync(worktreeParent)) {
+        fs.mkdirSync(worktreeParent, { recursive: true });
+      }
+      
+      laneWorktreeDirs[lane.name] = laneWorktreeDir;
+      
+      const initialState = createLaneState(lane.name, taskConfig, lane.path, {
+        pipelineBranch: lanePipelineBranch,
+        worktreeDir: laneWorktreeDir
+      });
+      saveState(safeJoin(laneRunDirs[lane.name]!, 'state.json'), initialState);
+    } catch (e) {
+      logger.warn(`Failed to create initial state for lane ${lane.name}: ${e}`);
+    }
   }
   
   logger.section('🧭 Starting Orchestration');
@@ -576,6 +618,7 @@ export async function orchestrate(tasksDir: string, options: {
         executor: options.executor || 'cursor-agent',
         startIndex: lane.startIndex,
         pipelineBranch: `${pipelineBranch}/${lane.name}`,
+        worktreeDir: laneWorktreeDirs[lane.name],
         enhancedLogConfig: options.enhancedLogging,
         noGit: options.noGit,
       });

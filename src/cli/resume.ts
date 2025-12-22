@@ -209,13 +209,10 @@ function getAllLaneStatuses(runDir: string): LaneInfo[] {
       const statePath = safeJoin(dir, 'state.json');
       const state = fs.existsSync(statePath) ? loadState<LaneState>(statePath) : null;
       
-      // Determine if lane needs resume
+      // Determine if lane needs resume: everything that is not completed
       const needsResume = state ? (
-        state.status === 'failed' ||
-        state.status === 'paused' ||
-        state.status === 'running' || // If process crashed mid-run
-        (state.status === 'pending' && state.currentTaskIndex > 0)
-      ) : false;
+        state.status !== 'completed'
+      ) : true;
       
       const isCompleted = state?.status === 'completed';
       const dependsOn = state?.dependsOn || [];
@@ -368,6 +365,10 @@ function spawnLaneResume(
     '--start-index', String(startIndex),
   ];
 
+  if (state.worktreeDir) {
+    runnerArgs.push('--worktree-dir', state.worktreeDir);
+  }
+
   if (options.noGit) {
     runnerArgs.push('--no-git');
   }
@@ -473,6 +474,12 @@ async function resumeAllLanes(
 ): Promise<{ succeeded: string[]; failed: string[]; skipped: string[] }> {
   const allLanes = getAllLaneStatuses(runDir);
   const lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
+  const missingTaskInfo = allLanes.filter(l => l.needsResume && !l.state?.tasksFile);
+  
+  if (missingTaskInfo.length > 0) {
+    logger.warn(`Lanes that haven't started yet and have no task info: ${missingTaskInfo.map(l => l.name).join(', ')}`);
+    logger.warn('These lanes cannot be resumed because their original task file paths were not recorded.');
+  }
   
   if (lanesToResume.length === 0) {
     logger.success('All lanes are already completed! Nothing to resume.');
