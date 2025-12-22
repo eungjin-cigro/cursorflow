@@ -156,6 +156,7 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, mode
     prompt: string; 
     model?: string;
     outputFormat?: 'stream-json' | 'json' | 'plain';
+    taskName?: string;
   }) => Promise<AgentSendResult>; 
   cursorAgentCreateChat: () => string; 
 }): Promise<ReviewResult> {
@@ -181,6 +182,7 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, mode
     prompt: reviewPrompt,
     model: reviewModel,
     outputFormat: config.agentOutputFormat,
+    taskName: `review:${taskResult.taskName}`,
   });
   
   const review = parseReviewResult(reviewResult.resultText || '');
@@ -220,6 +222,7 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
     prompt: string; 
     model?: string;
     outputFormat?: 'stream-json' | 'json' | 'plain';
+    taskName?: string;
   }) => Promise<AgentSendResult>; 
   cursorAgentCreateChat: () => string; 
 }): Promise<{ approved: boolean; review: ReviewResult; iterations: number; error?: string }> {
@@ -269,6 +272,7 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
       prompt: feedbackPrompt,
       model: config.model,
       outputFormat: config.agentOutputFormat,
+      taskName: taskResult.taskName,
     });
     
     if (!fixResult.ok) {

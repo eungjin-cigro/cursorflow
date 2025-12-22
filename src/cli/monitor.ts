@@ -347,7 +347,7 @@ class InteractiveMonitor {
       const convoPath = safeJoin(lane.path, 'conversation.jsonl');
       const entry = {
         timestamp: new Date().toISOString(),
-        role: 'user',
+        role: 'intervention',
         task: 'INTERVENTION',
         fullText: `[HUMAN INTERVENTION]: ${message}`,
         textLength: message.length + 20,
@@ -590,8 +590,13 @@ class InteractiveMonitor {
       visibleLogs.forEach((log, i) => {
         const actualIndex = i + this.scrollOffset;
         const isSelected = actualIndex === this.selectedMessageIndex;
-        const roleColor = log.role === 'user' ? '\x1b[33m' : log.role === 'reviewer' ? '\x1b[35m' : '\x1b[32m';
-        const role = log.role.toUpperCase().padEnd(10);
+        let roleColor = '\x1b[32m'; // Default assistant green
+        if (log.role === 'user') roleColor = '\x1b[33m'; // Yellow
+        else if (log.role === 'reviewer') roleColor = '\x1b[35m'; // Magenta
+        else if (log.role === 'intervention') roleColor = '\x1b[31m\x1b[1m'; // Bold Red for interventions
+        else if (log.role === 'system') roleColor = '\x1b[36m'; // Cyan
+        
+        const role = log.role.toUpperCase().padEnd(12);
         
         const prefix = isSelected ? '▶ ' : '  ';
         const header = `${prefix}${roleColor}${role}\x1b[0m [${new Date(log.timestamp).toLocaleTimeString()}]`;
@@ -628,7 +633,12 @@ class InteractiveMonitor {
     console.log(`🕒 ${new Date(log.timestamp).toLocaleString()} | [Esc/←] Back to History`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-    const roleColor = log.role === 'user' ? '\x1b[33m' : log.role === 'reviewer' ? '\x1b[35m' : '\x1b[32m';
+    let roleColor = '\x1b[32m';
+    if (log.role === 'user') roleColor = '\x1b[33m';
+    else if (log.role === 'reviewer') roleColor = '\x1b[35m';
+    else if (log.role === 'intervention') roleColor = '\x1b[31m\x1b[1m';
+    else if (log.role === 'system') roleColor = '\x1b[36m';
+    
     process.stdout.write(`${roleColor}ROLE: ${log.role.toUpperCase()}\x1b[0m\n`);
     if (log.model) process.stdout.write(`MODEL: ${log.model}\n`);
     if (log.task) process.stdout.write(`TASK: ${log.task}\n`);

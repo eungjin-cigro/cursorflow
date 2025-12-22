@@ -307,7 +307,7 @@ export interface LaneState {
 
 export interface ConversationEntry {
   timestamp: string;
-  role: 'user' | 'assistant' | 'reviewer' | 'system';
+  role: 'user' | 'assistant' | 'reviewer' | 'system' | 'intervention';
   task: string | null;
   fullText: string;
   textLength: number;

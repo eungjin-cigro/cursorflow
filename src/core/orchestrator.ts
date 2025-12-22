@@ -25,18 +25,40 @@ import {
   stripAnsi
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
+import { analyzeFailure, RecoveryAction, logFailure } from './failure-policy';
+
+/** Heartbeat interval: 30 seconds */
+const HEARTBEAT_INTERVAL_MS = 30000;
+
+/** Stall timeout for continue message: 3 minutes */
+const STALL_TIMEOUT_CONTINUE = 3 * 60 * 1000;
+
+/** Stall timeout for restart after continue: 5 minutes (total 8) */
+const STALL_TIMEOUT_RESTART = 5 * 60 * 1000;
 
 export interface LaneInfo {
   name: string;
   path: string;
   dependsOn: string[];
   startIndex?: number; // Current task index to resume from
+  restartCount?: number; // Number of times restarted due to stall
 }
 
 export interface SpawnLaneResult {
   child: ChildProcess;
   logPath: string;
   logManager?: EnhancedLogManager;
+}
+
+/**
+ * Lane execution tracking info
+ */
+interface RunningLaneInfo {
+  child: ChildProcess;
+  logPath: string;
+  logManager?: EnhancedLogManager;
+  lastActivity: number;
+  stallPhase: number; // 0: normal, 1: continued, 2: restarted
 }
 
 /**
@@ -52,6 +74,7 @@ export function spawnLane({
   worktreeDir,
   enhancedLogConfig,
   noGit = false,
+  onActivity,
 }: { 
   laneName: string; 
   tasksFile: string; 
@@ -62,6 +85,7 @@ export function spawnLane({
   worktreeDir?: string;
   enhancedLogConfig?: Partial<EnhancedLogConfig>;
   noGit?: boolean;
+  onActivity?: () => void;
 }): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
   
@@ -102,6 +126,7 @@ export function spawnLane({
   if (logConfig.enabled) {
     // Create callback for clean console output
     const onParsedMessage = (msg: ParsedMessage) => {
+      if (onActivity) onActivity();
       const formatted = formatMessageForConsole(msg, { 
         laneLabel: `[${laneName}]`,
         includeTimestamp: true 
@@ -135,11 +160,13 @@ export function spawnLane({
         
         for (const line of lines) {
           const trimmed = line.trim();
-          // Only print if NOT a noisy line
-          if (trimmed && 
-              !trimmed.startsWith('{') && 
-              !trimmed.startsWith('[') && 
-              !trimmed.includes('{"type"')) {
+          // Show if it's a timestamped log line (starts with [YYYY-MM-DD...)
+          // or if it's NOT a noisy JSON line
+          const isTimestamped = /^\[\d{4}-\d{2}-\d{2}T/.test(trimmed);
+          const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
+          
+          if (trimmed && (isTimestamped || !isJson)) {
+            if (onActivity) onActivity();
             process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
           }
         }
@@ -163,6 +190,7 @@ export function spawnLane({
             if (isStatus) {
               process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
             } else {
+              if (onActivity) onActivity();
               process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
             }
           }
@@ -421,7 +449,7 @@ export async function orchestrate(tasksDir: string, options: {
   });
   
   const maxConcurrent = options.maxConcurrentLanes || 10;
-  const running: Map<string, { child: ChildProcess; logPath: string }> = new Map();
+  const running: Map<string, RunningLaneInfo> = new Map();
   const exitCodes: Record<string, number> = {};
   const completedLanes = new Set<string>();
   const failedLanes = new Set<string>();
@@ -430,6 +458,7 @@ export async function orchestrate(tasksDir: string, options: {
   // Track start index for each lane (initially 0)
   for (const lane of lanes) {
     lane.startIndex = 0;
+    lane.restartCount = 0;
   }
   
   const laneRunDirs: Record<string, string> = {};
@@ -548,9 +577,17 @@ export async function orchestrate(tasksDir: string, options: {
         worktreeDir: laneWorktreeDirs[lane.name],
         enhancedLogConfig: options.enhancedLogging,
         noGit: options.noGit,
+        onActivity: () => {
+          const info = running.get(lane.name);
+          if (info) info.lastActivity = Date.now();
+        }
       });
       
-      running.set(lane.name, spawnResult);
+      running.set(lane.name, {
+        ...spawnResult,
+        lastActivity: Date.now(),
+        stallPhase: 0,
+      });
       events.emit('lane.started', {
         laneName: lane.name,
         pid: spawnResult.child.pid,
@@ -558,15 +595,62 @@ export async function orchestrate(tasksDir: string, options: {
       });
     }
     
-    // 3. Wait for any running lane to finish
+    // 3. Wait for any running lane to finish OR check for stalls
     if (running.size > 0) {
+      // Polling timeout for stall detection
+      let pollTimeout: NodeJS.Timeout | undefined;
+      const pollPromise = new Promise<{ name: string; code: number }>(resolve => {
+        pollTimeout = setTimeout(() => resolve({ name: '__poll__', code: 0 }), 10000);
+      });
+
       const promises = Array.from(running.entries()).map(async ([name, { child }]) => {
         const code = await waitChild(child);
         return { name, code };
       });
       
-      const finished = await Promise.race(promises);
+      const result = await Promise.race([...promises, pollPromise]);
+      if (pollTimeout) clearTimeout(pollTimeout);
       
+      if (result.name === '__poll__') {
+        // Periodic stall check
+        for (const [laneName, info] of running.entries()) {
+          const idleTime = Date.now() - info.lastActivity;
+          const lane = lanes.find(l => l.name === laneName)!;
+          
+          // Use FailurePolicy to decide action
+          if (idleTime > STALL_TIMEOUT_CONTINUE || (info.stallPhase === 1 && idleTime > STALL_TIMEOUT_RESTART)) {
+            const analysis = analyzeFailure(null, { 
+              stallPhase: info.stallPhase, 
+              idleTimeMs: idleTime 
+            });
+            
+            logFailure(laneName, analysis);
+            info.logManager?.log('error', analysis.message);
+
+            if (analysis.action === RecoveryAction.CONTINUE_SIGNAL) {
+              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
+              try {
+                fs.writeFileSync(interventionPath, 'continue');
+                info.stallPhase = 1;
+                info.lastActivity = Date.now();
+              } catch (e) {
+                logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
+              }
+            } else if (analysis.action === RecoveryAction.RESTART_LANE) {
+              lane.restartCount = (lane.restartCount || 0) + 1;
+              info.stallPhase = 2;
+              info.child.kill('SIGKILL');
+            } else if (analysis.action === RecoveryAction.ABORT_LANE) {
+              info.stallPhase = 3;
+              info.child.kill('SIGKILL');
+            }
+          }
+        }
+        continue;
+      }
+
+      const finished = result;
+      const info = running.get(finished.name)!;
       running.delete(finished.name);
       exitCodes[finished.name] = finished.code;
       
@@ -598,11 +682,30 @@ export async function orchestrate(tasksDir: string, options: {
           logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
         }
       } else {
+        // Check if it was a restart request
+        if (info.stallPhase === 2) {
+          logger.info(`🔄 Lane ${finished.name} is being restarted due to stall...`);
+          
+          // Update startIndex from current state to resume from the same task
+          const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
+          const state = loadState<LaneState>(statePath);
+          if (state) {
+            const lane = lanes.find(l => l.name === finished.name);
+            if (lane) {
+              lane.startIndex = state.currentTaskIndex;
+            }
+          }
+          
+          // Note: we don't add to failedLanes or completedLanes, 
+          // so it will be eligible to start again in the next iteration.
+          continue; 
+        }
+
         failedLanes.add(finished.name);
         events.emit('lane.failed', {
           laneName: finished.name,
           exitCode: finished.code,
-          error: 'Process exited with non-zero code',
+          error: info.stallPhase === 3 ? 'Stopped due to repeated stall' : 'Process exited with non-zero code',
         });
       }
       
