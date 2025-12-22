@@ -1,0 +1,21 @@
+{
+  "name": "basic-template",
+  "tasks": [
+    {
+      "name": "plan",
+      "model": "sonnet-4.5-thinking",
+      "prompt": "Analyze requirements for {{featureName}} and create a plan.",
+      "acceptanceCriteria": ["Plan documented"]
+    },
+    {
+      "name": "implement",
+      "model": "sonnet-4.5",
+      "prompt": "Implement {{featureName}} based on the plan.",
+      "acceptanceCriteria": ["Implementation complete"]
+    }
+  ],
+  "dependencyPolicy": {
+    "allowDependencyChange": false,
+    "lockfileReadOnly": true
+  }
+}

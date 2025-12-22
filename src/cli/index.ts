@@ -34,10 +34,11 @@ function printHelp(): void {
 
 \x1b[1mCOMMANDS\x1b[0m
   \x1b[33minit\x1b[0m [options]              Initialize CursorFlow in project
+  \x1b[33msetup\x1b[0m [options]             Install Cursor IDE commands
   \x1b[33mprepare\x1b[0m <feature> [opts]    Prepare task directory and JSON files
   \x1b[33mrun\x1b[0m <tasks-dir> [options]   Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options] \x1b[36mInteractive\x1b[0m lane dashboard
-  \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs
+  \x1b[33mclean\x1b[0m <type> [options]      Clean branches/worktrees/logs/tasks
   \x1b[33mresume\x1b[0m [lane] [options]     Resume lane(s) - use --all for batch resume
   \x1b[33mdoctor\x1b[0m [options]            Check environment and preflight
   \x1b[33msignal\x1b[0m <lane> <msg>         Directly intervene in a running lane
@@ -54,6 +55,9 @@ function printHelp(): void {
   $ \x1b[32mcursorflow prepare NewFeature --lanes 3\x1b[0m
   $ \x1b[32mcursorflow run _cursorflow/tasks/MyFeature/\x1b[0m
   $ \x1b[32mcursorflow monitor latest\x1b[0m
+  $ \x1b[32mcursorflow logs --all --follow\x1b[0m
+  $ \x1b[32mcursorflow resume --all\x1b[0m
+  $ \x1b[32mcursorflow doctor\x1b[0m
   $ \x1b[32mcursorflow models\x1b[0m
 
 \x1b[1mDOCUMENTATION\x1b[0m

@@ -70,6 +70,23 @@ CursorFlow provides built-in task templates:
 | `--preset merge` | merge → test | Integration lanes (auto-applied with `--depends-on`) |
 | *(none)* | implement | Quick single task |
 
+### Using External Templates
+
+You can use templates from a local file, a remote URL, or a built-in name:
+
+```bash
+# Using a built-in template name
+cursorflow prepare Feature --template basic
+
+# Using a local template file
+cursorflow prepare Custom --template ./my-template.json
+
+# Using a remote template URL
+cursorflow prepare Remote --template https://raw.githubusercontent.com/user/repo/main/template.json
+```
+
+Templates support `{{featureName}}`, `{{laneNumber}}`, and `{{devPort}}` placeholders.
+
 ```bash
 # Complex: Creates plan document that subsequent tasks reference
 cursorflow prepare Feature --preset complex --prompt "Build user dashboard"
@@ -160,13 +177,14 @@ cursorflow doctor --tasks-dir _cursorflow/tasks/my-feature
 | Command | Description |
 |---------|-------------|
 | `cursorflow init` | Initialize CursorFlow in project |
-| `cursorflow prepare` | Generate task files (with presets) |
-| `cursorflow doctor` | Validate environment and tasks |
-| `cursorflow run` | Execute task orchestration |
-| `cursorflow monitor` | Interactive dashboard |
-| `cursorflow resume` | Resume interrupted lane |
-| `cursorflow clean` | Clean branches/worktrees |
-| `cursorflow signal` | Send message to running agent |
+| `cursorflow setup` | Install Cursor IDE commands |
+| `cursorflow prepare` | Prepare task directory and JSON files |
+| `cursorflow run` | Run orchestration (DAG-based) |
+| `cursorflow monitor` | Interactive lane dashboard |
+| `cursorflow clean` | Clean branches/worktrees/logs/tasks |
+| `cursorflow resume` | Resume lane(s) - use --all for batch resume |
+| `cursorflow doctor` | Check environment and preflight |
+| `cursorflow signal` | Directly intervene in a running lane |
 | `cursorflow models` | List available AI models |
 | `cursorflow logs` | View, export, and follow logs |
 

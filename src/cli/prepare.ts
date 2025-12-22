@@ -10,6 +10,7 @@ import * as logger from '../utils/logger';
 import { loadConfig, getTasksDir } from '../utils/config';
 import { Task, RunnerConfig } from '../utils/types';
 import { safeJoin } from '../utils/path';
+import { resolveTemplate } from '../utils/template';
 
 // Preset template types
 type PresetType = 'complex' | 'simple' | 'merge';
@@ -114,8 +115,8 @@ Prepare task files for a new feature - Terminal-first workflow.
     --add-task <file>         Append task(s) to existing lane JSON file
 
   Advanced:
-    --template <path>         Custom template JSON file
-    --force                   Overwrite existing files
+    --template <path|url|name>  External template JSON file, URL, or built-in name
+    --force                     Overwrite existing files
 
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -627,13 +628,34 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   
   const hasDependencies = options.dependsOnLanes.length > 0;
   
-  // Build tasks from options (auto-detects merge preset if has dependencies)
-  const tasks = buildTasksFromOptions(options, laneNumber, featureName, hasDependencies);
-  const config = getDefaultConfig(laneNumber, featureName, tasks);
+  // Load template if provided
+  let template = null;
+  if (options.template) {
+    template = await resolveTemplate(options.template);
+  }
+
+  let taskConfig;
+  let effectivePreset: EffectivePresetType = options.preset || (hasDependencies ? 'merge' : 'complex');
+
+  if (template) {
+    taskConfig = { ...template, laneNumber, devPort: 3000 + laneNumber };
+    effectivePreset = 'custom';
+  } else {
+    // Build tasks from options (auto-detects merge preset if has dependencies)
+    const tasks = buildTasksFromOptions(options, laneNumber, featureName, hasDependencies);
+    taskConfig = getDefaultConfig(laneNumber, featureName, tasks);
+  }
+
+  // Replace placeholders
+  const processedConfig = replacePlaceholders(taskConfig, {
+    featureName,
+    laneNumber,
+    devPort: 3000 + laneNumber,
+  });
   
   // Add dependencies if specified
   const finalConfig = {
-    ...config,
+    ...processedConfig,
     ...(hasDependencies ? { dependsOn: options.dependsOnLanes } : {}),
   };
   
@@ -648,9 +670,10 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
     throw err;
   }
   
-  const taskSummary = tasks.map(t => t.name).join(' → ');
+  const tasksList = finalConfig.tasks || [];
+  const taskSummary = tasksList.map((t: any) => t.name).join(' → ');
   const depsInfo = hasDependencies ? ` (depends: ${options.dependsOnLanes.join(', ')})` : '';
-  const presetInfo = options.preset ? ` [${options.preset}]` : (hasDependencies ? ' [merge]' : '');
+  const presetInfo = options.preset ? ` [${options.preset}]` : (hasDependencies ? ' [merge]' : (template ? ' [template]' : ''));
   
   logger.success(`Added lane: ${fileName} [${taskSummary}]${presetInfo}${depsInfo}`);
   logger.info(`Directory: ${taskDir}`);
@@ -724,12 +747,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
   // Load template if provided (overrides --prompt/--task/--preset)
   let template = null;
   if (options.template) {
-    const templatePath = path.resolve(process.cwd(), options.template); // nosemgrep
-    if (!fs.existsSync(templatePath)) {
-      throw new Error(`Template file not found: ${templatePath}`);
-    }
-    template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-    logger.info(`Using template: ${options.template}`);
+    template = await resolveTemplate(options.template);
   }
 
   // Calculate dependencies
