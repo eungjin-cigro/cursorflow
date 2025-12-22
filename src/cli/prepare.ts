@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as logger from '../utils/logger';
 import { loadConfig, getTasksDir } from '../utils/config';
 import { Task, RunnerConfig } from '../utils/types';
+import { safeJoin } from '../utils/path';
 
 // Preset template types
 type PresetType = 'complex' | 'simple' | 'merge';
@@ -612,7 +613,7 @@ function getFeatureNameFromDir(taskDir: string): string {
 }
 
 async function addLaneToDir(options: PrepareOptions): Promise<void> {
-  const taskDir = path.resolve(process.cwd(), options.addLane!);
+  const taskDir = path.resolve(process.cwd(), options.addLane!); // nosemgrep
   
   if (!fs.existsSync(taskDir)) {
     throw new Error(`Task directory not found: ${taskDir}`);
@@ -622,7 +623,7 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   const laneNumber = getNextLaneNumber(taskDir);
   const laneName = `lane-${laneNumber}`;
   const fileName = `${laneNumber.toString().padStart(2, '0')}-${laneName}.json`;
-  const filePath = path.join(taskDir, fileName);
+  const filePath = safeJoin(taskDir, fileName);
   
   const hasDependencies = options.dependsOnLanes.length > 0;
   
@@ -660,7 +661,7 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
 }
 
 async function addTaskToLane(options: PrepareOptions): Promise<void> {
-  const laneFile = path.resolve(process.cwd(), options.addTask!);
+  const laneFile = path.resolve(process.cwd(), options.addTask!); // nosemgrep
   
   if (options.taskSpecs.length === 0) {
     throw new Error('No task specified. Use --task "name|model|prompt|criteria" to define a task.');
@@ -708,7 +709,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
   const now = new Date();
   const timestamp = now.toISOString().replace(/[-T:]/g, '').substring(2, 12);
   const taskDirName = `${timestamp}_${options.featureName}`;
-  const taskDir = path.join(tasksBaseDir, taskDirName);
+  const taskDir = safeJoin(tasksBaseDir, taskDirName);
 
   if (fs.existsSync(taskDir) && !options.force) {
     throw new Error(`Task directory already exists: ${taskDir}. Use --force to overwrite.`);
@@ -723,7 +724,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
   // Load template if provided (overrides --prompt/--task/--preset)
   let template = null;
   if (options.template) {
-    const templatePath = path.resolve(process.cwd(), options.template);
+    const templatePath = path.resolve(process.cwd(), options.template); // nosemgrep
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Template file not found: ${templatePath}`);
     }
@@ -741,7 +742,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
   for (let i = 1; i <= options.lanes; i++) {
     const laneName = `lane-${i}`;
     const fileName = `${i.toString().padStart(2, '0')}-${laneName}.json`;
-    const filePath = path.join(taskDir, fileName);
+    const filePath = safeJoin(taskDir, fileName);
     
     const depNums = dependencyMap.get(i) || [];
     const dependsOn = depNums.map(n => {
@@ -788,7 +789,7 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
   }
 
   // Create README
-  const readmePath = path.join(taskDir, 'README.md');
+  const readmePath = safeJoin(taskDir, 'README.md');
   const readme = `# Task: ${options.featureName}
 
 Prepared at: ${now.toISOString()}

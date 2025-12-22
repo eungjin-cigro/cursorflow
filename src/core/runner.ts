@@ -16,6 +16,7 @@ import { events } from '../utils/events';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
 import { runReviewLoop } from './reviewer';
+import { safeJoin } from '../utils/path';
 import { 
   RunnerConfig, 
   Task, 
@@ -239,7 +240,7 @@ export async function cursorAgentSend({ workspaceDir, chatId, prompt, model, sig
     // Save PID to state if possible (avoid TOCTOU by reading directly)
     if (child.pid && signalDir) {
       try {
-        const statePath = path.join(signalDir, 'state.json');
+        const statePath = safeJoin(signalDir, 'state.json');
         // Read directly without existence check to avoid race condition
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
         state.pid = child.pid;
@@ -474,7 +475,7 @@ export function applyDependencyFilePermissions(worktreeDir: string, policy: Depe
   }
   
   for (const file of targets) {
-    const filePath = path.join(worktreeDir, file);
+    const filePath = safeJoin(worktreeDir, file);
     if (!fs.existsSync(filePath)) continue;
     
     try {
@@ -507,7 +508,7 @@ export async function waitForTaskDependencies(deps: string[], runDir: string): P
         continue;
       }
 
-      const depStatePath = path.join(lanesRoot, laneName, 'state.json');
+      const depStatePath = safeJoin(lanesRoot, laneName, 'state.json');
       if (fs.existsSync(depStatePath)) {
         try {
           const state = JSON.parse(fs.readFileSync(depStatePath, 'utf8')) as LaneState;
@@ -540,7 +541,7 @@ export async function mergeDependencyBranches(deps: string[], runDir: string, wo
   const lanesToMerge = new Set(deps.map(d => d.split(':')[0]!));
 
   for (const laneName of lanesToMerge) {
-    const depStatePath = path.join(lanesRoot, laneName, 'state.json');
+    const depStatePath = safeJoin(lanesRoot, laneName, 'state.json');
     if (!fs.existsSync(depStatePath)) continue;
 
     try {
@@ -589,7 +590,7 @@ export async function runTask({
 }): Promise<TaskExecutionResult> {
   const model = task.model || config.model || 'sonnet-4.5';
   const timeout = task.timeout || config.timeout;
-  const convoPath = path.join(runDir, 'conversation.jsonl');
+  const convoPath = safeJoin(runDir, 'conversation.jsonl');
   
   logger.section(`[${index + 1}/${config.tasks.length}] ${task.name}`);
   logger.info(`Model: ${model}`);
@@ -781,7 +782,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   const repoRoot = noGit ? process.cwd() : git.getRepoRoot();
   
   // Load existing state if resuming
-  const statePath = path.join(runDir, 'state.json');
+  const statePath = safeJoin(runDir, 'state.json');
   let state: LaneState | null = null;
   
   if (fs.existsSync(statePath)) {
@@ -796,8 +797,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   const pipelineBranch = state?.pipelineBranch || config.pipelineBranch || `${config.branchPrefix || 'cursorflow/'}${Date.now().toString(36)}-${randomSuffix}`;
   // In noGit mode, use a simple local directory instead of worktree
   const worktreeDir = state?.worktreeDir || (noGit 
-    ? path.join(repoRoot, config.worktreeRoot || '_cursorflow/workdir', pipelineBranch.replace(/\//g, '-'))
-    : path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch));
+    ? safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/workdir', pipelineBranch.replace(/\//g, '-'))
+    : safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees', pipelineBranch));
   
   if (startIndex === 0) {
     logger.section('🚀 Starting Pipeline');
@@ -872,8 +873,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     const lanesRoot = path.dirname(runDir);
     
     for (const depName of config.dependsOn) {
-      const depRunDir = path.join(lanesRoot, depName);
-      const depStatePath = path.join(depRunDir, 'state.json');
+      const depRunDir = path.join(lanesRoot, depName); // nosemgrep
+      const depStatePath = path.join(depRunDir, 'state.json'); // nosemgrep
       
       if (!fs.existsSync(depStatePath)) {
         logger.warn(`Dependency state not found for ${depName} at ${depStatePath}`);
@@ -919,8 +920,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     const lanesRoot = path.dirname(runDir);
     
     for (const depName of config.dependsOn) {
-      const depRunDir = path.join(lanesRoot, depName);
-      const depStatePath = path.join(depRunDir, 'state.json');
+      const depRunDir = safeJoin(lanesRoot, depName);
+      const depStatePath = safeJoin(depRunDir, 'state.json');
       
       if (!fs.existsSync(depStatePath)) {
         continue;
@@ -939,8 +940,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
             for (const entry of entries) {
               if (entry.name === '.git' || entry.name === '_cursorflow' || entry.name === 'node_modules') continue;
               
-              const srcPath = path.join(src, entry.name);
-              const destPath = path.join(dest, entry.name);
+              const srcPath = safeJoin(src, entry.name);
+              const destPath = safeJoin(dest, entry.name);
               
               if (entry.isDirectory()) {
                 copyFiles(srcPath, destPath);

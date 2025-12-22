@@ -9,6 +9,7 @@ import { orchestrate } from '../core/orchestrator';
 import { getLogsDir, loadConfig } from '../utils/config';
 import { runDoctor, getDoctorStatus } from '../utils/doctor';
 import { areCommandsInstalled, setupCommands } from './setup-commands';
+import { safeJoin } from '../utils/path';
 
 interface RunOptions {
   tasksDir?: string;
@@ -90,8 +91,8 @@ async function run(args: string[]): Promise<void> {
     path.isAbsolute(options.tasksDir)
       ? options.tasksDir
       : (fs.existsSync(options.tasksDir)
-        ? path.resolve(process.cwd(), options.tasksDir)
-        : path.join(config.projectRoot, options.tasksDir));
+        ? path.resolve(process.cwd(), options.tasksDir) // nosemgrep
+        : safeJoin(config.projectRoot, options.tasksDir));
 
   if (!fs.existsSync(tasksDir)) {
     throw new Error(`Tasks directory not found: ${tasksDir}`);

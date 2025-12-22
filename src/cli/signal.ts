@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
 import { appendLog, createConversationEntry } from '../utils/state';
+import { safeJoin } from '../utils/path';
 
 interface SignalOptions {
   lane: string | null;
@@ -51,7 +52,7 @@ function parseArgs(args: string[]): SignalOptions {
 }
 
 function findLatestRunDir(logsDir: string): string | null {
-  const runsDir = path.join(logsDir, 'runs');
+  const runsDir = safeJoin(logsDir, 'runs');
   if (!fs.existsSync(runsDir)) return null;
   
   const runs = fs.readdirSync(runsDir)
@@ -59,7 +60,7 @@ function findLatestRunDir(logsDir: string): string | null {
     .sort()
     .reverse();
     
-  return runs.length > 0 ? path.join(runsDir, runs[0]!) : null;
+  return runs.length > 0 ? safeJoin(runsDir, runs[0]!) : null;
 }
 
 async function signal(args: string[]): Promise<void> {
@@ -86,14 +87,14 @@ async function signal(args: string[]): Promise<void> {
     throw new Error(`Run directory not found: ${runDir || 'latest'}`);
   }
 
-  const laneDir = path.join(runDir, 'lanes', options.lane);
+  const laneDir = safeJoin(runDir, 'lanes', options.lane);
   if (!fs.existsSync(laneDir)) {
     throw new Error(`Lane directory not found: ${laneDir}`);
   }
 
   // Case 1: Timeout update
   if (options.timeout !== null) {
-    const timeoutPath = path.join(laneDir, 'timeout.txt');
+    const timeoutPath = safeJoin(laneDir, 'timeout.txt');
     fs.writeFileSync(timeoutPath, String(options.timeout));
     logger.success(`Timeout update signal sent to ${options.lane}: ${options.timeout}ms`);
     return;
@@ -101,8 +102,8 @@ async function signal(args: string[]): Promise<void> {
 
   // Case 2: Intervention message
   if (options.message) {
-    const interventionPath = path.join(laneDir, 'intervention.txt');
-    const convoPath = path.join(laneDir, 'conversation.jsonl');
+    const interventionPath = safeJoin(laneDir, 'intervention.txt');
+    const convoPath = safeJoin(laneDir, 'conversation.jsonl');
     
     logger.info(`Sending signal to lane: ${options.lane}`);
     logger.info(`Message: "${options.message}"`);

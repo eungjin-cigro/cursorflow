@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as logger from '../utils/logger';
 import { findProjectRoot, createDefaultConfig, CursorFlowConfig } from '../utils/config';
 import { setupCommands } from './setup-commands';
+import { safeJoin } from '../utils/path';
 
 interface InitOptions {
   example: boolean;
@@ -84,8 +85,8 @@ Examples:
 }
 
 function createDirectories(projectRoot: string, config: CursorFlowConfig): void {
-  const tasksDir = path.join(projectRoot, config.tasksDir);
-  const logsDir = path.join(projectRoot, config.logsDir);
+  const tasksDir = safeJoin(projectRoot, config.tasksDir);
+  const logsDir = safeJoin(projectRoot, config.logsDir);
   
   if (!fs.existsSync(tasksDir)) {
     fs.mkdirSync(tasksDir, { recursive: true });
@@ -103,7 +104,7 @@ function createDirectories(projectRoot: string, config: CursorFlowConfig): void 
 }
 
 function createExampleTasks(projectRoot: string, config: CursorFlowConfig): void {
-  const exampleDir = path.join(projectRoot, config.tasksDir, 'example');
+  const exampleDir = safeJoin(projectRoot, config.tasksDir, 'example');
   
   if (!fs.existsSync(exampleDir)) {
     fs.mkdirSync(exampleDir, { recursive: true });
@@ -134,13 +135,13 @@ Create a simple hello.txt file with a greeting message.
     ]
   };
   
-  const taskPath = path.join(exampleDir, '01-hello.json');
+  const taskPath = safeJoin(exampleDir, '01-hello.json');
   fs.writeFileSync(taskPath, JSON.stringify(exampleTask, null, 2) + '\n', 'utf8');
   
   logger.success(`Created example task: ${path.relative(projectRoot, taskPath)}`);
   
   // Create README
-  const readmePath = path.join(exampleDir, 'README.md');
+  const readmePath = safeJoin(exampleDir, 'README.md');
   const readme = `# Example Task
 
 This is an example CursorFlow task to help you get started.
@@ -172,7 +173,7 @@ cursorflow run ${config.tasksDir}/example/
  * Add _cursorflow to .gitignore
  */
 function updateGitignore(projectRoot: string): void {
-  const gitignorePath = path.join(projectRoot, '.gitignore');
+  const gitignorePath = safeJoin(projectRoot, '.gitignore');
   const entry = '_cursorflow/';
   
   // Try to read existing .gitignore (avoid TOCTOU by reading directly)

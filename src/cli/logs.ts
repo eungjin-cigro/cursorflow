@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as logger from '../utils/logger';
 import { loadConfig } from '../utils/config';
+import { safeJoin } from '../utils/path';
 import { 
   readJsonLog, 
   exportLogs, 
@@ -114,15 +115,15 @@ function parseArgs(args: string[]): LogsOptions {
  * Find the latest run directory
  */
 function findLatestRunDir(logsDir: string): string | null {
-  const runsDir = path.join(logsDir, 'runs');
+  const runsDir = safeJoin(logsDir, 'runs');
   if (!fs.existsSync(runsDir)) return null;
   
   const runs = fs.readdirSync(runsDir)
     .filter(d => d.startsWith('run-'))
     .map(d => ({ 
       name: d, 
-      path: path.join(runsDir, d), 
-      mtime: fs.statSync(path.join(runsDir, d)).mtime.getTime() 
+      path: safeJoin(runsDir, d), 
+      mtime: fs.statSync(safeJoin(runsDir, d)).mtime.getTime() 
     }))
     .sort((a, b) => b.mtime - a.mtime);
   
@@ -133,11 +134,11 @@ function findLatestRunDir(logsDir: string): string | null {
  * List lanes in a run directory
  */
 function listLanes(runDir: string): string[] {
-  const lanesDir = path.join(runDir, 'lanes');
+  const lanesDir = safeJoin(runDir, 'lanes');
   if (!fs.existsSync(lanesDir)) return [];
   
   return fs.readdirSync(lanesDir)
-    .filter(d => fs.statSync(path.join(lanesDir, d)).isDirectory());
+    .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory());
 }
 
 /**
@@ -148,9 +149,9 @@ function displayTextLogs(
   options: LogsOptions
 ): void {
   let logFile: string;
-  const readableLog = path.join(laneDir, 'terminal-readable.log');
-  const rawLog = path.join(laneDir, 'terminal-raw.log');
-  const cleanLog = path.join(laneDir, 'terminal.log');
+  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
+  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+  const cleanLog = safeJoin(laneDir, 'terminal.log');
 
   if (options.raw) {
     logFile = rawLog;
@@ -171,10 +172,10 @@ function displayTextLogs(
   let content = fs.readFileSync(logFile, 'utf8');
   let lines = content.split('\n');
   
-  // Apply filter (escape to prevent regex injection)
+  // Apply filter (case-insensitive string match to avoid ReDoS)
   if (options.filter) {
-    const regex = new RegExp(escapeRegex(options.filter), 'i');
-    lines = lines.filter(line => regex.test(line));
+    const filterLower = options.filter.toLowerCase();
+    lines = lines.filter(line => line.toLowerCase().includes(filterLower));
   }
   
   // Apply tail
@@ -197,7 +198,7 @@ function displayJsonLogs(
   laneDir: string, 
   options: LogsOptions
 ): void {
-  const logFile = path.join(laneDir, 'terminal.jsonl');
+  const logFile = safeJoin(laneDir, 'terminal.jsonl');
   
   if (!fs.existsSync(logFile)) {
     console.log('No JSON log file found.');
@@ -211,10 +212,13 @@ function displayJsonLogs(
     entries = entries.filter(e => e.level === options.level);
   }
   
-  // Apply regex filter (escape to prevent regex injection)
+  // Apply filter (case-insensitive string match to avoid ReDoS)
   if (options.filter) {
-    const regex = new RegExp(escapeRegex(options.filter), 'i');
-    entries = entries.filter(e => regex.test(e.message) || regex.test(e.task || ''));
+    const filterLower = options.filter.toLowerCase();
+    entries = entries.filter(e => 
+      e.message.toLowerCase().includes(filterLower) || 
+      (e.task && e.task.toLowerCase().includes(filterLower))
+    );
   }
   
   // Apply tail
@@ -290,8 +294,8 @@ function readAllLaneLogs(runDir: string): MergedLogEntry[] {
   const allEntries: MergedLogEntry[] = [];
   
   lanes.forEach((laneName, index) => {
-    const laneDir = path.join(runDir, 'lanes', laneName);
-    const jsonLogPath = path.join(laneDir, 'terminal.jsonl');
+    const laneDir = safeJoin(runDir, 'lanes', laneName);
+    const jsonLogPath = safeJoin(laneDir, 'terminal.jsonl');
     
     if (fs.existsSync(jsonLogPath)) {
       const entries = readJsonLog(jsonLogPath);
@@ -333,13 +337,13 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
     entries = entries.filter(e => e.level === options.level);
   }
   
-  // Apply regex filter (escape to prevent regex injection)
+  // Apply filter (case-insensitive string match to avoid ReDoS)
   if (options.filter) {
-    const regex = new RegExp(escapeRegex(options.filter), 'i');
+    const filterLower = options.filter.toLowerCase();
     entries = entries.filter(e => 
-      regex.test(e.message) || 
-      regex.test(e.task || '') ||
-      regex.test(e.laneName)
+      e.message.toLowerCase().includes(filterLower) || 
+      (e.task && e.task.toLowerCase().includes(filterLower)) ||
+      e.laneName.toLowerCase().includes(filterLower)
     );
   }
   
@@ -426,8 +430,8 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
     const newEntries: MergedLogEntry[] = [];
     
     for (const lane of lanes) {
-      const laneDir = path.join(runDir, 'lanes', lane);
-      const jsonLogPath = path.join(laneDir, 'terminal.jsonl');
+      const laneDir = safeJoin(runDir, 'lanes', lane);
+      const jsonLogPath = safeJoin(laneDir, 'terminal.jsonl');
       
       try {
         // Use statSync directly to avoid TOCTOU race condition
@@ -473,10 +477,12 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       // Apply level filter
       if (options.level && entry.level !== options.level) continue;
       
-      // Apply regex filter (escape to prevent regex injection)
+      // Apply filter (case-insensitive string match to avoid ReDoS)
       if (options.filter) {
-        const regex = new RegExp(escapeRegex(options.filter), 'i');
-        if (!regex.test(entry.message) && !regex.test(entry.task || '') && !regex.test(entry.laneName)) {
+        const filterLower = options.filter.toLowerCase();
+        if (!entry.message.toLowerCase().includes(filterLower) && 
+            !(entry.task && entry.task.toLowerCase().includes(filterLower)) && 
+            !entry.laneName.toLowerCase().includes(filterLower)) {
           continue;
         }
       }
@@ -644,9 +650,9 @@ function escapeHtml(text: string): string {
  */
 function followLogs(laneDir: string, options: LogsOptions): void {
   let logFile: string;
-  const readableLog = path.join(laneDir, 'terminal-readable.log');
-  const rawLog = path.join(laneDir, 'terminal-raw.log');
-  const cleanLog = path.join(laneDir, 'terminal.log');
+  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
+  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+  const cleanLog = safeJoin(laneDir, 'terminal.log');
 
   if (options.raw) {
     logFile = rawLog;
@@ -687,11 +693,11 @@ function followLogs(laneDir: string, options: LogsOptions): void {
         
         let content = buffer.toString();
         
-        // Apply filter (escape to prevent regex injection)
+        // Apply filter (case-insensitive string match to avoid ReDoS)
         if (options.filter) {
-          const regex = new RegExp(escapeRegex(options.filter), 'i');
+          const filterLower = options.filter.toLowerCase();
           const lines = content.split('\n');
-          content = lines.filter(line => regex.test(line)).join('\n');
+          content = lines.filter(line => line.toLowerCase().includes(filterLower)).join('\n');
         }
         
         // Clean ANSI if needed (unless raw mode)
@@ -734,11 +740,11 @@ function displaySummary(runDir: string): void {
   }
   
   for (const lane of lanes) {
-    const laneDir = path.join(runDir, 'lanes', lane);
-    const cleanLog = path.join(laneDir, 'terminal.log');
-    const rawLog = path.join(laneDir, 'terminal-raw.log');
-    const jsonLog = path.join(laneDir, 'terminal.jsonl');
-    const readableLog = path.join(laneDir, 'terminal-readable.log');
+    const laneDir = safeJoin(runDir, 'lanes', lane);
+    const cleanLog = safeJoin(laneDir, 'terminal.log');
+    const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+    const jsonLog = safeJoin(laneDir, 'terminal.jsonl');
+    const readableLog = safeJoin(laneDir, 'terminal-readable.log');
     
     console.log(`  ${logger.COLORS.green}📁 ${lane}${logger.COLORS.reset}`);
     
@@ -839,7 +845,7 @@ async function logs(args: string[]): Promise<void> {
   }
   
   // Find lane directory
-  const laneDir = path.join(runDir, 'lanes', options.lane);
+  const laneDir = safeJoin(runDir, 'lanes', options.lane);
   if (!fs.existsSync(laneDir)) {
     const lanes = listLanes(runDir);
     throw new Error(`Lane not found: ${options.lane}\nAvailable lanes: ${lanes.join(', ')}`);

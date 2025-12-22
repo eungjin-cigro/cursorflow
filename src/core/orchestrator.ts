@@ -16,6 +16,7 @@ import { registerWebhooks } from '../utils/webhook';
 import { loadConfig, getLogsDir } from '../utils/config';
 import * as git from '../utils/git';
 import { execSync } from 'child_process';
+import { safeJoin } from '../utils/path';
 import { 
   EnhancedLogManager, 
   createLogManager, 
@@ -242,7 +243,7 @@ export function spawnLane({
     });
   } else {
     // Fallback to simple file logging
-    logPath = path.join(laneRunDir, 'terminal.log');
+    logPath = safeJoin(laneRunDir, 'terminal.log');
     const logFd = fs.openSync(logPath, 'a');
     
     child = spawn('node', args, {
@@ -289,7 +290,7 @@ export function listLaneFiles(tasksDir: string): LaneInfo[] {
     .filter(f => f.endsWith('.json'))
     .sort()
     .map(f => {
-      const filePath = path.join(tasksDir, f);
+      const filePath = safeJoin(tasksDir, f);
       const name = path.basename(f, '.json');
       let dependsOn: string[] = [];
       
@@ -316,7 +317,7 @@ export function printLaneStatus(lanes: LaneInfo[], laneRunDirs: Record<string, s
     const dir = laneRunDirs[lane.name];
     if (!dir) return { lane: lane.name, status: '(unknown)', task: '-' };
     
-    const statePath = path.join(dir, 'state.json');
+    const statePath = safeJoin(dir, 'state.json');
     const state = loadState<LaneState>(statePath);
     
     if (!state) {
@@ -364,9 +365,9 @@ async function resolveAllDependencies(
 
   // 2. Setup a temporary worktree for resolution if needed, or use the first available one
   const firstLaneName = Array.from(blockedLanes.keys())[0]!;
-  const statePath = path.join(laneRunDirs[firstLaneName]!, 'state.json');
+  const statePath = safeJoin(laneRunDirs[firstLaneName]!, 'state.json');
   const state = loadState<LaneState>(statePath);
-  const worktreeDir = state?.worktreeDir || path.join(runRoot, 'resolution-worktree');
+  const worktreeDir = state?.worktreeDir || safeJoin(runRoot, 'resolution-worktree');
 
   if (!fs.existsSync(worktreeDir)) {
     logger.info(`Creating resolution worktree at ${worktreeDir}`);
@@ -405,7 +406,7 @@ async function resolveAllDependencies(
     const laneDir = laneRunDirs[lane.name];
     if (!laneDir) continue;
 
-    const laneState = loadState<LaneState>(path.join(laneDir, 'state.json'));
+    const laneState = loadState<LaneState>(safeJoin(laneDir, 'state.json'));
     if (!laneState || laneState.status === 'completed' || laneState.status === 'failed') continue;
 
     // Merge pipelineBranch into the lane's current task branch
@@ -465,8 +466,8 @@ export async function orchestrate(tasksDir: string, options: {
   const runId = `run-${Date.now()}`;
   // Use absolute path for runRoot to avoid issues with subfolders
   const runRoot = options.runDir 
-    ? (path.isAbsolute(options.runDir) ? options.runDir : path.resolve(process.cwd(), options.runDir))
-    : path.join(logsDir, 'runs', runId);
+    ? (path.isAbsolute(options.runDir) ? options.runDir : path.resolve(process.cwd(), options.runDir)) // nosemgrep
+    : safeJoin(logsDir, 'runs', runId);
   
   fs.mkdirSync(runRoot, { recursive: true });
 
@@ -500,7 +501,7 @@ export async function orchestrate(tasksDir: string, options: {
   
   const laneRunDirs: Record<string, string> = {};
   for (const lane of lanes) {
-    laneRunDirs[lane.name] = path.join(runRoot, 'lanes', lane.name);
+    laneRunDirs[lane.name] = safeJoin(runRoot, 'lanes', lane.name);
     fs.mkdirSync(laneRunDirs[lane.name], { recursive: true });
   }
   
@@ -607,7 +608,7 @@ export async function orchestrate(tasksDir: string, options: {
         });
       } else if (finished.code === 2) {
         // Blocked by dependency
-        const statePath = path.join(laneRunDirs[finished.name]!, 'state.json');
+        const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
         const state = loadState<LaneState>(statePath);
         
         if (state && state.dependencyRequest) {

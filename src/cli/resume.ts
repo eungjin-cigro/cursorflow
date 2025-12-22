@@ -10,6 +10,14 @@ import { loadConfig, getLogsDir } from '../utils/config';
 import { loadState } from '../utils/state';
 import { LaneState } from '../utils/types';
 import { runDoctor } from '../utils/doctor';
+import { safeJoin } from '../utils/path';
+import { 
+  EnhancedLogManager, 
+  createLogManager, 
+  DEFAULT_LOG_CONFIG,
+  stripAnsi,
+  ParsedMessage
+} from '../utils/enhanced-logger';
 
 interface ResumeOptions {
   lane: string | null;
@@ -21,6 +29,8 @@ interface ResumeOptions {
   status: boolean;
   maxConcurrent: number;
   help: boolean;
+  noGit: boolean;
+  executor: string | null;
 }
 
 function printHelp(): void {
@@ -38,6 +48,8 @@ Options:
   --clean                Clean up existing worktree before resuming
   --restart              Restart from the first task (index 0)
   --skip-doctor          Skip environment/branch checks (not recommended)
+  --no-git               Disable Git operations (must match original run)
+  --executor <type>      Override executor (default: cursor-agent)
   --help, -h             Show help
 
 Examples:
@@ -52,6 +64,7 @@ Examples:
 function parseArgs(args: string[]): ResumeOptions {
   const runDirIdx = args.indexOf('--run-dir');
   const maxConcurrentIdx = args.indexOf('--max-concurrent');
+  const executorIdx = args.indexOf('--executor');
   
   return {
     lane: args.find(a => !a.startsWith('--')) || null,
@@ -63,6 +76,8 @@ function parseArgs(args: string[]): ResumeOptions {
     status: args.includes('--status'),
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '3') : 3,
     help: args.includes('--help') || args.includes('-h'),
+    noGit: args.includes('--no-git'),
+    executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
   };
 }
 
@@ -70,7 +85,7 @@ function parseArgs(args: string[]): ResumeOptions {
  * Find the latest run directory
  */
 function findLatestRunDir(logsDir: string): string | null {
-  const runsDir = path.join(logsDir, 'runs');
+  const runsDir = safeJoin(logsDir, 'runs');
   if (!fs.existsSync(runsDir)) return null;
   
   const runs = fs.readdirSync(runsDir)
@@ -78,7 +93,7 @@ function findLatestRunDir(logsDir: string): string | null {
     .sort()
     .reverse();
     
-  return runs.length > 0 ? path.join(runsDir, runs[0]!) : null;
+  return runs.length > 0 ? safeJoin(runsDir, runs[0]!) : null;
 }
 
 /**
@@ -96,6 +111,79 @@ const STATUS_COLORS: Record<string, string> = {
 };
 const RESET = '\x1b[0m';
 
+/**
+ * Format and print parsed message to console (copied from orchestrator.ts)
+ */
+function handleParsedMessage(laneName: string, msg: ParsedMessage): void {
+  const ts = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false });
+  const laneLabel = `[${laneName}]`.padEnd(12);
+  
+  let prefix = '';
+  let content = msg.content;
+  
+  switch (msg.type) {
+    case 'user':
+      prefix = `${logger.COLORS.cyan}🧑 USER${logger.COLORS.reset}`;
+      content = content.replace(/\n/g, ' ');
+      break;
+    case 'assistant':
+      prefix = `${logger.COLORS.green}🤖 ASST${logger.COLORS.reset}`;
+      break;
+    case 'tool':
+      prefix = `${logger.COLORS.yellow}🔧 TOOL${logger.COLORS.reset}`;
+      const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
+      if (toolMatch) {
+        const [, name, args] = toolMatch;
+        try {
+          const parsedArgs = JSON.parse(args!);
+          let argStr = '';
+          if (name === 'read_file' && parsedArgs.target_file) argStr = parsedArgs.target_file;
+          else if (name === 'run_terminal_cmd' && parsedArgs.command) argStr = parsedArgs.command;
+          else if (name === 'write' && parsedArgs.file_path) argStr = parsedArgs.file_path;
+          else if (name === 'search_replace' && parsedArgs.file_path) argStr = parsedArgs.file_path;
+          else {
+            const keys = Object.keys(parsedArgs);
+            if (keys.length > 0) argStr = String(parsedArgs[keys[0]]).substring(0, 50);
+          }
+          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}(${argStr})`;
+        } catch {
+          content = `${logger.COLORS.bold}${name}${logger.COLORS.reset}: ${args}`;
+        }
+      }
+      break;
+    case 'tool_result':
+      prefix = `${logger.COLORS.gray}📄 RESL${logger.COLORS.reset}`;
+      const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
+      content = resMatch ? `${resMatch[1]} OK` : 'result';
+      break;
+    case 'result':
+      prefix = `${logger.COLORS.green}✅ DONE${logger.COLORS.reset}`;
+      break;
+    case 'system':
+      prefix = `${logger.COLORS.gray}⚙️  SYS${logger.COLORS.reset}`;
+      break;
+    case 'thinking':
+      prefix = `${logger.COLORS.gray}🤔 THNK${logger.COLORS.reset}`;
+      break;
+  }
+  
+  if (prefix) {
+    const lines = content.split('\n');
+    const tsPrefix = `${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneLabel}${logger.COLORS.reset}`;
+    
+    if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result' || msg.type === 'thinking') {
+      const header = `${prefix} ┌${'─'.repeat(60)}`;
+      process.stdout.write(`${tsPrefix} ${header}\n`);
+      for (const line of lines) {
+        process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} │ ${line}\n`);
+      }
+      process.stdout.write(`${tsPrefix} ${' '.repeat(stripAnsi(prefix).length)} └${'─'.repeat(60)}\n`);
+    } else {
+      process.stdout.write(`${tsPrefix} ${prefix} ${content}\n`);
+    }
+  }
+}
+
 interface LaneInfo {
   name: string;
   dir: string;
@@ -109,16 +197,16 @@ interface LaneInfo {
  * Get all lane statuses from a run directory
  */
 function getAllLaneStatuses(runDir: string): LaneInfo[] {
-  const lanesDir = path.join(runDir, 'lanes');
+  const lanesDir = safeJoin(runDir, 'lanes');
   if (!fs.existsSync(lanesDir)) {
     return [];
   }
   
   const lanes = fs.readdirSync(lanesDir)
-    .filter(f => fs.statSync(path.join(lanesDir, f)).isDirectory())
+    .filter(f => fs.statSync(safeJoin(lanesDir, f)).isDirectory())
     .map(name => {
-      const dir = path.join(lanesDir, name);
-      const statePath = path.join(dir, 'state.json');
+      const dir = safeJoin(lanesDir, name);
+      const statePath = safeJoin(dir, 'state.json');
       const state = fs.existsSync(statePath) ? loadState<LaneState>(statePath) : null;
       
       // Determine if lane needs resume
@@ -256,14 +344,20 @@ function printAllLaneStatus(runDir: string): { total: number; completed: number;
 }
 
 /**
- * Resume a single lane and return the child process
+ * Resume a single lane and return the child process and its log manager
  */
 function spawnLaneResume(
   laneName: string,
   laneDir: string,
   state: LaneState,
-  options: { restart: boolean }
-): ChildProcess {
+  options: { 
+    restart: boolean;
+    noGit?: boolean;
+    pipelineBranch?: string;
+    executor?: string | null;
+    enhancedLogConfig?: any;
+  }
+): { child: ChildProcess; logManager: EnhancedLogManager } {
   const runnerPath = require.resolve('../core/runner');
   const startIndex = options.restart ? 0 : state.currentTaskIndex;
   
@@ -273,13 +367,80 @@ function spawnLaneResume(
     '--run-dir', laneDir,
     '--start-index', String(startIndex),
   ];
+
+  if (options.noGit) {
+    runnerArgs.push('--no-git');
+  }
+
+  // Explicitly pass pipeline branch if available (either from state or override)
+  const branch = options.pipelineBranch || state.pipelineBranch;
+  if (branch) {
+    runnerArgs.push('--pipeline-branch', branch);
+  }
+  
+  // Pass executor if provided
+  if (options.executor) {
+    runnerArgs.push('--executor', options.executor);
+  }
+
+  const logManager = createLogManager(laneDir, laneName, options.enhancedLogConfig || {}, (msg) => handleParsedMessage(laneName, msg));
   
   const child = spawn('node', runnerArgs, {
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: process.env,
   });
   
-  return child;
+  let lineBuffer = '';
+  
+  if (child.stdout) {
+    child.stdout.on('data', (data: Buffer) => {
+      logManager.writeStdout(data);
+      
+      const str = data.toString();
+      lineBuffer += str;
+      const lines = lineBuffer.split('\n');
+      lineBuffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && 
+            !trimmed.startsWith('{') && 
+            !trimmed.startsWith('[') && 
+            !trimmed.includes('{"type"')) {
+          process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${line}\n`);
+        }
+      }
+    });
+  }
+  
+  if (child.stderr) {
+    child.stderr.on('data', (data: Buffer) => {
+      logManager.writeStderr(data);
+      const str = data.toString();
+      const lines = str.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) {
+          const isStatus = trimmed.startsWith('Preparing worktree') || 
+                           trimmed.startsWith('Switched to a new branch') ||
+                           trimmed.startsWith('HEAD is now at') ||
+                           trimmed.includes('actual output');
+          
+          if (isStatus) {
+            process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}${laneName.padEnd(10)}${logger.COLORS.reset} ${trimmed}\n`);
+          } else {
+            process.stderr.write(`${logger.COLORS.red}[${laneName}] ERROR: ${trimmed}${logger.COLORS.reset}\n`);
+          }
+        }
+      }
+    });
+  }
+  
+  child.on('exit', () => {
+    logManager.close();
+  });
+  
+  return { child, logManager };
 }
 
 /**
@@ -301,7 +462,14 @@ function waitForChild(child: ChildProcess): Promise<number> {
  */
 async function resumeAllLanes(
   runDir: string,
-  options: { restart: boolean; maxConcurrent: number; skipDoctor: boolean }
+  options: { 
+    restart: boolean; 
+    maxConcurrent: number; 
+    skipDoctor: boolean; 
+    noGit: boolean;
+    executor: string | null;
+    enhancedLogConfig?: any;
+  }
 ): Promise<{ succeeded: string[]; failed: string[]; skipped: string[] }> {
   const allLanes = getAllLaneStatuses(runDir);
   const lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
@@ -427,8 +595,11 @@ async function resumeAllLanes(
       const depsInfo = lane.dependsOn.length > 0 ? ` (after: ${lane.dependsOn.join(', ')})` : '';
       logger.info(`Starting: ${lane.name} (task ${lane.state!.currentTaskIndex}/${lane.state!.totalTasks})${depsInfo}`);
       
-      const child = spawnLaneResume(lane.name, lane.dir, lane.state!, {
+      const { child } = spawnLaneResume(lane.name, lane.dir, lane.state!, {
         restart: options.restart,
+        noGit: options.noGit,
+        executor: options.executor,
+        enhancedLogConfig: options.enhancedLogConfig,
       });
       
       active.set(lane.name, child);
@@ -520,6 +691,9 @@ async function resume(args: string[]): Promise<void> {
       restart: options.restart,
       maxConcurrent: options.maxConcurrent,
       skipDoctor: options.skipDoctor,
+      noGit: options.noGit,
+      executor: options.executor,
+      enhancedLogConfig: config.enhancedLogging,
     });
     
     if (result.failed.length > 0) {
@@ -538,8 +712,8 @@ async function resume(args: string[]): Promise<void> {
     return;
   }
   
-  const laneDir = path.join(runDir, 'lanes', options.lane);
-  const statePath = path.join(laneDir, 'state.json');
+  const laneDir = safeJoin(runDir, 'lanes', options.lane);
+  const statePath = safeJoin(laneDir, 'state.json');
   
   if (!fs.existsSync(statePath)) {
     throw new Error(`Lane state not found at ${statePath}. Is the lane name correct?`);
@@ -598,8 +772,11 @@ async function resume(args: string[]): Promise<void> {
   logger.info(`Tasks: ${state.tasksFile}`);
   logger.info(`Starting from task index: ${options.restart ? 0 : state.currentTaskIndex}`);
   
-  const child = spawnLaneResume(options.lane, laneDir, state, {
+  const { child } = spawnLaneResume(options.lane, laneDir, state, {
     restart: options.restart,
+    noGit: options.noGit,
+    executor: options.executor,
+    enhancedLogConfig: config.enhancedLogging,
   });
   
   logger.info(`Spawning runner process...`);

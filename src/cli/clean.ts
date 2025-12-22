@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as logger from '../utils/logger';
 import * as git from '../utils/git';
 import { loadConfig, getLogsDir, getTasksDir } from '../utils/config';
+import { safeJoin } from '../utils/path';
 
 interface CleanOptions {
   type?: string;
@@ -105,7 +106,7 @@ async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptio
   logger.info('\nChecking worktrees...');
   const worktrees = git.listWorktrees(repoRoot);
   
-  const worktreeRoot = path.join(repoRoot, config.worktreeRoot || '_cursorflow/worktrees');
+  const worktreeRoot = safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees');
   let toRemove = worktrees.filter(wt => {
     // Skip main worktree
     if (wt.path === repoRoot) return false;
@@ -226,9 +227,9 @@ async function cleanLogs(config: any, options: CleanOptions) {
     const entries = fs.readdirSync(logsDir, { withFileTypes: true });
     let items = entries.map(entry => ({
       name: entry.name,
-      path: path.join(logsDir, entry.name),
+      path: safeJoin(logsDir, entry.name),
       isDir: entry.isDirectory(),
-      mtime: getModTime(path.join(logsDir, entry.name))
+      mtime: getModTime(safeJoin(logsDir, entry.name))
     }));
 
     if (items.length <= 1) {
@@ -288,9 +289,9 @@ async function cleanTasks(config: any, options: CleanOptions) {
       .filter(entry => entry.name !== 'example')
       .map(entry => ({
         name: entry.name,
-        path: path.join(tasksDir, entry.name),
+        path: safeJoin(tasksDir, entry.name),
         isDir: entry.isDirectory(),
-        mtime: getModTime(path.join(tasksDir, entry.name))
+        mtime: getModTime(safeJoin(tasksDir, entry.name))
       }));
 
     if (items.length <= 1) {
@@ -325,7 +326,7 @@ async function cleanTasks(config: any, options: CleanOptions) {
         const entries = fs.readdirSync(tasksDir, { withFileTypes: true });
         for (const entry of entries) {
           if (entry.name === 'example') continue;
-          const itemPath = path.join(tasksDir, entry.name);
+          const itemPath = safeJoin(tasksDir, entry.name);
           logger.info(`  Removing task: ${entry.name}...`);
           fs.rmSync(itemPath, { recursive: true, force: true });
         }

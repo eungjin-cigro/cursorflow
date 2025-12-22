@@ -9,6 +9,7 @@ import * as logger from '../utils/logger';
 import { loadState, readLog } from '../utils/state';
 import { LaneState, ConversationEntry } from '../utils/types';
 import { loadConfig } from '../utils/config';
+import { safeJoin } from '../utils/path';
 
 interface LaneWithDeps {
   name: string;
@@ -339,11 +340,11 @@ class InteractiveMonitor {
     if (!lane) return;
 
     try {
-      const interventionPath = path.join(lane.path, 'intervention.txt');
+      const interventionPath = safeJoin(lane.path, 'intervention.txt');
       fs.writeFileSync(interventionPath, message, 'utf8');
 
       // Also log it to the conversation
-      const convoPath = path.join(lane.path, 'conversation.jsonl');
+      const convoPath = safeJoin(lane.path, 'conversation.jsonl');
       const entry = {
         timestamp: new Date().toISOString(),
         role: 'user',
@@ -372,7 +373,7 @@ class InteractiveMonitor {
         return;
       }
 
-      const timeoutPath = path.join(lane.path, 'timeout.txt');
+      const timeoutPath = safeJoin(lane.path, 'timeout.txt');
       fs.writeFileSync(timeoutPath, String(timeoutMs), 'utf8');
       
       this.showNotification(`Timeout updated to ${Math.round(timeoutMs/1000)}s`, 'success');
@@ -385,7 +386,7 @@ class InteractiveMonitor {
     if (!this.selectedLaneName) return;
     const lane = this.lanes.find(l => l.name === this.selectedLaneName);
     if (!lane) return;
-    const convoPath = path.join(lane.path, 'conversation.jsonl');
+    const convoPath = safeJoin(lane.path, 'conversation.jsonl');
     this.currentLogs = readLog<ConversationEntry>(convoPath);
     // Keep selection in bounds after refresh
     if (this.selectedMessageIndex >= this.currentLogs.length) {
@@ -537,7 +538,7 @@ class InteractiveMonitor {
     }
 
     const status = this.getLaneStatus(lane.path, lane.name);
-    const logPath = path.join(lane.path, 'terminal.log');
+    const logPath = safeJoin(lane.path, 'terminal.log');
     let liveLog = '(No live terminal output)';
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, 'utf8');
@@ -680,7 +681,7 @@ class InteractiveMonitor {
       return;
     }
 
-    const logPath = path.join(lane.path, 'terminal.log');
+    const logPath = safeJoin(lane.path, 'terminal.log');
     let logLines: string[] = [];
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, 'utf8');
@@ -761,21 +762,21 @@ class InteractiveMonitor {
   }
 
   private listLanesWithDeps(runDir: string): LaneWithDeps[] {
-    const lanesDir = path.join(runDir, 'lanes');
+    const lanesDir = safeJoin(runDir, 'lanes');
     if (!fs.existsSync(lanesDir)) return [];
     
     const config = loadConfig();
-    const tasksDir = path.join(config.projectRoot, config.tasksDir);
+    const tasksDir = safeJoin(config.projectRoot, config.tasksDir);
     
     const laneConfigs = this.listLaneFilesFromDir(tasksDir);
     
     return fs.readdirSync(lanesDir)
-      .filter(d => fs.statSync(path.join(lanesDir, d)).isDirectory())
+      .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory())
       .map(name => {
         const config = laneConfigs.find(c => c.name === name);
         return {
           name,
-          path: path.join(lanesDir, name),
+          path: safeJoin(lanesDir, name),
           dependsOn: config?.dependsOn || [],
         };
       });
@@ -786,7 +787,7 @@ class InteractiveMonitor {
     return fs.readdirSync(tasksDir)
       .filter(f => f.endsWith('.json'))
       .map(f => {
-        const filePath = path.join(tasksDir, f);
+        const filePath = safeJoin(tasksDir, f);
         try {
           const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
           return { name: path.basename(f, '.json'), dependsOn: config.dependsOn || [] };
@@ -797,7 +798,7 @@ class InteractiveMonitor {
   }
 
   private getLaneStatus(lanePath: string, laneName: string) {
-    const statePath = path.join(lanePath, 'state.json');
+    const statePath = safeJoin(lanePath, 'state.json');
     const state = loadState<LaneState & { chatId?: string }>(statePath);
     
     const laneInfo = this.lanes.find(l => l.name === laneName);
@@ -857,11 +858,11 @@ class InteractiveMonitor {
  * Find the latest run directory
  */
 function findLatestRunDir(logsDir: string): string | null {
-  const runsDir = path.join(logsDir, 'runs');
+  const runsDir = safeJoin(logsDir, 'runs');
   if (!fs.existsSync(runsDir)) return null;
   const runs = fs.readdirSync(runsDir)
     .filter(d => d.startsWith('run-'))
-    .map(d => ({ name: d, path: path.join(runsDir, d), mtime: fs.statSync(path.join(runsDir, d)).mtime.getTime() }))
+    .map(d => ({ name: d, path: safeJoin(runsDir, d), mtime: fs.statSync(safeJoin(runsDir, d)).mtime.getTime() }))
     .sort((a, b) => b.mtime - a.mtime);
   return runs.length > 0 ? runs[0]!.path : null;
 }

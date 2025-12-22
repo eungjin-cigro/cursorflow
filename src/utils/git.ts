@@ -37,17 +37,45 @@ export interface CommitInfo {
 }
 
 /**
+ * Filter out noisy git stderr messages
+ */
+function filterGitStderr(stderr: string): string {
+  if (!stderr) return '';
+  
+  const lines = stderr.split('\n');
+  const filtered = lines.filter(line => {
+    // GitHub noise
+    if (line.includes('remote: Create a pull request')) return false;
+    if (line.trim().startsWith('remote:') && line.includes('pull/new')) return false;
+    if (line.trim() === 'remote:') return false; // Empty remote lines
+    
+    return true;
+  });
+  
+  return filtered.join('\n');
+}
+
+/**
  * Run git command and return output
  */
 export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
   
   try {
+    const stdioMode = silent ? 'pipe' : ['inherit', 'inherit', 'pipe'];
+
     const result = spawnSync('git', args, {
       cwd: cwd || process.cwd(),
       encoding: 'utf8',
-      stdio: silent ? 'pipe' : 'inherit',
+      stdio: stdioMode as any,
     });
+    
+    if (!silent && result.stderr) {
+      const filteredStderr = filterGitStderr(result.stderr);
+      if (filteredStderr) {
+        process.stderr.write(filteredStderr);
+      }
+    }
     
     if (result.status !== 0 && !silent) {
       throw new Error(`Git command failed: git ${args.join(' ')}\n${result.stderr || ''}`);

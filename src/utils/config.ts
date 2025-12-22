@@ -7,6 +7,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { CursorFlowConfig } from './types';
+import { safeJoin } from './path';
 export { CursorFlowConfig };
 
 /**
@@ -16,8 +17,8 @@ export function findProjectRoot(cwd = process.cwd()): string {
   let current = cwd;
   
   while (current !== path.parse(current).root) {
-    const packagePath = path.join(current, 'package.json');
-    const configPath = path.join(current, 'cursorflow.config.js');
+    const packagePath = safeJoin(current, 'package.json');
+    const configPath = safeJoin(current, 'cursorflow.config.js');
     
     if (fs.existsSync(packagePath) || fs.existsSync(configPath)) {
       return current;
@@ -36,7 +37,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     projectRoot = findProjectRoot();
   }
   
-  const configPath = path.join(projectRoot, 'cursorflow.config.js');
+  const configPath = safeJoin(projectRoot, 'cursorflow.config.js');
   
   // Default configuration
   const defaults: CursorFlowConfig = {
@@ -114,14 +115,14 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
  * Get absolute path for tasks directory
  */
 export function getTasksDir(config: CursorFlowConfig): string {
-  return path.join(config.projectRoot, config.tasksDir);
+  return safeJoin(config.projectRoot, config.tasksDir);
 }
 
 /**
  * Get absolute path for logs directory
  */
 export function getLogsDir(config: CursorFlowConfig): string {
-  return path.join(config.projectRoot, config.logsDir);
+  return safeJoin(config.projectRoot, config.logsDir);
 }
 
 /**
@@ -157,7 +158,7 @@ export function validateConfig(config: CursorFlowConfig): boolean {
  * Create default config file
  */
 export function createDefaultConfig(projectRoot: string, force = false): string {
-  const configPath = path.join(projectRoot, 'cursorflow.config.js');
+  const configPath = safeJoin(projectRoot, 'cursorflow.config.js');
   
   const template = `module.exports = {
   // Directory configuration

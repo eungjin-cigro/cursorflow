@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Transform, TransformCallback } from 'stream';
 import { EnhancedLogConfig } from './types';
+import { safeJoin } from './path';
 
 // Re-export for backwards compatibility
 export { EnhancedLogConfig } from './types';
@@ -413,10 +414,10 @@ export class EnhancedLogManager {
     fs.mkdirSync(logDir, { recursive: true });
     
     // Set up log file paths
-    this.cleanLogPath = path.join(logDir, 'terminal.log');
-    this.rawLogPath = path.join(logDir, 'terminal-raw.log');
-    this.jsonLogPath = path.join(logDir, 'terminal.jsonl');
-    this.readableLogPath = path.join(logDir, 'terminal-readable.log');
+    this.cleanLogPath = safeJoin(logDir, 'terminal.log');
+    this.rawLogPath = safeJoin(logDir, 'terminal-raw.log');
+    this.jsonLogPath = safeJoin(logDir, 'terminal.jsonl');
+    this.readableLogPath = safeJoin(logDir, 'terminal-readable.log');
     
     // Initialize log files
     this.initLogFiles();
@@ -620,8 +621,8 @@ export class EnhancedLogManager {
     
     // Shift existing rotated files
     for (let i = this.config.maxFiles - 1; i >= 1; i--) {
-      const oldPath = path.join(dir, `${base}.${i}${ext}`);
-      const newPath = path.join(dir, `${base}.${i + 1}${ext}`);
+      const oldPath = safeJoin(dir, `${base}.${i}${ext}`);
+      const newPath = safeJoin(dir, `${base}.${i + 1}${ext}`);
       
       if (fs.existsSync(oldPath)) {
         if (i === this.config.maxFiles - 1) {
@@ -633,7 +634,7 @@ export class EnhancedLogManager {
     }
     
     // Rotate current to .1
-    const rotatedPath = path.join(dir, `${base}.1${ext}`);
+    const rotatedPath = safeJoin(dir, `${base}.1${ext}`);
     fs.renameSync(logPath, rotatedPath);
   }
 
@@ -1101,8 +1102,8 @@ export function exportLogs(
   format: 'text' | 'json' | 'markdown' | 'html',
   outputPath?: string
 ): string {
-  const cleanLogPath = path.join(laneRunDir, 'terminal.log');
-  const jsonLogPath = path.join(laneRunDir, 'terminal.jsonl');
+  const cleanLogPath = safeJoin(laneRunDir, 'terminal.log');
+  const jsonLogPath = safeJoin(laneRunDir, 'terminal.jsonl');
   
   let output = '';
   

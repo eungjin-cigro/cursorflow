@@ -4,6 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { safeJoin } from './path';
 import { 
   LaneState, 
   ConversationEntry, 
@@ -151,7 +152,7 @@ export function getLatestRunDir(logsDir: string): string | null {
   }
   
   const runs = fs.readdirSync(logsDir)
-    .filter(f => fs.statSync(path.join(logsDir, f)).isDirectory())
+    .filter(f => fs.statSync(safeJoin(logsDir, f)).isDirectory())
     .sort()
     .reverse();
   
@@ -159,7 +160,7 @@ export function getLatestRunDir(logsDir: string): string | null {
     return null;
   }
   
-  return path.join(logsDir, runs[0]!);
+  return safeJoin(logsDir, runs[0]!);
 }
 
 /**
@@ -171,11 +172,11 @@ export function listLanesInRun(runDir: string): { name: string; dir: string; sta
   }
   
   return fs.readdirSync(runDir)
-    .filter(f => fs.statSync(path.join(runDir, f)).isDirectory())
+    .filter(f => fs.statSync(safeJoin(runDir, f)).isDirectory())
     .map(laneName => ({
       name: laneName,
-      dir: path.join(runDir, laneName),
-      statePath: path.join(runDir, laneName, 'state.json'),
+      dir: safeJoin(runDir, laneName),
+      statePath: safeJoin(runDir, laneName, 'state.json'),
     }));
 }
 

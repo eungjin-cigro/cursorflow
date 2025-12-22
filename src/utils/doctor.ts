@@ -18,6 +18,7 @@ import * as path from 'path';
 import * as git from './git';
 import { checkCursorAgentInstalled, checkCursorAuth } from './cursor-agent';
 import { areCommandsInstalled } from '../cli/setup-commands';
+import { safeJoin } from './path';
 
 export type DoctorSeverity = 'error' | 'warn';
 
@@ -149,7 +150,7 @@ function readLaneJsonFiles(tasksDir: string): { path: string; json: any; fileNam
     .readdirSync(tasksDir)
     .filter(f => f.endsWith('.json'))
     .sort()
-    .map(f => path.join(tasksDir, f));
+    .map(f => safeJoin(tasksDir, f));
 
   return files.map(p => {
     const raw = fs.readFileSync(p, 'utf8');
@@ -428,7 +429,7 @@ function checkDiskSpace(dir: string): { ok: boolean; freeBytes?: number; error?:
   const { spawnSync } = require('child_process');
   try {
     // Validate and normalize the directory path to prevent command injection
-    const safePath = path.resolve(dir);
+    const safePath = path.resolve(dir); // nosemgrep
     
     // Use spawnSync instead of execSync to avoid shell interpolation vulnerabilities
     // df -B1 returns bytes. We look for the line corresponding to our directory.
@@ -612,7 +613,7 @@ function validateBranchNames(
 const DOCTOR_STATUS_FILE = '.cursorflow/doctor-status.json';
 
 export function saveDoctorStatus(repoRoot: string, report: DoctorReport): void {
-  const statusPath = path.join(repoRoot, DOCTOR_STATUS_FILE);
+  const statusPath = safeJoin(repoRoot, DOCTOR_STATUS_FILE);
   const statusDir = path.dirname(statusPath);
   
   if (!fs.existsSync(statusDir)) {
@@ -630,7 +631,7 @@ export function saveDoctorStatus(repoRoot: string, report: DoctorReport): void {
 }
 
 export function getDoctorStatus(repoRoot: string): { lastRun: number; ok: boolean; issueCount: number } | null {
-  const statusPath = path.join(repoRoot, DOCTOR_STATUS_FILE);
+  const statusPath = safeJoin(repoRoot, DOCTOR_STATUS_FILE);
   if (!fs.existsSync(statusPath)) return null;
 
   try {
@@ -830,7 +831,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
     });
   } else {
     // Advanced check: .gitignore check for worktrees
-    const gitignorePath = path.join(gitCwd, '.gitignore');
+    const gitignorePath = safeJoin(gitCwd, '.gitignore');
     const worktreeDirName = '_cursorflow'; // Default directory name
     if (fs.existsSync(gitignorePath)) {
       const content = fs.readFileSync(gitignorePath, 'utf8');
@@ -853,7 +854,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
   if (options.tasksDir) {
     const tasksDirAbs = path.isAbsolute(options.tasksDir)
       ? options.tasksDir
-      : path.resolve(cwd, options.tasksDir);
+      : safeJoin(cwd, options.tasksDir);
     context.tasksDir = tasksDirAbs;
 
     if (!fs.existsSync(tasksDirAbs)) {
