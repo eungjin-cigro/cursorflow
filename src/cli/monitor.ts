@@ -58,6 +58,8 @@ class InteractiveMonitor {
   private timer: NodeJS.Timeout | null = null;
   private scrollOffset: number = 0;
   private terminalScrollOffset: number = 0;
+  private followMode: boolean = true;
+  private unseenLineCount: number = 0;
   private lastTerminalTotalLines: number = 0;
   private interventionInput: string = '';
   private timeoutInput: string = '';
@@ -234,11 +236,23 @@ class InteractiveMonitor {
   private handleTerminalKey(key: string) {
     switch (key) {
       case 'up':
+        this.followMode = false;  // Scrolling up disables follow mode
         this.terminalScrollOffset++;
         this.render();
         break;
       case 'down':
         this.terminalScrollOffset = Math.max(0, this.terminalScrollOffset - 1);
+        if (this.terminalScrollOffset === 0) {
+          this.followMode = true;  // Reached bottom, re-enable follow mode
+          this.unseenLineCount = 0;
+        }
+        this.render();
+        break;
+      case 'f':
+        // F key: Force follow mode on and scroll to bottom
+        this.followMode = true;
+        this.terminalScrollOffset = 0;
+        this.unseenLineCount = 0;
         this.render();
         break;
       case 't':
@@ -701,10 +715,16 @@ class InteractiveMonitor {
     const maxVisible = 40;
     const totalLines = logLines.length;
 
-    // Sticky scroll logic: if new lines arrived and we are already scrolled up,
-    // increase the offset to stay on the same content.
-    if (this.terminalScrollOffset > 0 && this.lastTerminalTotalLines > 0 && totalLines > this.lastTerminalTotalLines) {
-      this.terminalScrollOffset += (totalLines - this.lastTerminalTotalLines);
+    // Follow mode logic
+    if (this.followMode) {
+      this.terminalScrollOffset = 0;  // Always show latest
+    } else {
+      // Track new lines when not following
+      if (this.lastTerminalTotalLines > 0 && totalLines > this.lastTerminalTotalLines) {
+        this.unseenLineCount += (totalLines - this.lastTerminalTotalLines);
+        // Keep position stable
+        this.terminalScrollOffset += (totalLines - this.lastTerminalTotalLines);
+      }
     }
     this.lastTerminalTotalLines = totalLines;
     
@@ -721,7 +741,10 @@ class InteractiveMonitor {
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`🖥️  Full Live Terminal: ${lane.name}`);
-    console.log(`🕒 Streaming... | [↑/↓] Scroll (${this.terminalScrollOffset > 0 ? `Scrolled Up ${this.terminalScrollOffset}` : 'Bottom'}) | [I] Intervene | [T/Esc/←] Back`);
+    const followStatus = this.followMode 
+      ? '\x1b[32m[F] Follow: ON ✓\x1b[0m' 
+      : `\x1b[33m[F] Follow: OFF${this.unseenLineCount > 0 ? ` (↓ ${this.unseenLineCount} new)` : ''}\x1b[0m`;
+    console.log(`🕒 Streaming... | ${followStatus} | [↑/↓] Scroll | [I] Intervene | [Esc] Back`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     visibleLines.forEach(line => {

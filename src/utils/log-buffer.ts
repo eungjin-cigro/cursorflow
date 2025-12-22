@@ -1,332 +1,497 @@
+/**
+ * LogBufferService - Scrollable log buffer for TUI monitor
+ * 
+ * Provides:
+ * - Real-time log streaming from JSONL files
+ * - In-memory log buffer with size limits
+ * - Viewport-based retrieval (for scrolling)
+ * - Lane filtering and text search
+ * - New entry counting (for follow mode)
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { safeJoin } from './path';
-import { JsonLogEntry } from './enhanced-logger';
-import { LogService, MergedLogEntry } from './log-service';
 import { LogImportance } from './types';
+import * as logger from './logger';
 
+/**
+ * Raw JSON log entry from terminal.jsonl
+ */
+export interface JsonLogEntry {
+  timestamp: string;
+  type: string;
+  level?: string;
+  content?: string;
+  message?: string;
+  [key: string]: any;
+}
+
+/**
+ * Processed log entry for display
+ */
 export interface BufferedLogEntry {
-  id: number;                    // 순차 ID (스크롤 위치용)
+  id: number;
   timestamp: Date;
   laneName: string;
   level: string;
+  type: string;
   message: string;
   importance: LogImportance;
   laneColor: string;
-  raw: JsonLogEntry;             // 원본 데이터
+  raw: JsonLogEntry;
 }
 
+/**
+ * Buffer configuration options
+ */
 export interface LogBufferOptions {
-  maxEntries?: number;           // 최대 버퍼 크기 (기본: 10000)
-  pollInterval?: number;         // 폴링 간격 ms (기본: 100)
+  maxEntries?: number;
+  pollInterval?: number;
 }
 
-export interface LogViewport {
-  offset: number;                // 시작 위치 (0 = 맨 위)
-  limit: number;                 // 가져올 개수 (화면 높이)
-  laneFilter?: string;           // 특정 레인만 (null/undefined = 전체)
-  importanceFilter?: LogImportance; // 최소 중요도
-  searchQuery?: string;          // 텍스트 검색
+/**
+ * Filter options for log retrieval
+ */
+export interface LogFilter {
+  lane?: string;
+  importance?: LogImportance;
+  search?: string;
+  type?: string;
 }
 
+/**
+ * Buffer state for external monitoring
+ */
 export interface LogBufferState {
-  totalEntries: number;          // 전체 버퍼 크기
-  filteredCount: number;         // 필터 적용 후 개수
-  newCount: number;              // 마지막 acknowledgeNewEntries() 이후 새 로그 수
-  isStreaming: boolean;          // 실시간 스트리밍 중 여부
-  lanes: string[];               // 발견된 레인 목록
+  totalEntries: number;
+  filteredCount: number;
+  newCount: number;
+  isStreaming: boolean;
+  lanes: string[];
 }
+
+// Lane colors for consistent display
+const LANE_COLORS = [
+  logger.COLORS.cyan,
+  logger.COLORS.magenta,
+  logger.COLORS.yellow,
+  logger.COLORS.green,
+  logger.COLORS.blue,
+  logger.COLORS.red,
+];
 
 export class LogBufferService extends EventEmitter {
   private runDir: string;
   private options: Required<LogBufferOptions>;
-  private buffer: BufferedLogEntry[] = [];
-  private nextId: number = 0;
-  private lastPositions: Map<string, number> = new Map();
-  private laneColors: Map<string, string> = new Map();
-  private lanes: Set<string> = new Set();
-  private streamingInterval: NodeJS.Timeout | null = null;
-  private acknowledgedCount: number = 0;
+  private entries: BufferedLogEntry[] = [];
+  private entryIdCounter = 0;
+  private isStreaming = false;
+  private pollTimer: NodeJS.Timeout | null = null;
+  private filePositions = new Map<string, number>();
+  private lanes: string[] = [];
+  private laneColorMap = new Map<string, string>();
+  private newEntriesCount = 0;
+  private lastAcknowledgedId = 0;
 
-  constructor(runDir: string, options?: LogBufferOptions) {
+  constructor(runDir: string, options: LogBufferOptions = {}) {
     super();
     this.runDir = runDir;
     this.options = {
-      maxEntries: options?.maxEntries ?? 10000,
-      pollInterval: options?.pollInterval ?? 100,
+      maxEntries: options.maxEntries ?? 10000,
+      pollInterval: options.pollInterval ?? 100,
     };
   }
 
   /**
-   * 실시간 스트리밍 시작
-   * - 100ms 간격으로 새 로그 폴링
-   * - 새 로그 발견 시 'update' 이벤트 발생
+   * Start streaming logs from all lane JSONL files
    */
   startStreaming(): void {
-    if (this.streamingInterval) return;
-    
-    // 초기 로드
-    this.loadInitialLogs();
-    
-    // 폴링 시작
-    this.streamingInterval = setInterval(() => {
-      const newEntries = this.pollNewEntries();
-      if (newEntries.length > 0) {
-        this.emit('update', newEntries);
-      }
+    if (this.isStreaming) return;
+    this.isStreaming = true;
+
+    // Discover lanes
+    this.discoverLanes();
+
+    // Initial load
+    this.pollLogs();
+
+    // Start polling
+    this.pollTimer = setInterval(() => {
+      this.pollLogs();
     }, this.options.pollInterval);
+
+    this.emit('started');
   }
 
   /**
-   * 스트리밍 중지
+   * Stop streaming
    */
   stopStreaming(): void {
-    if (this.streamingInterval) {
-      clearInterval(this.streamingInterval);
-      this.streamingInterval = null;
+    if (!this.isStreaming) return;
+    this.isStreaming = false;
+
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+
+    this.emit('stopped');
+  }
+
+  /**
+   * Discover lane directories
+   */
+  private discoverLanes(): void {
+    const lanesDir = path.join(this.runDir, 'lanes');
+    if (!fs.existsSync(lanesDir)) return;
+
+    const dirs = fs.readdirSync(lanesDir).filter(name => {
+      const dirPath = path.join(lanesDir, name);
+      return fs.statSync(dirPath).isDirectory();
+    });
+
+    this.lanes = dirs.sort();
+    
+    // Assign colors
+    this.lanes.forEach((lane, index) => {
+      this.laneColorMap.set(lane, LANE_COLORS[index % LANE_COLORS.length]);
+    });
+  }
+
+  /**
+   * Poll all lane log files for new entries
+   */
+  private pollLogs(): void {
+    const lanesDir = path.join(this.runDir, 'lanes');
+    if (!fs.existsSync(lanesDir)) return;
+
+    const newEntries: BufferedLogEntry[] = [];
+
+    for (const laneName of this.lanes) {
+      const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
+      if (!fs.existsSync(jsonlPath)) continue;
+
+      try {
+        const stat = fs.statSync(jsonlPath);
+        const lastPos = this.filePositions.get(jsonlPath) || 0;
+
+        if (stat.size > lastPos) {
+          // Read new content
+          const fd = fs.openSync(jsonlPath, 'r');
+          const buffer = Buffer.alloc(stat.size - lastPos);
+          fs.readSync(fd, buffer, 0, buffer.length, lastPos);
+          fs.closeSync(fd);
+
+          const newContent = buffer.toString('utf-8');
+          const lines = newContent.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line) as JsonLogEntry;
+              const processed = this.processEntry(entry, laneName);
+              if (processed) {
+                newEntries.push(processed);
+              }
+            } catch {
+              // Skip invalid JSON lines
+            }
+          }
+
+          this.filePositions.set(jsonlPath, stat.size);
+        }
+      } catch (error) {
+        // File might be in use, skip this poll
+      }
+    }
+
+    if (newEntries.length > 0) {
+      // Sort by timestamp
+      newEntries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+      // Add to buffer
+      this.entries.push(...newEntries);
+      this.newEntriesCount += newEntries.length;
+
+      // Trim buffer if needed
+      if (this.entries.length > this.options.maxEntries) {
+        const excess = this.entries.length - this.options.maxEntries;
+        this.entries.splice(0, excess);
+      }
+
+      this.emit('update', newEntries);
     }
   }
 
   /**
-   * 뷰포트에 해당하는 로그 조회
-   * @param viewport 뷰포트 설정 (오프셋, 개수, 필터)
-   * @returns 필터링된 로그 엔트리 배열
+   * Process a raw JSON entry into a BufferedLogEntry
    */
-  getEntries(viewport: LogViewport): BufferedLogEntry[] {
-    let filtered = this.getFilteredBuffer(viewport);
-    
-    // 뷰포트 적용
-    return filtered.slice(viewport.offset, viewport.offset + viewport.limit);
-  }
+  private processEntry(entry: JsonLogEntry, laneName: string): BufferedLogEntry | null {
+    const timestamp = new Date(entry.timestamp || Date.now());
+    const type = entry.type || 'unknown';
+    const level = entry.level || this.inferLevel(type);
+    const message = entry.content || entry.message || JSON.stringify(entry);
+    const importance = this.inferImportance(type, level);
 
-  /**
-   * 전체 개수 (필터 적용 후)
-   */
-  getTotalCount(filter?: { lane?: string; importance?: LogImportance; search?: string }): number {
-    const viewport: LogViewport = {
-      offset: 0,
-      limit: Number.MAX_SAFE_INTEGER,
-      laneFilter: filter?.lane,
-      importanceFilter: filter?.importance,
-      searchQuery: filter?.search
+    return {
+      id: ++this.entryIdCounter,
+      timestamp,
+      laneName,
+      level,
+      type,
+      message: this.truncateMessage(message),
+      importance,
+      laneColor: this.laneColorMap.get(laneName) || logger.COLORS.white,
+      raw: entry,
     };
-    
-    return this.getFilteredBuffer(viewport).length;
   }
 
   /**
-   * 마지막 확인 이후 새 로그 개수 (자동 스크롤 OFF 시 표시용)
+   * Infer log level from type
+   */
+  private inferLevel(type: string): string {
+    switch (type.toLowerCase()) {
+      case 'error':
+      case 'stderr':
+        return 'error';
+      case 'warning':
+        return 'warn';
+      case 'debug':
+      case 'thinking':
+        return 'debug';
+      default:
+        return 'info';
+    }
+  }
+
+  /**
+   * Infer importance from type and level
+   */
+  private inferImportance(type: string, level: string): LogImportance {
+    if (level === 'error' || type === 'error' || type === 'result') {
+      return LogImportance.HIGH;
+    }
+    if (type === 'tool' || type === 'tool_result') {
+      return LogImportance.MEDIUM;
+    }
+    if (type === 'thinking' || level === 'debug') {
+      return LogImportance.DEBUG;
+    }
+    if (type === 'assistant' || type === 'user') {
+      return LogImportance.MEDIUM;
+    }
+    return LogImportance.INFO;
+  }
+
+  /**
+   * Truncate long messages
+   */
+  private truncateMessage(message: string, maxLength = 500): string {
+    if (message.length <= maxLength) return message;
+    return message.substring(0, maxLength) + '...';
+  }
+
+  /**
+   * Get entries with filtering and pagination
+   */
+  getEntries(options: {
+    offset?: number;
+    limit?: number;
+    filter?: LogFilter;
+    fromEnd?: boolean;
+  } = {}): BufferedLogEntry[] {
+    const { offset = 0, limit = 100, filter, fromEnd = true } = options;
+
+    let filtered = this.applyFilter(this.entries, filter);
+
+    if (fromEnd) {
+      // Return from the end (most recent) with offset going backwards
+      const start = Math.max(0, filtered.length - offset - limit);
+      const end = Math.max(0, filtered.length - offset);
+      return filtered.slice(start, end);
+    } else {
+      // Return from the beginning with offset
+      return filtered.slice(offset, offset + limit);
+    }
+  }
+
+  /**
+   * Apply filter to entries
+   */
+  private applyFilter(entries: BufferedLogEntry[], filter?: LogFilter): BufferedLogEntry[] {
+    if (!filter) return entries;
+
+    return entries.filter(entry => {
+      // Lane filter
+      if (filter.lane && entry.laneName !== filter.lane) {
+        return false;
+      }
+
+      // Importance filter
+      if (filter.importance) {
+        const importanceOrder = [
+          LogImportance.DEBUG,
+          LogImportance.INFO,
+          LogImportance.LOW,
+          LogImportance.MEDIUM,
+          LogImportance.HIGH,
+          LogImportance.CRITICAL,
+        ];
+        const entryLevel = importanceOrder.indexOf(entry.importance);
+        const filterLevel = importanceOrder.indexOf(filter.importance);
+        if (entryLevel < filterLevel) {
+          return false;
+        }
+      }
+
+      // Type filter
+      if (filter.type && entry.type !== filter.type) {
+        return false;
+      }
+
+      // Search filter
+      if (filter.search) {
+        const searchLower = filter.search.toLowerCase();
+        const messageMatch = entry.message.toLowerCase().includes(searchLower);
+        const typeMatch = entry.type.toLowerCase().includes(searchLower);
+        if (!messageMatch && !typeMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Get total count with optional filter
+   */
+  getTotalCount(filter?: LogFilter): number {
+    if (!filter) return this.entries.length;
+    return this.applyFilter(this.entries, filter).length;
+  }
+
+  /**
+   * Get count of new entries since last acknowledgment
    */
   getNewEntriesCount(): number {
-    return this.buffer.length - this.acknowledgedCount;
+    return this.newEntriesCount;
   }
 
   /**
-   * 새 로그 확인 완료 - 카운터 리셋
+   * Acknowledge new entries (reset counter)
    */
   acknowledgeNewEntries(): void {
-    this.acknowledgedCount = this.buffer.length;
+    this.newEntriesCount = 0;
+    this.lastAcknowledgedId = this.entryIdCounter;
   }
 
   /**
-   * 레인 목록 조회
+   * Get list of discovered lanes
    */
   getLanes(): string[] {
-    return Array.from(this.lanes);
+    return [...this.lanes];
   }
 
   /**
-   * 현재 상태 조회
+   * Get current state
    */
   getState(): LogBufferState {
     return {
-      totalEntries: this.buffer.length,
-      filteredCount: this.buffer.length,  // 기본값, getEntries 사용 권장
-      newCount: this.getNewEntriesCount(),
-      isStreaming: this.streamingInterval !== null,
+      totalEntries: this.entries.length,
+      filteredCount: this.entries.length,
+      newCount: this.newEntriesCount,
+      isStreaming: this.isStreaming,
       lanes: this.getLanes(),
     };
   }
 
   /**
-   * 특정 레인 색상 조회
+   * Get lane color
    */
   getLaneColor(laneName: string): string {
-    return this.laneColors.get(laneName) || '\x1b[37m';  // 기본 흰색
+    return this.laneColorMap.get(laneName) || logger.COLORS.white;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Private Methods
-  // ─────────────────────────────────────────────────────────────
-
-  private getFilteredBuffer(viewport: LogViewport): BufferedLogEntry[] {
-    let filtered = this.buffer;
-    
-    // 레인 필터
-    if (viewport.laneFilter) {
-      filtered = filtered.filter(e => e.laneName === viewport.laneFilter);
-    }
-    
-    // 중요도 필터
-    if (viewport.importanceFilter) {
-      filtered = filtered.filter(e => 
-        LogService.meetsImportanceLevel(e.raw, viewport.importanceFilter!)
-      );
-    }
-    
-    // 검색 필터
-    if (viewport.searchQuery) {
-      const query = viewport.searchQuery.toLowerCase();
-      filtered = filtered.filter(e => 
-        e.message.toLowerCase().includes(query) ||
-        e.laneName.toLowerCase().includes(query)
-      );
-    }
-    
-    return filtered;
+  /**
+   * Clear buffer
+   */
+  clear(): void {
+    this.entries = [];
+    this.entryIdCounter = 0;
+    this.newEntriesCount = 0;
+    this.lastAcknowledgedId = 0;
+    this.filePositions.clear();
   }
 
-  private loadInitialLogs(): void {
-    const lanesDir = safeJoin(this.runDir, 'lanes');
-    if (!fs.existsSync(lanesDir)) return;
-
-    const laneDirs = fs.readdirSync(lanesDir)
-      .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory());
-
-    const colors = [
-      '\x1b[34m', // blue
-      '\x1b[33m', // yellow  
-      '\x1b[35m', // magenta
-      '\x1b[36m', // cyan
-      '\x1b[32m', // green
-      '\x1b[91m', // bright red
-    ];
-
-    laneDirs.forEach((lane, index) => {
-      this.lanes.add(lane);
-      this.laneColors.set(lane, colors[index % colors.length]!);
-      this.lastPositions.set(lane, 0);
-      
-      // 기존 로그 로드
-      const jsonLogPath = safeJoin(lanesDir, lane, 'terminal.jsonl');
-      if (fs.existsSync(jsonLogPath)) {
-        this.loadLogsFromFile(lane, jsonLogPath);
-      }
-    });
-
-    // 버퍼 크기 제한
-    this.trimBuffer();
-  }
-
-  private loadLogsFromFile(laneName: string, jsonLogPath: string): void {
-    try {
-      const stats = fs.statSync(jsonLogPath);
-      const content = fs.readFileSync(jsonLogPath, 'utf8');
-      const lines = content.split('\n').filter(l => l.trim());
-      
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line) as JsonLogEntry;
-          this.addEntry(laneName, entry);
-        } catch {
-          // Skip invalid lines
-        }
-      }
-      
-      this.lastPositions.set(laneName, stats.size);
-    } catch {
-      // Ignore errors
-    }
-  }
-
-  private pollNewEntries(): BufferedLogEntry[] {
-    const newEntries: BufferedLogEntry[] = [];
-    const lanesDir = safeJoin(this.runDir, 'lanes');
+  /**
+   * Format entry for display
+   */
+  formatEntry(entry: BufferedLogEntry, options: { showLane?: boolean; showTimestamp?: boolean } = {}): string {
+    const { showLane = true, showTimestamp = true } = options;
     
-    if (!fs.existsSync(lanesDir)) return newEntries;
-
-    // Check for new lanes
-    const currentLaneDirs = fs.readdirSync(lanesDir)
-      .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory());
+    const parts: string[] = [];
     
-    for (const lane of currentLaneDirs) {
-      if (!this.lanes.has(lane)) {
-        this.lanes.add(lane);
-        const colors = [
-          '\x1b[34m', '\x1b[33m', '\x1b[35m', '\x1b[36m', '\x1b[32m', '\x1b[91m'
-        ];
-        this.laneColors.set(lane, colors[this.lanes.size % colors.length]!);
-        this.lastPositions.set(lane, 0);
-      }
+    if (showTimestamp) {
+      const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
+      parts.push(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset}`);
     }
-
-    for (const lane of this.lanes) {
-      const jsonLogPath = safeJoin(lanesDir, lane, 'terminal.jsonl');
-      if (!fs.existsSync(jsonLogPath)) continue;
-
-      const lastPos = this.lastPositions.get(lane) || 0;
-      
-      try {
-        const stats = fs.statSync(jsonLogPath);
-        if (stats.size > lastPos) {
-          const fd = fs.openSync(jsonLogPath, 'r');
-          const bufferSize = stats.size - lastPos;
-          const readBuffer = Buffer.alloc(bufferSize);
-          fs.readSync(fd, readBuffer, 0, bufferSize, lastPos);
-          fs.closeSync(fd);
-          
-          const content = readBuffer.toString();
-          const lines = content.split('\n').filter(l => l.trim());
-          
-          for (const line of lines) {
-            try {
-              const entry = JSON.parse(line) as JsonLogEntry;
-              const buffered = this.addEntry(lane, entry);
-              newEntries.push(buffered);
-            } catch {
-              // Skip invalid lines
-            }
-          }
-          
-          this.lastPositions.set(lane, stats.size);
-        }
-      } catch {
-        // Ignore errors
-      }
-    }
-
-    // 버퍼 크기 제한
-    if (newEntries.length > 0) {
-      this.trimBuffer();
-    }
-
-    return newEntries;
-  }
-
-  private addEntry(laneName: string, raw: JsonLogEntry): BufferedLogEntry {
-    const buffered: BufferedLogEntry = {
-      id: this.nextId++,
-      timestamp: new Date(raw.timestamp),
-      laneName,
-      level: raw.level,
-      message: raw.message,
-      importance: LogService.getLogImportance(raw),
-      laneColor: this.getLaneColor(laneName),
-      raw,
-    };
     
-    this.buffer.push(buffered);
-    return buffered;
+    if (showLane) {
+      parts.push(`${entry.laneColor}[${entry.laneName.padEnd(12)}]${logger.COLORS.reset}`);
+    }
+    
+    // Type indicator
+    const typeIndicator = this.getTypeIndicator(entry.type);
+    parts.push(typeIndicator);
+    
+    // Message
+    parts.push(entry.message);
+    
+    return parts.join(' ');
   }
 
-  private trimBuffer(): void {
-    if (this.buffer.length > this.options.maxEntries) {
-      const excess = this.buffer.length - this.options.maxEntries;
-      this.buffer.splice(0, excess);
-      
-      // acknowledgedCount 조정
-      this.acknowledgedCount = Math.max(0, this.acknowledgedCount - excess);
+  /**
+   * Get type indicator for display
+   */
+  private getTypeIndicator(type: string): string {
+    switch (type.toLowerCase()) {
+      case 'user':
+        return `${logger.COLORS.cyan}[USER  ]${logger.COLORS.reset}`;
+      case 'assistant':
+        return `${logger.COLORS.green}[ASST  ]${logger.COLORS.reset}`;
+      case 'tool':
+        return `${logger.COLORS.yellow}[TOOL  ]${logger.COLORS.reset}`;
+      case 'tool_result':
+        return `${logger.COLORS.gray}[RESULT]${logger.COLORS.reset}`;
+      case 'error':
+      case 'stderr':
+        return `${logger.COLORS.red}[ERROR ]${logger.COLORS.reset}`;
+      case 'thinking':
+        return `${logger.COLORS.gray}[THINK ]${logger.COLORS.reset}`;
+      case 'result':
+        return `${logger.COLORS.green}[DONE  ]${logger.COLORS.reset}`;
+      case 'stdout':
+        return `${logger.COLORS.white}[STDOUT]${logger.COLORS.reset}`;
+      default:
+        return `${logger.COLORS.gray}[${type.toUpperCase().padEnd(6)}]${logger.COLORS.reset}`;
     }
   }
+}
+
+/**
+ * Create a LogBufferService for a run
+ */
+export function createLogBuffer(runDir: string, options?: LogBufferOptions): LogBufferService {
+  return new LogBufferService(runDir, options);
+}
+
+/**
+ * Log viewport interface for backward compatibility
+ */
+export interface LogViewport {
+  entries: BufferedLogEntry[];
+  totalCount: number;
+  offset: number;
+  visibleCount: number;
 }

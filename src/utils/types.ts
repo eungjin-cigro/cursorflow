@@ -165,6 +165,50 @@ export enum LogImportance {
   DEBUG = 'debug'
 }
 
+export type RunStatus = 'running' | 'completed' | 'failed' | 'partial' | 'pending';
+export type ValidationStatus = 'valid' | 'warnings' | 'errors' | 'unknown';
+
+export interface LaneInfo {
+  name: string;
+  status: string;
+  currentTask: number;
+  totalTasks: number;
+  pid?: number;
+  pipelineBranch?: string;
+}
+
+export interface RunInfo {
+  id: string;
+  path: string;
+  taskName: string;
+  status: RunStatus;
+  startTime: number;
+  endTime?: number;
+  duration: number;
+  lanes: LaneInfo[];
+  branches: string[];
+  worktrees: string[];
+}
+
+export interface TaskDirInfo {
+  name: string;
+  path: string;
+  timestamp: Date;
+  featureName: string;
+  lanes: LaneFileInfo[];
+  validationStatus: ValidationStatus;
+  lastValidated?: number;
+}
+
+export interface LaneFileInfo {
+  fileName: string;
+  laneName: string;
+  preset: string;
+  taskCount: number;
+  taskFlow: string;
+  dependsOn: string[];
+}
+
 export interface ReviewStartedPayload {
   taskName: string;
   taskBranch: string;
@@ -175,6 +219,7 @@ export interface ReviewCompletedPayload {
   status: 'approved' | 'needs_changes';
   issueCount: number;
   summary: string;
+  raw: string;
 }
 
 export interface ReviewApprovedPayload {
@@ -325,26 +370,3 @@ export interface EventEntry {
   event: string;
   [key: string]: any;
 }
-
-export type RunStatus = 'running' | 'completed' | 'failed' | 'partial' | 'pending';
-
-export interface LaneInfo {
-  name: string;
-  status: string;
-  currentTask: number;
-  totalTasks: number;
-  pid?: number;
-}
-
-export interface RunInfo {
-  id: string;
-  path: string;
-  taskName: string;
-  status: RunStatus;
-  startTime: number;
-  duration: number;
-  lanes: LaneInfo[];
-  branches: string[];
-  worktrees: string[];
-}
-

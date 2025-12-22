@@ -1,244 +1,370 @@
+/**
+ * TaskService - Manages CursorFlow task directories and validation
+ * 
+ * Provides:
+ * - List prepared task directories
+ * - Get task details (lanes, dependencies)
+ * - Validate tasks (doctor integration)
+ * - Check run eligibility
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
-import { safeJoin } from './path';
-import { runDoctor, DoctorReport } from './doctor';
+import { TaskDirInfo, LaneFileInfo, ValidationStatus, Task } from './types';
 
-export type ValidationStatus = 'valid' | 'warnings' | 'errors' | 'unknown';
+// Re-export types for consumers
+export { TaskDirInfo, LaneFileInfo, ValidationStatus } from './types';
+import * as logger from './logger';
 
-export interface LaneFileInfo {
-  fileName: string;              // 01-lane-1.json
-  laneName: string;              // lane-1
-  preset: string;                // complex | simple | merge | custom
-  taskCount: number;
-  taskFlow: string;              // "plan → implement → test"
-  dependsOn: string[];
+export interface ValidationResult {
+  /** Combined errors + warnings for backwards compatibility */
+  issues: string[];
+  status: ValidationStatus;
+  errors: string[];
+  warnings: string[];
+  lastValidated: number;
 }
 
-export interface TaskDirInfo {
-  name: string;                  // 2412221530_AuthSystem
-  path: string;
-  timestamp: Date;
-  featureName: string;           // AuthSystem
-  lanes: LaneFileInfo[];
-  validationStatus: ValidationStatus;
-  validationReport?: DoctorReport;
-  lastValidated?: number;
-}
+// Cache for validation results
+const validationCache = new Map<string, ValidationResult>();
 
 export class TaskService {
   private tasksDir: string;
-  private validationCache: Map<string, { report: DoctorReport; time: number }> = new Map();
-  private CACHE_TTL = 5 * 60 * 1000;  // 5 minutes
 
   constructor(tasksDir: string) {
     this.tasksDir = tasksDir;
   }
 
   /**
-   * List all task directories in _cursorflow/tasks/
+   * List all prepared task directories
    */
   listTaskDirs(): TaskDirInfo[] {
-    if (!fs.existsSync(this.tasksDir)) return [];
-    
-    const dirs = fs.readdirSync(this.tasksDir)
-      .filter(d => {
-        const fullPath = safeJoin(this.tasksDir, d);
-        if (!fs.statSync(fullPath).isDirectory() || d === 'example') return false;
+    if (!fs.existsSync(this.tasksDir)) {
+      return [];
+    }
 
-        // Robust check: must match YYMMDDHHMM_ prefix OR contain at least one .json file
-        const hasTimestamp = /^\d{10}_/.test(d);
-        const hasJsonFiles = fs.readdirSync(fullPath).some(f => f.endsWith('.json'));
-        
-        return hasTimestamp || hasJsonFiles;
+    const dirs = fs.readdirSync(this.tasksDir)
+      .filter(name => {
+        const dirPath = path.join(this.tasksDir, name);
+        return fs.statSync(dirPath).isDirectory() && !name.startsWith('.');
       })
-      .map(name => this.getTaskDirInfo(name))
-      .filter((t): t is TaskDirInfo => t !== null)
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());  // Newest first
-    
-    return dirs;
+      .sort((a, b) => b.localeCompare(a)); // Most recent first (assuming timestamp prefix)
+
+    return dirs.map(name => this.getTaskDirInfo(name)).filter((t): t is TaskDirInfo => t !== null);
   }
 
   /**
-   * Get detailed information for a single task directory
+   * Get detailed information about a task directory
    */
   getTaskDirInfo(taskName: string): TaskDirInfo | null {
-    const taskPath = safeJoin(this.tasksDir, taskName);
-    if (!fs.existsSync(taskPath)) return null;
+    const taskPath = path.join(this.tasksDir, taskName);
     
-    // Extract timestamp and feature name from name (YYMMDDHHMM_FeatureName)
-    const match = taskName.match(/^(\d{10})_(.+)$/);
-    let timestamp: Date;
-    let featureName: string;
-    
-    if (match) {
-      const [, ts, name] = match;
-      // Parse YYMMDDHHMM
-      const year = 2000 + parseInt(ts!.substring(0, 2));
-      const month = parseInt(ts!.substring(2, 4)) - 1;
-      const day = parseInt(ts!.substring(4, 6));
-      const hour = parseInt(ts!.substring(6, 8));
-      const min = parseInt(ts!.substring(8, 10));
-      timestamp = new Date(year, month, day, hour, min);
-      featureName = name!;
-    } else {
-      timestamp = fs.statSync(taskPath).mtime;
-      featureName = taskName;
+    if (!fs.existsSync(taskPath)) {
+      return null;
     }
-    
-    // Parse lane files
-    const lanes = this.parseLaneFiles(taskPath);
-    
-    // Check cached validation results
-    const cached = this.validationCache.get(taskName);
-    let validationStatus: ValidationStatus = 'unknown';
-    let validationReport: DoctorReport | undefined;
-    let lastValidated: number | undefined;
-    
-    if (cached && Date.now() - cached.time < this.CACHE_TTL) {
-      validationReport = cached.report;
-      lastValidated = cached.time;
-      validationStatus = this.getStatusFromReport(cached.report);
+
+    try {
+      const stat = fs.statSync(taskPath);
+      const timestamp = this.parseTimestampFromName(taskName) || stat.mtime;
+      const featureName = this.extractFeatureName(taskName);
+      const lanes = this.scanLaneFiles(taskPath);
+      
+      // Get cached validation status
+      const cached = validationCache.get(taskName);
+      const validationStatus = cached?.status || 'unknown';
+      const lastValidated = cached?.lastValidated;
+
+      return {
+        name: taskName,
+        path: taskPath,
+        timestamp,
+        featureName,
+        lanes,
+        validationStatus,
+        lastValidated,
+      };
+    } catch (error) {
+      logger.debug(`Failed to read task dir ${taskName}: ${error}`);
+      return null;
     }
-    
-    return {
-      name: taskName,
-      path: taskPath,
-      timestamp,
-      featureName,
-      lanes,
-      validationStatus,
-      validationReport,
-      lastValidated,
-    };
   }
 
   /**
-   * Parse lane JSON files in a task directory
+   * Scan lane files in a task directory
    */
-  private parseLaneFiles(taskPath: string): LaneFileInfo[] {
-    if (!fs.existsSync(taskPath)) return [];
-
+  private scanLaneFiles(taskPath: string): LaneFileInfo[] {
     const files = fs.readdirSync(taskPath)
-      .filter(f => f.endsWith('.json'))
+      .filter(name => name.endsWith('.json'))
       .sort();
-    
+
     const lanes: LaneFileInfo[] = [];
-    
+
     for (const fileName of files) {
       try {
-        const filePath = safeJoin(taskPath, fileName);
-        const json = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const filePath = path.join(taskPath, fileName);
+        const content = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         
-        const tasks = json.tasks || [];
-        const taskNames = tasks.map((t: any) => t.name || 'unnamed');
-        const taskFlow = taskNames.join(' → ');
-        
-        // Preset detection
-        let preset = 'custom';
-        const names = new Set(taskNames);
-        if (names.has('plan') && names.has('implement') && names.has('test')) {
-          preset = 'complex';
-        } else if (names.has('merge') && names.has('test')) {
-          preset = 'merge';
-        } else if (names.has('implement') && names.has('test') && !names.has('plan')) {
-          preset = 'simple';
-        }
-        
+        const laneName = this.extractLaneName(fileName);
+        const tasks = content.tasks || [];
+        const dependsOn = content.dependsOn || [];
+        const preset = this.detectPreset(tasks);
+        const taskFlow = this.generateTaskFlow(tasks);
+
         lanes.push({
           fileName,
-          laneName: path.basename(fileName, '.json'),
+          laneName,
           preset,
           taskCount: tasks.length,
           taskFlow,
-          dependsOn: json.dependsOn || [],
+          dependsOn,
         });
-      } catch {
-        // Fallback on parse error
-        lanes.push({
-          fileName,
-          laneName: path.basename(fileName, '.json'),
-          preset: 'unknown',
-          taskCount: 0,
-          taskFlow: '(parse error)',
-          dependsOn: [],
-        });
+      } catch (error) {
+        logger.debug(`Failed to parse lane file ${fileName}: ${error}`);
       }
     }
-    
+
     return lanes;
   }
 
   /**
-   * Run doctor for a task directory and cache the results
+   * Extract lane name from filename (e.g., "01-lane-1.json" -> "lane-1")
    */
-  validateTaskDir(taskName: string): DoctorReport {
-    const taskPath = safeJoin(this.tasksDir, taskName);
+  private extractLaneName(fileName: string): string {
+    const baseName = fileName.replace('.json', '');
+    // Remove numeric prefix if present (e.g., "01-lane-1" -> "lane-1")
+    const match = baseName.match(/^\d+-(.+)$/);
+    return match ? match[1] : baseName;
+  }
+
+  /**
+   * Parse timestamp from task name (format: YYMMDDHHMM_FeatureName)
+   */
+  private parseTimestampFromName(taskName: string): Date | null {
+    const match = taskName.match(/^(\d{10})_/);
+    if (!match) return null;
+
+    const ts = match[1];
+    const year = 2000 + parseInt(ts.substring(0, 2), 10);
+    const month = parseInt(ts.substring(2, 4), 10) - 1;
+    const day = parseInt(ts.substring(4, 6), 10);
+    const hour = parseInt(ts.substring(6, 8), 10);
+    const minute = parseInt(ts.substring(8, 10), 10);
+
+    return new Date(year, month, day, hour, minute);
+  }
+
+  /**
+   * Extract feature name from task directory name
+   */
+  private extractFeatureName(taskName: string): string {
+    const parts = taskName.split('_');
+    if (parts.length >= 2) {
+      return parts.slice(1).join('_');
+    }
+    return taskName;
+  }
+
+  /**
+   * Detect task preset based on task structure
+   */
+  private detectPreset(tasks: Task[]): string {
+    if (tasks.length === 0) return 'empty';
     
-    const report = runDoctor({
-      cwd: process.cwd(),
-      tasksDir: taskPath,
-      includeCursorAgentChecks: false,  // Fast validation
-    });
+    const taskNames = tasks.map(t => t.name.toLowerCase());
     
-    // Save to cache
-    this.validationCache.set(taskName, { report, time: Date.now() });
+    if (taskNames.includes('plan') && taskNames.includes('implement') && taskNames.includes('test')) {
+      return 'complex';
+    }
+    if (taskNames.includes('implement') && taskNames.includes('test') && !taskNames.includes('plan')) {
+      return 'simple';
+    }
+    if (taskNames.includes('merge')) {
+      return 'merge';
+    }
     
-    return report;
+    return 'custom';
+  }
+
+  /**
+   * Generate task flow string (e.g., "plan → implement → test")
+   */
+  private generateTaskFlow(tasks: Task[]): string {
+    if (tasks.length === 0) return '';
+    return tasks.map(t => t.name).join(' → ');
+  }
+
+  /**
+   * Validate a task directory
+   */
+  validateTaskDir(taskName: string): ValidationResult {
+    const taskInfo = this.getTaskDirInfo(taskName);
+    
+    if (!taskInfo) {
+      return {
+        status: 'errors',
+        errors: [`Task directory not found: ${taskName}`],
+        warnings: [],
+        issues: [`Task directory not found: ${taskName}`],
+        lastValidated: Date.now(),
+      };
+    }
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Check if there are any lane files
+    if (taskInfo.lanes.length === 0) {
+      errors.push('No lane files found in task directory');
+    }
+
+    // Validate each lane file
+    for (const lane of taskInfo.lanes) {
+      // Check task count
+      if (lane.taskCount === 0) {
+        errors.push(`Lane ${lane.fileName} has no tasks defined`);
+      }
+
+      // Check dependencies exist
+      for (const dep of lane.dependsOn) {
+        const depExists = taskInfo.lanes.some(l => 
+          l.laneName === dep || l.fileName === dep || l.fileName === `${dep}.json`
+        );
+        if (!depExists) {
+          warnings.push(`Lane ${lane.fileName} depends on unknown lane: ${dep}`);
+        }
+      }
+
+      // Validate lane file structure
+      try {
+        const filePath = path.join(taskInfo.path, lane.fileName);
+        const content = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        
+        // Check tasks array
+        if (!Array.isArray(content.tasks)) {
+          errors.push(`Lane ${lane.fileName}: 'tasks' must be an array`);
+        } else {
+          // Validate each task
+          for (let i = 0; i < content.tasks.length; i++) {
+            const task = content.tasks[i];
+            if (!task.name) {
+              errors.push(`Lane ${lane.fileName}: Task ${i + 1} missing 'name'`);
+            }
+            if (!task.prompt) {
+              errors.push(`Lane ${lane.fileName}: Task ${i + 1} missing 'prompt'`);
+            }
+          }
+        }
+      } catch (error) {
+        errors.push(`Lane ${lane.fileName}: Invalid JSON - ${error}`);
+      }
+    }
+
+    // Check for circular dependencies
+    const circularDeps = this.detectCircularDependencies(taskInfo.lanes);
+    if (circularDeps.length > 0) {
+      errors.push(`Circular dependencies detected: ${circularDeps.join(' -> ')}`);
+    }
+
+    // Determine overall status
+    let status: ValidationStatus = 'valid';
+    if (errors.length > 0) {
+      status = 'errors';
+    } else if (warnings.length > 0) {
+      status = 'warnings';
+    }
+
+    const issues = [...errors, ...warnings];
+    const result: ValidationResult = {
+      issues,
+      status,
+      errors,
+      warnings,
+      lastValidated: Date.now(),
+    };
+
+    // Cache the result
+    validationCache.set(taskName, result);
+
+    return result;
+  }
+
+  /**
+   * Detect circular dependencies in lane dependency graph
+   */
+  private detectCircularDependencies(lanes: LaneFileInfo[]): string[] {
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    const cycle: string[] = [];
+
+    const dfs = (laneName: string): boolean => {
+      if (stack.has(laneName)) {
+        cycle.push(laneName);
+        return true; // Cycle found
+      }
+      if (visited.has(laneName)) {
+        return false;
+      }
+
+      visited.add(laneName);
+      stack.add(laneName);
+
+      const lane = lanes.find(l => l.laneName === laneName);
+      if (lane) {
+        for (const dep of lane.dependsOn) {
+          if (dfs(dep)) {
+            cycle.unshift(laneName);
+            return true;
+          }
+        }
+      }
+
+      stack.delete(laneName);
+      return false;
+    };
+
+    for (const lane of lanes) {
+      if (dfs(lane.laneName)) {
+        break;
+      }
+    }
+
+    return cycle;
   }
 
   /**
    * Get cached validation status
    */
   getValidationStatus(taskName: string): ValidationStatus {
-    const cached = this.validationCache.get(taskName);
-    if (!cached || Date.now() - cached.time > this.CACHE_TTL) {
-      return 'unknown';
-    }
-    return this.getStatusFromReport(cached.report);
+    const cached = validationCache.get(taskName);
+    return cached?.status || 'unknown';
   }
 
   /**
-   * Check if a task directory is ready to run
+   * Check if a task can be run
    */
   canRun(taskName: string): { ok: boolean; issues: string[] } {
-    const report = this.validateTaskDir(taskName);
-    const errors = report.issues.filter(i => i.severity === 'error');
+    const validation = this.validateTaskDir(taskName);
     
-    return {
-      ok: errors.length === 0,
-      issues: errors.map(i => i.message),
-    };
+    if (validation.status === 'errors') {
+      return { ok: false, issues: validation.errors };
+    }
+
+    return { ok: true, issues: validation.warnings };
   }
 
   /**
-   * Extract validation status from a doctor report
+   * Clear validation cache
    */
-  private getStatusFromReport(report: DoctorReport): ValidationStatus {
-    const errors = report.issues.filter(i => i.severity === 'error').length;
-    const warnings = report.issues.filter(i => i.severity === 'warn').length;
-    
-    if (errors > 0) return 'errors';
-    if (warnings > 0) return 'warnings';
-    return 'valid';
-  }
-
-  /**
-   * Get status icon for validation status
-   */
-  static getStatusIcon(status: ValidationStatus): string {
-    const icons: Record<ValidationStatus, string> = {
-      'valid': '✅',
-      'warnings': '⚠️',
-      'errors': '❌',
-      'unknown': '❓',
-    };
-    return icons[status] || '❓';
+  clearCache(): void {
+    validationCache.clear();
   }
 }
 
 /**
- * Singleton factory
+ * Create a TaskService instance with default paths
  */
-export function createTaskService(tasksDir: string): TaskService {
+export function createTaskService(projectRoot?: string): TaskService {
+  const root = projectRoot || process.cwd();
+  const tasksDir = path.join(root, '_cursorflow', 'tasks');
   return new TaskService(tasksDir);
 }
