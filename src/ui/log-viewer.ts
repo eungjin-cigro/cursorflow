@@ -330,9 +330,7 @@ export class LogViewer {
     const entries = this.logBuffer.getEntries({
       offset: this.state.scrollOffset,
       limit: this.pageSize,
-      laneFilter: this.state.laneFilter || undefined,
-      importanceFilter: this.state.importanceFilter || undefined,
-      searchQuery: this.state.searchQuery || undefined,
+      filter: { lane: this.state.laneFilter || undefined, importance: this.state.importanceFilter || undefined, search: this.state.searchQuery || undefined },
     });
     
     const totalCount = this.getFilteredCount();
