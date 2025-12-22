@@ -1,5 +1,11 @@
 # Lane 1 구현 계획: RunService + ProcessManager
 
+## 분석한 문서
+- `.cursor/plans/monitor_feature_enhancement_16b869e8.plan.md` (전체 계획)
+- `.cursor/plans/module-a-core-services.md` (RunService, ProcessManager 상세 명세)
+- `commands/cursorflow-run.md` (Run 명령어 스펙)
+- `commands/cursorflow-monitor.md` (Monitor 명령어 스펙)
+
 ## 구현할 파일
 1. src/utils/run-service.ts
 2. src/utils/process-manager.ts
