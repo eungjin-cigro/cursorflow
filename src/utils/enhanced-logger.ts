@@ -789,7 +789,7 @@ export class EnhancedLogManager {
         const match = cleanLine.match(textLogRegex);
         
         if (match && this.onParsedMessage) {
-          const [, time, lane, emoji, level, content] = match;
+          const [, time, , emoji, level, content] = match;
           // Convert HH:MM:SS to a timestamp for today
           const [h, m, s] = time!.split(':').map(Number);
           const timestamp = new Date().setHours(h!, m!, s!, 0);
