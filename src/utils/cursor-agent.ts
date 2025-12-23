@@ -2,7 +2,7 @@
  * Cursor Agent CLI wrapper and utilities
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 /**
  * Check if cursor-agent CLI is installed

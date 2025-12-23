@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync, spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 
 import * as git from '../utils/git';
 import * as logger from '../utils/logger';
@@ -253,7 +253,6 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     let bytesReceived = 0;
     const startTime = Date.now();
     const heartbeatInterval = setInterval(() => {
-      const elapsed = Math.round((Date.now() - lastHeartbeat) / 1000);
       const totalElapsed = Math.round((Date.now() - startTime) / 1000);
       // Output without timestamp - orchestrator will add it
       console.log(`⏱ Heartbeat: ${totalElapsed}s elapsed, ${bytesReceived} bytes received`);

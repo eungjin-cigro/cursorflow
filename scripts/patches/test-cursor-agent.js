@@ -15,7 +15,6 @@
  */
 
 const { spawn, spawnSync } = require('child_process');
-const path = require('path');
 
 // Parse args
 const args = process.argv.slice(2);

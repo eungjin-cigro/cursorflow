@@ -12,7 +12,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import * as logger from '../utils/logger';
 import { loadState, readLog } from '../utils/state';
 import { LaneState, ConversationEntry } from '../utils/types';
 import { loadConfig } from '../utils/config';
@@ -1794,7 +1793,6 @@ async function monitor(args: string[]): Promise<void> {
     return;
   }
 
-  const watchIdx = args.indexOf('--watch');
   const intervalIdx = args.indexOf('--interval');
   const interval = intervalIdx >= 0 ? parseInt(args[intervalIdx + 1] || '2') || 2 : 2;
   
