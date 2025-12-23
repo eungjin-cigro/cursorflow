@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.26] - 2025-12-22
+
+### Fixed
+- **Security**: Resolved Semgrep finding (detect-child-process) in process service by using `spawnSync`.
+- **Security**: Fixed potential file system race conditions (TOCTOU) and added atomic write patterns for POF files.
+- **Testing**: Fixed E2E test failures by skipping preflight checks in test environments.
+- **CI**: Added `pnpm` installation step and updated workflow steps to use `pnpm` in GitHub Actions.
+- **Refactor**: Removed unused variables and imports identified by CodeQL analysis.
+
 ## [0.1.20] - 2025-12-22
 
 ### Fixed
