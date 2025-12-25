@@ -144,18 +144,21 @@ export class EnhancedLogManager {
    */
   private initLogFiles(): void {
     // Check and rotate if necessary
-    this.rotateIfNeeded(this.rawLogPath);
-    this.rotateIfNeeded(this.readableLogPath);
+    if (this.config.keepRawLogs) {
+      this.rotateIfNeeded(this.rawLogPath);
+      this.rawLogFd = fs.openSync(this.rawLogPath, 'a');
+    }
     
-    // Open file descriptors
-    this.rawLogFd = fs.openSync(this.rawLogPath, 'a');
+    this.rotateIfNeeded(this.readableLogPath);
     this.readableLogFd = fs.openSync(this.readableLogPath, 'a');
     
-    // Get initial file sizes
-    try {
-      this.rawLogSize = fs.statSync(this.rawLogPath).size;
-    } catch {
-      this.rawLogSize = 0;
+    // Get initial file size for raw log if enabled
+    if (this.rawLogFd !== null) {
+      try {
+        this.rawLogSize = fs.statSync(this.rawLogPath).size;
+      } catch {
+        this.rawLogSize = 0;
+      }
     }
     
     // Write session header
