@@ -310,7 +310,7 @@ test_doctor_valid_config() {
 EOF
     
     local exit_code=0
-    cursorflow_out doctor --tasks-dir "$TMP_DIR" > /dev/null 2>&1 || exit_code=$?
+    cursorflow_out doctor --tasks-dir "$TMP_DIR" --no-cursor > /dev/null 2>&1 || exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         record_pass "doctor passes valid configuration"

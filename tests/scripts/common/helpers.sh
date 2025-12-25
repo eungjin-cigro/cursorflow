@@ -234,6 +234,9 @@ EOF
     git commit -m "initial commit" > /dev/null 2>&1
     git branch -m main > /dev/null 2>&1 || true
     
+    # Add dummy origin remote for doctor checks
+    git remote add origin https://github.com/cursorflow/test-repo.git > /dev/null 2>&1
+    
     echo "$test_root"
 }
 

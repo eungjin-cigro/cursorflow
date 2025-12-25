@@ -58,3 +58,6 @@ test-projects/
 docs/
 *.tgz
 _test_*
+
+# CursorFlow
+_cursorflow/
