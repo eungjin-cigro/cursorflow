@@ -21,124 +21,105 @@ interface PrepareOptions {
   lanes: number;
   template: string | null;
   preset: PresetType | null;  // --preset complex|simple|merge
-  sequential: boolean;
-  deps: string | null;
   // Terminal-first options
   prompt: string | null;
   criteria: string[];
   model: string | null;
-  taskSpecs: string[];  // Multiple --task "name|model|prompt|criteria"
+  taskSpecs: string[];  // Multiple --task "name|model|prompt|criteria|dependsOn|timeout"
   // Incremental options
   addLane: string | null;      // Add lane to existing task dir
   addTask: string | null;      // Add task to existing lane file
-  dependsOnLanes: string[];    // --depends-on for new lane
   force: boolean;
   help: boolean;
 }
 
 function printHelp(): void {
   console.log(`
-Usage: cursorflow prepare <feature-name> [options]
-
-Prepare task files for a new feature - Terminal-first workflow.
+cursorflow prepare - 태스크 파일 생성
 
 ═══════════════════════════════════════════════════════════════════════════════
-  WORKFLOW: Requirements → Lanes → Tasks → Validate → Run
+  시나리오: "쇼핑몰" 프로젝트에서 백엔드 API와 프론트엔드 동시 개발
 ═══════════════════════════════════════════════════════════════════════════════
 
-## Step 1: Create Initial Lanes (with Presets)
+[Case 1] 가장 간단하게 - 버그 하나 고치기
+─────────────────────────────────────────
+  cursorflow prepare FixCartBug --prompt "장바구니 수량 버그 수정"
 
-  # Complex implementation: plan → implement → test
-  cursorflow prepare FeatureName --preset complex --prompt "Implement user auth"
+  결과: _cursorflow/tasks/2412251030_FixCartBug/
+        └── 01-FixCartBug.json    (implement 태스크 1개)
 
-  # Simple implementation: implement → test
-  cursorflow prepare BugFix --preset simple --prompt "Fix login bug"
 
-  # Merge lane: merge → test (for lanes with dependencies)
-  cursorflow prepare Integration --preset merge --depends-on "01-lane-1,02-lane-2"
+[Case 2] 프리셋 사용 - 계획부터 테스트까지
+─────────────────────────────────────────
+  cursorflow prepare PaymentAPI --preset complex --prompt "Stripe 결제 연동"
 
-  # Multiple sequential lanes (auto-detects merge preset for dependent lanes)
-  cursorflow prepare FullStack --lanes 3 --sequential --prompt "Build your layer"
+  결과: 01-PaymentAPI.json에 plan → implement → test 태스크 생성
 
-## Step 2: Add More Lanes (Incremental)
+  프리셋:
+    --preset complex   plan → implement → test
+    --preset simple    implement → test
+    (없으면)           implement만
 
-  # Add a merge lane to existing task directory
-  cursorflow prepare --add-lane _cursorflow/tasks/2412211530_FullStack \\
-    --preset merge --depends-on "01-lane-1,02-lane-2"
 
-## Step 3: Add More Tasks to a Lane
+[Case 3] 병렬 레인 - 백엔드/프론트 동시 개발
+─────────────────────────────────────────
+  cursorflow prepare ShopFeature --lanes 2 --preset complex \\
+    --prompt "상품 검색 기능"
 
-  # Append a task to an existing lane
-  cursorflow prepare --add-task _cursorflow/tasks/2412211530_FullStack/01-lane-1.json \\
-    --task "verify|sonnet-4.5|Double-check all requirements|All criteria met"
+  결과: 01-lane-1.json (백엔드)  ─┬─ 동시 실행
+        02-lane-2.json (프론트)  ─┘
 
-## Step 4: Validate Configuration
 
-  cursorflow doctor --tasks-dir _cursorflow/tasks/2412211530_FullStack
+[Case 4] 의존성 - 프론트가 백엔드 완료 후 시작
+─────────────────────────────────────────
+  cursorflow prepare --add-task ./02-lane-2.json \\
+    --task "integrate|sonnet-4.5|API 연동|완료|01-lane-1:implement"
+                                              └─ 이 태스크 완료 후 시작
 
-## Step 5: Run
+  실행 흐름:
+    01-lane-1: [plan] → [implement] → [test]
+                             ↓ 완료되면
+    02-lane-2: [plan] ───────┴─────→ [integrate]
 
-  cursorflow run _cursorflow/tasks/2412211530_FullStack
 
-═══════════════════════════════════════════════════════════════════════════════
+[Case 5] 커스텀 태스크 - 원하는 대로 구성
+─────────────────────────────────────────
+  cursorflow prepare CustomFlow \\
+    --task "setup|sonnet-4.5|DB 스키마 생성|완료" \\
+    --task "api|sonnet-4.5|REST API 구현|동작" \\
+    --task "test|sonnet-4.5|테스트 작성|통과"
 
-## Preset Templates
 
-  --preset complex     plan → implement → test (for complex features)
-  --preset simple      implement → test (for simple changes)
-  --preset merge       merge → test (auto-applied when --depends-on is set)
+[Case 6] 나중에 추가 - 레인이나 태스크 덧붙이기
+─────────────────────────────────────────
+  # 새 레인 추가
+  cursorflow prepare --add-lane ./tasks/ShopFeature --preset simple
 
-## Options
-
-  Core:
-    <feature-name>            Name of the feature (for new task directories)
-    --lanes <num>             Number of lanes to create (default: 1)
-    --preset <type>           Use preset template: complex | simple | merge
-
-  Task Definition:
-    --prompt <text>           Task prompt (uses preset or single task)
-    --criteria <list>         Comma-separated acceptance criteria
-    --model <model>           Model to use (default: sonnet-4.5)
-    --task <spec>             Full task spec: "name|model|prompt|criteria|dependsOn|timeout" (repeatable)
-
-  Dependencies:
-    --sequential              Chain lanes: 1 → 2 → 3
-    --deps <spec>             Custom dependencies: "2:1;3:1,2"
-    --depends-on <lanes>      Dependencies for --add-lane: "01-lane-1,02-lane-2"
-    Task-level deps:          In --task, add "lane:task" at the end.
-                              Example: "test|sonnet-4.5|Run tests|All pass|01-lane-1:setup"
-    Task-level timeout:       In --task, add milliseconds at the end.
-                              Example: "heavy|sonnet-4.5|Big task|Done||1200000"
-
-  Incremental (add to existing):
-    --add-lane <dir>          Add a new lane to existing task directory
-    --add-task <file>         Append task(s) to existing lane JSON file
-
-  Advanced:
-    --template <path|url|name>  External template JSON file, URL, or built-in name
-    --force                     Overwrite existing files
+  # 기존 레인에 태스크 추가
+  cursorflow prepare --add-task ./01-lane-1.json \\
+    --task "docs|sonnet-4.5|API 문서화|완성"
 
 ═══════════════════════════════════════════════════════════════════════════════
 
-## Examples
+--task 형식: "이름|모델|프롬프트|완료조건|의존성|타임아웃"
 
-  # 1. Complex feature with multiple lanes
-  cursorflow prepare AuthSystem --lanes 3 --sequential --preset complex \\
-    --prompt "Implement authentication for your layer"
+  예시:
+    "build|sonnet-4.5|빌드하기|완료"                    기본
+    "deploy|sonnet-4.5|배포|성공|01-lane:build"         의존성
+    "heavy|sonnet-4.5|대용량|완료||1200000"             타임아웃 20분
 
-  # 2. Simple bug fix
-  cursorflow prepare FixLoginBug --preset simple \\
-    --prompt "Fix the login validation bug in auth.ts"
+═══════════════════════════════════════════════════════════════════════════════
 
-  # 3. Add a merge/integration lane
-  cursorflow prepare --add-lane _cursorflow/tasks/2412211530_AuthSystem \\
-    --preset merge --depends-on "01-lane-1,02-lane-2"
-
-  # 4. Custom multi-task lane (overrides preset)
-  cursorflow prepare ComplexFeature \\
-    --task "plan|sonnet-4.5-thinking|Create implementation plan|Plan documented" \\
-    --task "implement|sonnet-4.5|Build the feature|Code complete" \\
-    --task "test|sonnet-4.5|Write comprehensive tests|Tests pass"
+옵션 요약:
+  --prompt <text>      작업 설명
+  --preset <type>      complex | simple | merge
+  --lanes <num>        병렬 레인 수 (기본: 1)
+  --task <spec>        커스텀 태스크 (반복 가능)
+  --add-lane <dir>     기존 디렉토리에 레인 추가
+  --add-task <file>    기존 레인에 태스크 추가
+  --model <model>      AI 모델 (기본: sonnet-4.5)
+  --template <path>    외부 템플릿 파일
+  --force              덮어쓰기
   `);
 }
 
@@ -148,15 +129,12 @@ function parseArgs(args: string[]): PrepareOptions {
     lanes: 1,
     template: null,
     preset: null,
-    sequential: false,
-    deps: null,
     prompt: null,
     criteria: [],
     model: null,
     taskSpecs: [],
     addLane: null,
     addTask: null,
-    dependsOnLanes: [],
     force: false,
     help: false,
   };
@@ -169,8 +147,6 @@ function parseArgs(args: string[]): PrepareOptions {
       result.help = true;
     } else if (arg === '--force') {
       result.force = true;
-    } else if (arg === '--sequential') {
-      result.sequential = true;
     } else if (arg === '--lanes' && args[i + 1]) {
       result.lanes = parseInt(args[++i]) || 1;
     } else if (arg === '--template' && args[i + 1]) {
@@ -182,8 +158,6 @@ function parseArgs(args: string[]): PrepareOptions {
       } else {
         throw new Error(`Invalid preset: "${presetValue}". Must be one of: complex, simple, merge`);
       }
-    } else if (arg === '--deps' && args[i + 1]) {
-      result.deps = args[++i];
     } else if (arg === '--prompt' && args[i + 1]) {
       result.prompt = args[++i];
     } else if (arg === '--criteria' && args[i + 1]) {
@@ -196,8 +170,6 @@ function parseArgs(args: string[]): PrepareOptions {
       result.addLane = args[++i];
     } else if (arg === '--add-task' && args[i + 1]) {
       result.addTask = args[++i];
-    } else if (arg === '--depends-on' && args[i + 1]) {
-      result.dependsOnLanes = args[++i].split(',').map(d => d.trim()).filter(d => d);
     } else if (!arg.startsWith('--') && !result.featureName) {
       result.featureName = arg;
     }
@@ -216,10 +188,7 @@ function parseTaskSpec(spec: string): Task {
     throw new Error(`Invalid task spec: "${spec}". Expected format: "name|model|prompt[|criteria[|dependsOn[|timeout]]]"`);
   }
   
-  const [name, model, prompt, criteriaStr, depsStr, timeoutStr] = parts;
-  const acceptanceCriteria = criteriaStr 
-    ? criteriaStr.split(',').map(c => c.trim()).filter(c => c)
-    : undefined;
+  const [name, model, prompt, _criteriaStr, depsStr, timeoutStr] = parts;
   
   const dependsOn = depsStr
     ? depsStr.split(',').map(d => d.trim()).filter(d => d)
@@ -231,7 +200,6 @@ function parseTaskSpec(spec: string): Task {
     name: name.trim(),
     model: model.trim() || 'sonnet-4.5',
     prompt: prompt.trim(),
-    ...(acceptanceCriteria && acceptanceCriteria.length > 0 ? { acceptanceCriteria } : {}),
     ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
     ...(timeout ? { timeout } : {}),
   };
@@ -286,11 +254,6 @@ The plan document should include:
 - Data structures and interfaces
 - Step-by-step implementation tasks
 - Potential risks and edge cases`,
-          acceptanceCriteria: [
-            `Plan document saved to ${planDocPath}`,
-            'All required files are identified',
-            'Approach is clearly defined',
-          ],
         },
         {
           name: 'implement',
@@ -318,11 +281,6 @@ ${basePrompt}
 - Refer back to the plan document if unsure about any step.
 - Verify all edge cases from the plan are handled.
 - Ensure code follows project conventions.`,
-          acceptanceCriteria: criteria.length > 0 ? criteria : [
-            'Code implemented according to plan',
-            'No build errors',
-            'All edge cases handled',
-          ],
         },
         {
           name: 'test',
@@ -346,11 +304,6 @@ Write comprehensive tests for the implementation.
 ## Important
 - All tests must pass before completing.
 - Cover happy path and error cases from the plan.`,
-          acceptanceCriteria: [
-            'Unit tests written',
-            'All tests pass',
-            'Edge cases covered',
-          ],
         }
       );
       break;
@@ -375,11 +328,6 @@ ${basePrompt}
 ## Important
 - Keep changes focused and minimal.
 - Follow existing code conventions.`,
-          acceptanceCriteria: criteria.length > 0 ? criteria : [
-            'Implementation complete',
-            'No build errors',
-            'Code follows conventions',
-          ],
         },
         {
           name: 'test',
@@ -397,10 +345,6 @@ Test the implementation thoroughly.
 
 ## Important
 - All tests must pass before completing.`,
-          acceptanceCriteria: [
-            'Tests written/updated',
-            'All tests pass',
-          ],
         }
       );
       break;
@@ -427,11 +371,6 @@ Merge dependent branches and resolve any conflicts.
 - Resolve all conflicts cleanly.
 - Ensure code from all merged branches works together.
 - Check that no functionality was broken by the merge.`,
-          acceptanceCriteria: [
-            'All conflicts resolved',
-            'No build errors',
-            'Integration verified',
-          ],
         },
         {
           name: 'test',
@@ -451,11 +390,6 @@ Run comprehensive tests after the merge.
 ## Important
 - All tests must pass.
 - Test the interaction between merged features.`,
-          acceptanceCriteria: criteria.length > 0 ? criteria : [
-            'All unit tests pass',
-            'Integration tests pass',
-            'No regressions',
-          ],
         }
       );
       break;
@@ -468,9 +402,9 @@ function buildTasksFromOptions(
   options: PrepareOptions,
   laneNumber: number,
   featureName: string,
-  hasDependencies: boolean = false
+  _hasDependencies: boolean = false
 ): Task[] {
-  // Priority: --task > --preset/dependencies > --prompt alone > default
+  // Priority: --task > --preset > --prompt alone > default
   
   // 1. Explicit --task specifications (highest priority)
   if (options.taskSpecs.length > 0) {
@@ -481,18 +415,16 @@ function buildTasksFromOptions(
     return tasks;
   }
   
-  // 2. Preset template (use when --preset specified OR lane has dependencies)
+  // 2. Preset template (use when --preset specified)
   //    --prompt serves as context when used with preset
-  if (options.preset || hasDependencies) {
-    // Auto-apply merge preset if lane has dependencies and no explicit preset
-    const preset = options.preset || (hasDependencies ? 'merge' : 'complex');
+  if (options.preset) {
     return buildTasksFromPreset(
-      preset,
+      options.preset,
       featureName,
       laneNumber,
       options.prompt || `Implement ${featureName}`,
       options.criteria,
-      hasDependencies
+      false
     );
   }
   
@@ -504,10 +436,6 @@ function buildTasksFromOptions(
       prompt: options.prompt,
     };
     
-    if (options.criteria.length > 0) {
-      task.acceptanceCriteria = options.criteria;
-    }
-    
     return [task];
   }
   
@@ -518,7 +446,7 @@ function buildTasksFromOptions(
     laneNumber,
     `Implement ${featureName}`,
     options.criteria,
-    hasDependencies
+    false
   );
 }
 
@@ -538,11 +466,6 @@ function getDefaultConfig(laneNumber: number, featureName: string, tasks: Task[]
       lockfileReadOnly: true,
     },
     
-    // Review Settings
-    enableReview: true,
-    reviewModel: 'sonnet-4.5-thinking',
-    maxReviewIterations: 3,
-    
     // Lane Metadata
     laneNumber: laneNumber,
     devPort: 3000 + laneNumber,
@@ -550,24 +473,6 @@ function getDefaultConfig(laneNumber: number, featureName: string, tasks: Task[]
     // Tasks
     tasks: tasks,
   };
-}
-
-function parseDeps(depsStr: string): Map<number, number[]> {
-  const map = new Map<number, number[]>();
-  // Format: "2:1;3:1,2"
-  const lanes = depsStr.split(';');
-  for (const lane of lanes) {
-    const [targetStr, depsPart] = lane.split(':');
-    if (!targetStr || !depsPart) continue;
-    
-    const target = parseInt(targetStr);
-    const deps = depsPart.split(',').map(d => parseInt(d)).filter(d => !isNaN(d));
-    
-    if (!isNaN(target) && deps.length > 0) {
-      map.set(target, deps);
-    }
-  }
-  return map;
 }
 
 function replacePlaceholders(obj: any, context: { featureName: string; laneNumber: number; devPort: number }): any {
@@ -626,8 +531,6 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   const fileName = `${laneNumber.toString().padStart(2, '0')}-${laneName}.json`;
   const filePath = safeJoin(taskDir, fileName);
   
-  const hasDependencies = options.dependsOnLanes.length > 0;
-  
   // Load template if provided
   let template = null;
   if (options.template) {
@@ -639,23 +542,17 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   if (template) {
     taskConfig = { ...template, laneNumber, devPort: 3000 + laneNumber };
   } else {
-    // Build tasks from options (auto-detects merge preset if has dependencies)
-    const tasks = buildTasksFromOptions(options, laneNumber, featureName, hasDependencies);
+    // Build tasks from options
+    const tasks = buildTasksFromOptions(options, laneNumber, featureName, false);
     taskConfig = getDefaultConfig(laneNumber, featureName, tasks);
   }
 
   // Replace placeholders
-  const processedConfig = replacePlaceholders(taskConfig, {
+  const finalConfig = replacePlaceholders(taskConfig, {
     featureName,
     laneNumber,
     devPort: 3000 + laneNumber,
   });
-  
-  // Add dependencies if specified
-  const finalConfig = {
-    ...processedConfig,
-    ...(hasDependencies ? { dependsOn: options.dependsOnLanes } : {}),
-  };
   
   // Use atomic write with wx flag to avoid TOCTOU race condition (unless force is set)
   // SECURITY NOTE: Writing user-defined task configuration to the file system.
@@ -672,10 +569,9 @@ async function addLaneToDir(options: PrepareOptions): Promise<void> {
   
   const tasksList = finalConfig.tasks || [];
   const taskSummary = tasksList.map((t: any) => t.name).join(' → ');
-  const depsInfo = hasDependencies ? ` (depends: ${options.dependsOnLanes.join(', ')})` : '';
-  const presetInfo = options.preset ? ` [${options.preset}]` : (hasDependencies ? ' [merge]' : (template ? ' [template]' : ''));
+  const presetInfo = options.preset ? ` [${options.preset}]` : (template ? ' [template]' : '');
   
-  logger.success(`Added lane: ${fileName} [${taskSummary}]${presetInfo}${depsInfo}`);
+  logger.success(`Added lane: ${fileName} [${taskSummary}]${presetInfo}`);
   logger.info(`Directory: ${taskDir}`);
   
   console.log(`\nNext steps:`);
@@ -750,29 +646,17 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
     template = await resolveTemplate(options.template);
   }
 
-  // Calculate dependencies
-  const dependencyMap = options.sequential 
-    ? new Map(Array.from({ length: options.lanes - 1 }, (_, i) => [i + 2, [i + 1]]))
-    : (options.deps ? parseDeps(options.deps) : new Map<number, number[]>());
-
-  const laneInfoList: { name: string; fileName: string; dependsOn: string[]; preset: string }[] = [];
+  const laneInfoList: { name: string; fileName: string; preset: string }[] = [];
 
   for (let i = 1; i <= options.lanes; i++) {
     const laneName = `lane-${i}`;
     const fileName = `${i.toString().padStart(2, '0')}-${laneName}.json`;
     const filePath = safeJoin(taskDir, fileName);
     
-    const depNums = dependencyMap.get(i) || [];
-    const dependsOn = depNums.map(n => {
-      const depLaneName = `lane-${n}`;
-      return `${n.toString().padStart(2, '0')}-${depLaneName}`;
-    });
-
-    const hasDependencies = dependsOn.length > 0;
     const devPort = 3000 + i;
     
     let taskConfig;
-    let effectivePreset: EffectivePresetType = options.preset || (hasDependencies ? 'merge' : 'complex');
+    let effectivePreset: EffectivePresetType = options.preset || 'complex';
     
     if (template) {
       // Use template
@@ -780,31 +664,25 @@ async function createNewFeature(options: PrepareOptions): Promise<void> {
       effectivePreset = 'custom';
     } else {
       // Build from CLI options
-      const tasks = buildTasksFromOptions(options, i, options.featureName, hasDependencies);
+      const tasks = buildTasksFromOptions(options, i, options.featureName, false);
       taskConfig = getDefaultConfig(i, options.featureName, tasks);
     }
     
     // Replace placeholders
-    const processedConfig = replacePlaceholders(taskConfig, {
+    const finalConfig = replacePlaceholders(taskConfig, {
       featureName: options.featureName,
       laneNumber: i,
       devPort: devPort,
     });
-    
-    // Add dependencies if any
-    const finalConfig = {
-      ...processedConfig,
-      ...(dependsOn.length > 0 ? { dependsOn } : {}),
-    };
     
     // SECURITY NOTE: Writing generated lane configuration (containing user prompts) to file system.
     fs.writeFileSync(filePath, JSON.stringify(finalConfig, null, 2) + '\n', 'utf8');
     
     const taskSummary = finalConfig.tasks?.map((t: any) => t.name).join(' → ') || 'default';
     const presetLabel = effectivePreset !== 'custom' ? ` [${effectivePreset}]` : '';
-    logger.success(`Created: ${fileName} [${taskSummary}]${presetLabel}${dependsOn.length > 0 ? ` (depends: ${dependsOn.join(', ')})` : ''}`);
+    logger.success(`Created: ${fileName} [${taskSummary}]${presetLabel}`);
     
-    laneInfoList.push({ name: laneName, fileName, dependsOn, preset: effectivePreset });
+    laneInfoList.push({ name: laneName, fileName, preset: effectivePreset });
   }
 
   // Create README
@@ -826,14 +704,29 @@ cursorflow run ${path.relative(config.projectRoot, taskDir)}
 
 ## Lanes
 
-${laneInfoList.map(l => `- **${l.fileName.replace('.json', '')}** [${l.preset}]${l.dependsOn.length > 0 ? ` (depends: ${l.dependsOn.join(', ')})` : ''}`).join('\n')}
+${laneInfoList.map(l => `- **${l.fileName.replace('.json', '')}** [${l.preset}]`).join('\n')}
+
+## Task-Level Dependencies
+
+To make a task wait for another task to complete before starting, use the \`dependsOn\` field:
+
+\`\`\`json
+{
+  "tasks": [
+    {
+      "name": "my-task",
+      "prompt": "...",
+      "dependsOn": ["other-lane:other-task"]
+    }
+  ]
+}
+\`\`\`
 
 ## Modifying Tasks
 
 \`\`\`bash
-# Add a new lane (with merge preset for dependent lanes)
-cursorflow prepare --add-lane ${path.relative(config.projectRoot, taskDir)} \\
-  --preset merge --depends-on "01-lane-1"
+# Add a new lane
+cursorflow prepare --add-lane ${path.relative(config.projectRoot, taskDir)} --preset complex
 
 # Add task to existing lane
 cursorflow prepare --add-task ${path.relative(config.projectRoot, taskDir)}/01-lane-1.json \\

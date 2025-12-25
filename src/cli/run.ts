@@ -116,6 +116,7 @@ interface RunOptions {
   executor: string | null;
   maxConcurrent: number | null;
   skipDoctor: boolean;
+  skipPreflight: boolean;
   noGit: boolean;
   raw: boolean;
   help: boolean;
@@ -135,6 +136,7 @@ Options:
   --max-concurrent <num> Limit parallel agents (overrides config)
   --executor <type>      cursor-agent | cloud
   --skip-doctor          Skip environment checks (not recommended)
+  --skip-preflight       Skip preflight checks (Git remote, etc.)
   --no-git               Disable Git operations (worktree, push, commit)
   --raw                  Save raw logs (absolute raw, no processing)
   --dry-run              Show execution plan without starting agents
@@ -157,6 +159,7 @@ function parseArgs(args: string[]): RunOptions {
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '0') || null : null,
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
+    skipPreflight: args.includes('--skip-preflight'),
     noGit: args.includes('--no-git'),
     raw: args.includes('--raw'),
     help: args.includes('--help') || args.includes('-h'),
@@ -234,6 +237,7 @@ async function run(args: string[]): Promise<void> {
     ];
     
     if (options.skipDoctor) resumeArgs.push('--skip-doctor');
+    if (options.skipPreflight) resumeArgs.push('--skip-preflight');
     if (options.noGit) resumeArgs.push('--no-git');
     if (options.executor) {
       resumeArgs.push('--executor', options.executor);
@@ -255,7 +259,7 @@ async function run(args: string[]): Promise<void> {
   }
 
   // Preflight checks (doctor)
-  if (!options.skipDoctor) {
+  if (!options.skipDoctor && !options.skipPreflight) {
     const report = runDoctor({
       cwd: process.cwd(),
       tasksDir,
@@ -296,6 +300,7 @@ async function run(args: string[]): Promise<void> {
         ...(options.raw ? { raw: true } : {}),
       },
       noGit: options.noGit,
+      skipPreflight: options.skipPreflight,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

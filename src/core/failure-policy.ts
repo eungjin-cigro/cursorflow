@@ -129,6 +129,15 @@ export interface FailureContext {
 /**
  * Analyze stall condition with multi-layer detection and escalating recovery
  * 
+ * @deprecated Use StallDetectionService from './stall-detection' instead.
+ * This function is kept for backward compatibility but will be removed in a future version.
+ * 
+ * The new unified StallDetectionService provides:
+ * - Single source of truth for stall state
+ * - Automatic recovery action execution
+ * - Better heartbeat filtering
+ * - Consistent state management
+ * 
  * Recovery escalation stages:
  * 1. Phase 0 → Phase 1: Send continue signal (after 2 min idle)
  * 2. Phase 1 → Phase 2: Send stronger prompt (after 2 min grace)

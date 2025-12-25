@@ -56,13 +56,13 @@ const UI = {
 interface LaneWithDeps {
   name: string;
   path: string;
-  dependsOn: string[];
 }
 
 interface MonitorOptions {
   runDir?: string;
   interval: number;
   help: boolean;
+  list: boolean;
 }
 
 function printHelp(): void {
@@ -73,8 +73,14 @@ Interactive lane dashboard to track progress and dependencies.
 
 Options:
   [run-dir]              Run directory to monitor (default: latest)
+  --list, -l             List all runs (multiple flows dashboard)
   --interval <seconds>   Refresh interval (default: 2)
   --help, -h             Show help
+
+Examples:
+  cursorflow monitor             # Monitor latest run
+  cursorflow monitor --list      # Show all runs dashboard
+  cursorflow monitor run-123     # Monitor specific run
   `);
 }
 
@@ -135,9 +141,10 @@ class InteractiveMonitor {
     return process.stdout.rows || 24;
   }
 
-  constructor(runDir: string, interval: number, logsDir?: string) {
+  constructor(runDir: string, interval: number, logsDir?: string, initialView: View = View.LIST) {
     this.runDir = runDir;
     this.interval = interval;
+    this.view = initialView;
     
     // Set logs directory for multiple flows discovery
     if (logsDir) {
@@ -999,14 +1006,12 @@ class InteractiveMonitor {
       // Next action
       let nextAction = '-';
       if (status.status === 'completed') {
-        const dependents = this.lanes.filter(l => laneStatuses[l.name]?.dependsOn?.includes(lane.name));
-        nextAction = dependents.length > 0 ? `→ ${dependents.map(d => d.name).join(', ')}` : '✓ Done';
+        nextAction = '✓ Done';
       } else if (status.status === 'waiting') {
         if (status.waitingFor?.length > 0) {
           nextAction = `⏳ ${status.waitingFor.join(', ')}`;
         } else {
-          const missingDeps = status.dependsOn.filter((d: string) => laneStatuses[d]?.status !== 'completed');
-          nextAction = missingDeps.length > 0 ? `⏳ ${missingDeps.join(', ')}` : '⏳ waiting';
+          nextAction = '⏳ waiting';
         }
       } else if (processStatus?.actualStatus === 'running') {
         nextAction = '🚀 working...';
@@ -1063,9 +1068,6 @@ class InteractiveMonitor {
     process.stdout.write(` ${UI.COLORS.dim}Duration${UI.COLORS.reset}   ${this.formatDuration(processStatus?.duration || status.duration)}\n`);
     process.stdout.write(` ${UI.COLORS.dim}Branch${UI.COLORS.reset}     ${status.pipelineBranch}\n`);
     
-    if (status.dependsOn && status.dependsOn.length > 0) {
-      process.stdout.write(` ${UI.COLORS.dim}Depends${UI.COLORS.reset}    ${status.dependsOn.join(', ')}\n`);
-    }
     if (status.waitingFor && status.waitingFor.length > 0) {
       process.stdout.write(` ${UI.COLORS.yellow}Waiting${UI.COLORS.reset}    ${status.waitingFor.join(', ')}\n`);
     }
@@ -1132,7 +1134,6 @@ class InteractiveMonitor {
     const colors: Record<string, string> = {
       user: UI.COLORS.yellow,
       assistant: UI.COLORS.green,
-      reviewer: UI.COLORS.magenta,
       intervention: UI.COLORS.red,
       system: UI.COLORS.cyan,
     };
@@ -1243,9 +1244,9 @@ class InteractiveMonitor {
         const nodeText = `${statusIcon} ${laneName}`;
         process.stdout.write(`   ${statusColor}${nodeText.padEnd(20)}${UI.COLORS.reset}`);
         
-        // Render dependencies
-        if (status?.dependsOn?.length > 0) {
-          process.stdout.write(` ${UI.COLORS.dim}←${UI.COLORS.reset} ${UI.COLORS.yellow}${status.dependsOn.join(', ')}${UI.COLORS.reset}`);
+        // Show task-level dependencies if waiting
+        if (status?.waitingFor?.length > 0) {
+          process.stdout.write(` ${UI.COLORS.dim}←${UI.COLORS.reset} ${UI.COLORS.yellow}${status.waitingFor.join(', ')}${UI.COLORS.reset}`);
         }
         process.stdout.write('\n');
       }
@@ -1256,54 +1257,21 @@ class InteractiveMonitor {
       }
     }
 
-    process.stdout.write(`\n ${UI.COLORS.dim}Lanes wait for dependencies to complete before starting${UI.COLORS.reset}\n`);
+    process.stdout.write(`\n ${UI.COLORS.dim}Tasks can wait for other tasks using task-level dependencies${UI.COLORS.reset}\n`);
     
     this.renderFooter(['[←/Esc] Back']);
   }
   
   /**
-   * Calculate dependency levels for visualization
+   * Calculate levels for visualization (all lanes run in parallel now)
    */
   private calculateDependencyLevels(): string[][] {
-    const levels: string[][] = [];
-    const assigned = new Set<string>();
-    
-    // First, find lanes with no dependencies
-    const noDeps = this.lanes.filter(l => !l.dependsOn || l.dependsOn.length === 0);
-    if (noDeps.length > 0) {
-      levels.push(noDeps.map(l => l.name));
-      noDeps.forEach(l => assigned.add(l.name));
+    // Since lane-level dependencies are removed, all lanes can run in parallel
+    // Group them into a single level
+    if (this.lanes.length === 0) {
+      return [];
     }
-    
-    // Then assign remaining lanes by dependency completion
-    let maxIterations = 10;
-    while (assigned.size < this.lanes.length && maxIterations-- > 0) {
-      const nextLevel: string[] = [];
-      
-      for (const lane of this.lanes) {
-        if (assigned.has(lane.name)) continue;
-        
-        // Check if all dependencies are assigned
-        const allDepsAssigned = lane.dependsOn.every(d => assigned.has(d));
-        if (allDepsAssigned) {
-          nextLevel.push(lane.name);
-        }
-      }
-      
-      if (nextLevel.length === 0) {
-        // Remaining lanes have circular deps or missing deps
-        const remaining = this.lanes.filter(l => !assigned.has(l.name)).map(l => l.name);
-        if (remaining.length > 0) {
-          levels.push(remaining);
-        }
-        break;
-      }
-      
-      levels.push(nextLevel);
-      nextLevel.forEach(n => assigned.add(n));
-    }
-    
-    return levels;
+    return [this.lanes.map(l => l.name)];
   }
 
   private renderTerminal() {
@@ -1689,39 +1657,33 @@ class InteractiveMonitor {
     return fs.readdirSync(lanesDir)
       .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory())
       .map(name => {
-        const config = laneConfigs.find(c => c.name === name);
         return {
           name,
           path: safeJoin(lanesDir, name),
-          dependsOn: config?.dependsOn || [],
         };
       });
   }
 
-  private listLaneFilesFromDir(tasksDir: string): { name: string; dependsOn: string[] }[] {
+  private listLaneFilesFromDir(tasksDir: string): { name: string }[] {
     if (!fs.existsSync(tasksDir)) return [];
     return fs.readdirSync(tasksDir)
       .filter(f => f.endsWith('.json'))
       .map(f => {
         const filePath = safeJoin(tasksDir, f);
         try {
-          const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          return { name: path.basename(f, '.json'), dependsOn: config.dependsOn || [] };
+          return { name: path.basename(f, '.json') };
         } catch {
-          return { name: path.basename(f, '.json'), dependsOn: [] };
+          return { name: path.basename(f, '.json') };
         }
       });
   }
 
-  private getLaneStatus(lanePath: string, laneName: string) {
+  private getLaneStatus(lanePath: string, _laneName: string) {
     const statePath = safeJoin(lanePath, 'state.json');
     const state = loadState<LaneState & { chatId?: string }>(statePath);
     
-    const laneInfo = this.lanes.find(l => l.name === laneName);
-    const dependsOn = state?.dependsOn || laneInfo?.dependsOn || [];
-    
     if (!state) {
-      return { status: 'pending', currentTask: 0, totalTasks: '?', progress: '0%', dependsOn, duration: 0, pipelineBranch: '-', chatId: '-' };
+      return { status: 'pending', currentTask: 0, totalTasks: '?', progress: '0%', duration: 0, pipelineBranch: '-', chatId: '-' };
     }
     
     const progress = state.totalTasks > 0 ? Math.round((state.currentTaskIndex / state.totalTasks) * 100) : 0;
@@ -1737,7 +1699,6 @@ class InteractiveMonitor {
       progress: `${progress}%`,
       pipelineBranch: state.pipelineBranch || '-',
       chatId: state.chatId || '-',
-      dependsOn,
       duration,
       error: state.error,
       pid: state.pid,
@@ -1788,6 +1749,8 @@ function findLatestRunDir(logsDir: string): string | null {
  */
 async function monitor(args: string[]): Promise<void> {
   const help = args.includes('--help') || args.includes('-h');
+  const list = args.includes('--list') || args.includes('-l');
+  
   if (help) {
     printHelp();
     return;
@@ -1802,12 +1765,18 @@ async function monitor(args: string[]): Promise<void> {
   let runDir = runDirArg;
   if (!runDir || runDir === 'latest') {
     runDir = findLatestRunDir(config.logsDir) || undefined;
-    if (!runDir) throw new Error('No run directories found');
+    if (!runDir && !list) throw new Error('No run directories found');
+    if (!runDir && list) {
+      // Create a dummy runDir if none exists but we want to see the list (dashboard will handle empty list)
+      runDir = path.join(config.logsDir, 'runs', 'empty');
+    }
   }
   
-  if (!fs.existsSync(runDir)) throw new Error(`Run directory not found: ${runDir}`);
+  if (runDir && !fs.existsSync(runDir) && !list) {
+    throw new Error(`Run directory not found: ${runDir}`);
+  }
   
-  const monitor = new InteractiveMonitor(runDir, interval);
+  const monitor = new InteractiveMonitor(runDir!, interval, undefined, list ? View.FLOWS_DASHBOARD : View.LIST);
   await monitor.start();
 }
 

@@ -148,33 +148,6 @@ test_tasks_help() {
 }
 
 # ============================================================================
-# Runs Command Tests
-# ============================================================================
-
-test_runs_command() {
-    log_test "cursorflow runs"
-    local output
-    output=$(cursorflow_out runs 2>&1) || true
-    # Should show runs or "no runs found" message
-    if echo "$output" | grep -qiE "(run|no.*found|empty|history)"; then
-        record_pass "runs command works"
-    else
-        record_skip "runs command output different than expected"
-    fi
-}
-
-test_runs_help() {
-    log_test "cursorflow runs --help"
-    local output
-    output=$(cursorflow_out runs --help 2>&1) || true
-    if echo "$output" | grep -qiE "(run|list|history)"; then
-        record_pass "runs --help shows usage"
-    else
-        record_skip "runs --help not implemented"
-    fi
-}
-
-# ============================================================================
 # Monitor Command Tests
 # ============================================================================
 
@@ -182,10 +155,22 @@ test_monitor_help() {
     log_test "cursorflow monitor --help"
     local output
     output=$(cursorflow_out monitor --help 2>&1) || true
-    if echo "$output" | grep -qiE "(monitor|watch|status)"; then
+    if echo "$output" | grep -qiE "(monitor|list|all flows)"; then
         record_pass "monitor --help shows usage"
     else
         record_skip "monitor --help not implemented"
+    fi
+}
+
+test_monitor_list() {
+    log_test "cursorflow monitor --list"
+    local output
+    # Since it's interactive, we just check if it doesn't crash immediately or shows help if no runs
+    output=$(cursorflow_out monitor --list 2>&1 || true)
+    if echo "$output" | grep -qiE "(flow|run|no.*found|empty)"; then
+        record_pass "monitor --list works"
+    else
+        record_skip "monitor --list behavior different than expected"
     fi
 }
 
@@ -375,11 +360,10 @@ run_tests() {
     test_models_help
     test_tasks_command
     test_tasks_help
-    test_runs_command
-    test_runs_help
     
     log_phase "Phase 4: Monitoring Commands"
     test_monitor_help
+    test_monitor_list
     test_monitor_no_run
     test_logs_help
     test_logs_no_run

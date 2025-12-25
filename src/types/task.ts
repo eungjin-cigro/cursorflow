@@ -9,8 +9,6 @@ export interface Task {
   name: string;
   prompt: string;
   model?: string;
-  /** Acceptance criteria for the AI reviewer to validate */
-  acceptanceCriteria?: string[];
   /** Task-level dependencies (format: "lane:task") */
   dependsOn?: string[];
   /** Task execution timeout in milliseconds. Overrides lane-level timeout. */
@@ -19,7 +17,6 @@ export interface Task {
 
 export interface RunnerConfig {
   tasks: Task[];
-  dependsOn?: string[];
   pipelineBranch?: string;
   worktreeDir?: string;
   branchPrefix?: string;
@@ -27,13 +24,8 @@ export interface RunnerConfig {
   baseBranch?: string;
   model?: string;
   dependencyPolicy: DependencyPolicy;
-  enableReview?: boolean;
   /** Output format for cursor-agent (default: 'json') */
   agentOutputFormat?: 'json' | 'plain';
-  reviewModel?: string;
-  reviewAllTasks?: boolean;
-  maxReviewIterations?: number;
-  acceptanceCriteria?: string[];
   /** Task execution timeout in milliseconds. Default: 600000 (10 minutes) */
   timeout?: number;
   /** 
@@ -48,6 +40,11 @@ export interface RunnerConfig {
    * Default: false
    */
   noGit?: boolean;
+  /**
+   * Enable verbose Git logging.
+   * Default: false
+   */
+  verboseGit?: boolean;
 }
 
 export interface TaskDirInfo {
@@ -71,7 +68,6 @@ export interface TaskExecutionResult {
 export interface TaskResult {
   taskName: string;
   taskBranch: string;
-  acceptanceCriteria?: string[];
   [key: string]: any;
 }
 

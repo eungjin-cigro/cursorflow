@@ -74,7 +74,7 @@ Result: Both try to create "authfeature/lane-1-*" branches
 2. **Check Status Before Cleaning**
    ```bash
    # Always check what's running
-   cursorflow runs
+   cursorflow monitor --list
    
    # Use dry-run first
    cursorflow clean worktrees --dry-run
@@ -95,10 +95,7 @@ Result: Both try to create "authfeature/lane-1-*" branches
 4. **Monitor Active Flows**
    ```bash
    # See all running flows
-   cursorflow monitor
-   
-   # Check specific run status
-   cursorflow runs --run-id run-1234567890
+   cursorflow monitor --list
    ```
 
 ### For CI/CD Environments
@@ -283,7 +280,7 @@ cursorflow clean branches
 
 | Command | Description |
 |---------|-------------|
-| `cursorflow runs` | List all runs and their status |
+| `cursorflow monitor --list` | List all runs and their status |
 | `cursorflow clean --dry-run` | Preview what would be cleaned |
 | `cursorflow clean --run <id>` | Clean specific run only |
 | `cursorflow clean --orphaned` | Clean only orphaned resources |

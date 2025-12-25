@@ -79,7 +79,7 @@ export interface LogSession {
 
 export interface ConversationEntry {
   timestamp: string;
-  role: 'user' | 'assistant' | 'reviewer' | 'system' | 'intervention';
+  role: 'user' | 'assistant' | 'system' | 'intervention';
   task: string | null;
   fullText: string;
   textLength: number;

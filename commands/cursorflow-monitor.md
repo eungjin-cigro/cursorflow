@@ -7,11 +7,23 @@ The `cursorflow monitor` command provides a powerful, interactive terminal-based
 
 ```bash
 # Monitor the most recent run
-cursorflow monitor latest
+cursorflow monitor
+
+# List all runs (Multiple Flows Dashboard)
+cursorflow monitor --list
 
 # Monitor a specific run directory
-cursorflow monitor _cursorflow/logs/runs/run-2025-12-21T10-00-00
+cursorflow monitor run-2025-12-21T10-00-00
 ```
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `[run-dir]` | Run directory or ID to monitor (default: latest) |
+| `--list`, `-l` | Show all runs dashboard (interactive list) |
+| `--interval <n>` | Refresh interval in seconds (default: 2) |
+| `--help`, `-h` | Show help |
 
 ## Dashboard Controls
 
@@ -19,7 +31,16 @@ cursorflow monitor _cursorflow/logs/runs/run-2025-12-21T10-00-00
 - **Navigation**: Use `↑` and `↓` to move between lanes.
 - **Details**: Press `→` or `Enter` to enter the **Lane Detail View**.
 - **Flow View**: Press `F` to see the task dependency graph (DAG).
+- **All Runs**: Press `M` to switch to the **All Flows Dashboard**.
+- **Unified Logs**: Press `U` to see a merged log stream of all lanes.
 - **Quit**: Press `Q` to exit.
+
+### All Flows Dashboard
+- **Navigation**: Use `↑` and `↓` to select a flow.
+- **Switch**: Press `→` or `Enter` to switch the monitor to the selected flow.
+- **Delete**: Press `D` to delete a completed flow's logs (requires confirmation).
+- **Refresh**: Press `R` to refresh the list of flows.
+- **Back**: Press `M` or `Esc` to return to the List View.
 
 ### Lane Detail View
 - **History Browsing**: Use `↑` and `↓` to scroll through conversation history.

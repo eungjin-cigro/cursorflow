@@ -13,11 +13,10 @@
 
 - ⚡ **Parallel Execution**: Run multiple AI agents concurrently using isolated Git worktrees.
 - 🔗 **Task Dependencies (DAG)**: Define complex workflows where tasks wait for and merge their dependencies automatically.
-- 📋 **Preset Templates**: Built-in templates for common patterns (complex, simple, merge).
+- 🌊 **Flow Architecture**: Intuitive `new` + `add` commands to define Flows, Lanes, and Tasks.
 - 📊 **Interactive Dashboard**: A powerful terminal-based monitor to track all lanes, progress, and dependencies in real-time.
 - 📺 **Live Terminal Streaming**: Watch the AI agent's output as it happens with scrollable history.
 - 🙋 **Human Intervention**: Send direct messages to running agents to guide them or fix issues on the fly.
-- 🔍 **Automatic Review**: AI-powered code review with iterative feedback loops.
 - 🔀 **Smart Merging**: Automatically merge completed feature branches into subsequent dependent lanes.
 - 🔒 **Security-First**: Automated security scanning and dependency policy enforcement.
 
@@ -29,74 +28,135 @@
 npm install -g @litmers/cursorflow-orchestrator
 ```
 
-### 2. Initialize & Prepare Tasks
+### 2. Create a Flow
 
 ```bash
 cd your-project
 cursorflow init
 
-# Simple task (single implement task)
-cursorflow prepare FixBug --prompt "Fix the login validation bug in auth.ts"
-
-# Complex feature (plan → implement → test)
-cursorflow prepare AuthSystem --preset complex --prompt "Build user authentication with JWT"
-
-# Multiple parallel lanes
-cursorflow prepare FullStack --lanes 3 --sequential --preset complex \
-  --prompt "Build your layer of the full-stack feature"
+# Create a Flow with two Lanes: backend and frontend
+cursorflow new ShopFeature --lanes "backend,frontend"
 ```
 
-### 3. Validate & Run
+### 3. Add Tasks to Lanes
 
 ```bash
-# Check for issues before running
-cursorflow doctor --tasks-dir _cursorflow/tasks/2412211530_AuthSystem
+# Add tasks to backend lane (uses default model)
+cursorflow add ShopFeature backend \
+  --task "name=implement|prompt=상품 검색 API 구현"
 
+# Add tasks to frontend lane (waits for backend)
+cursorflow add ShopFeature frontend \
+  --task "name=ui|prompt=검색 UI 구현" \
+  --after "backend:implement"
+```
+
+### 4. Run
+
+```bash
 # Start orchestration
-cursorflow run _cursorflow/tasks/2412211530_AuthSystem
+cursorflow run ShopFeature
 
-# Open the interactive dashboard
+# Monitor progress in real-time
 cursorflow monitor latest
 ```
 
-## 📋 Preset Templates
+## 📋 Flow 커맨드 - 시나리오로 배우기
 
-CursorFlow provides built-in task templates:
+**시나리오**: "쇼핑몰" 프로젝트에서 백엔드 API와 프론트엔드를 동시에 개발
 
-| Preset | Tasks | Use Case |
-|--------|-------|----------|
-| `--preset complex` | plan → implement → test | Complex features (saves plan to `_cursorflow/PLAN_lane-{N}.md`) |
-| `--preset simple` | implement → test | Simple changes, bug fixes |
-| `--preset merge` | merge → test | Integration lanes (auto-applied with `--depends-on`) |
-| *(none)* | implement | Quick single task |
+---
 
-### Using External Templates
-
-You can use templates from a local file, a remote URL, or a built-in name:
+### Step 1: Flow와 Lane 생성 (`new`)
 
 ```bash
-# Using a built-in template name
-cursorflow prepare Feature --template basic
-
-# Using a local template file
-cursorflow prepare Custom --template ./my-template.json
-
-# Using a remote template URL
-cursorflow prepare Remote --template https://raw.githubusercontent.com/user/repo/main/template.json
+cursorflow new SearchFeature --lanes "api,web,mobile"
 ```
 
-Templates support `{{featureName}}`, `{{laneNumber}}`, and `{{devPort}}` placeholders.
+**결과:**
+```
+_cursorflow/flows/001_SearchFeature/
+├── flow.meta.json       # Flow 메타데이터
+├── 01-api.json          # API 레인 (빈 상태)
+├── 02-web.json          # Web 레인 (빈 상태)
+└── 03-mobile.json       # Mobile 레인 (빈 상태)
+```
+
+---
+
+### Step 2: 각 Lane에 Task 추가 (`add`)
 
 ```bash
-# Complex: Creates plan document that subsequent tasks reference
-cursorflow prepare Feature --preset complex --prompt "Build user dashboard"
+# API 레인: 의존성 없음, 바로 시작
+cursorflow add SearchFeature api \
+  --task "name=plan|prompt=API 설계" \
+  --task "name=implement|prompt=검색 API 구현" \
+  --task "name=test|prompt=API 테스트 작성"
 
-# Simple: Just implement and test
-cursorflow prepare BugFix --preset simple --prompt "Fix null pointer in auth.ts"
+# Web 레인: API의 implement 완료 후 시작
+cursorflow add SearchFeature web \
+  --task "name=ui|prompt=검색 UI 구현" \
+  --after "api:implement"
 
-# Single task: Just the prompt
-cursorflow prepare QuickFix --prompt "Update README.md"
+# Mobile 레인: API 테스트까지 모두 끝나야 시작
+cursorflow add SearchFeature mobile \
+  --task "name=app|prompt=모바일 검색 화면 구현" \
+  --after "api:test"
 ```
+
+---
+
+### Step 3: 실행
+
+```bash
+cursorflow run SearchFeature
+```
+
+**실행 흐름:**
+```
+api:    [plan] → [implement] → [test]
+                     │            │
+web:                 └─→ [ui] ────┤
+                                  │
+mobile:                           └─→ [app]
+```
+
+---
+
+### --task 형식
+
+```
+"name=<이름>|prompt=<프롬프트>"          # 기본 모델 사용
+"name=<이름>|model=<모델>|prompt=<프롬프트>"  # 모델 지정
+```
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `name` | ✅ | 태스크 이름 (영문, 숫자, -, _) |
+| `prompt` | ✅ | 태스크 프롬프트 |
+| `model` | ❌ | AI 모델 (생략 시 기본 모델 사용) |
+
+기본 모델 설정: `cursorflow config defaultModel <model-name>`
+
+---
+
+### --after 형식 (의존성)
+
+```
+--after "lane:task"           # 특정 태스크 완료 후 시작
+--after "lane"                # 해당 레인의 마지막 태스크 완료 후
+--after "a:t1, b:t2"          # 여러 태스크 모두 완료 후 (콤마 구분)
+```
+
+---
+
+### 커맨드 요약
+
+| 커맨드 | 설명 | 예시 |
+|--------|------|------|
+| `new` | Flow와 Lane 생성 | `cursorflow new Feature --lanes "api,web"` |
+| `add` | Lane에 Task 추가 | `cursorflow add Feature api --task "..."` |
+| `run` | Flow 실행 | `cursorflow run Feature` |
 
 ## 🎮 Dashboard Controls
 
@@ -116,19 +176,23 @@ Within the `cursorflow monitor` dashboard:
 
 ```json
 {
-  "baseBranch": "main",
   "branchPrefix": "feature/lane-1-",
   "timeout": 600000,
   "enableIntervention": false,
-  "dependsOn": ["01-lane-1"],
   "enableReview": true,
   "reviewModel": "sonnet-4.5-thinking",
   "tasks": [
     {
+      "name": "setup",
+      "model": "sonnet-4.5",
+      "prompt": "Set up the project structure..."
+    },
+    {
       "name": "implement",
       "model": "sonnet-4.5",
       "prompt": "Implement the user authentication...",
-      "acceptanceCriteria": ["Code complete", "Tests pass"]
+      "acceptanceCriteria": ["Code complete", "Tests pass"],
+      "dependsOn": ["other-lane:setup"]
     }
   ]
 }
@@ -141,20 +205,48 @@ Within the `cursorflow monitor` dashboard:
 | `timeout` | number | 600000 | Task timeout in milliseconds (10 min) |
 | `enableIntervention` | boolean | false | Enable stdin piping for intervention |
 | `model` | string | "sonnet-4.5" | AI model to use |
-| `dependsOn` | string[] | [] | Lane dependencies |
 | `enableReview` | boolean | true | Enable AI code review |
 
-## 🔗 Task Dependencies
+## 🔗 태스크 의존성 (dependsOn)
 
-Define dependencies between lanes. Dependent lanes wait for parents and auto-merge:
+**언제 사용?** 프론트엔드가 백엔드 API 완성 후에 시작해야 할 때
+
+### 사용법
+
+JSON 파일에서 `dependsOn` 필드 추가:
+
+```json
+{
+  "tasks": [
+    { "name": "setup", "prompt": "초기 설정..." },
+    { 
+      "name": "integrate", 
+      "prompt": "API 연동...",
+      "dependsOn": ["01-backend:implement"]  // ← 이 태스크 완료 후 시작
+    }
+  ]
+}
+```
+
+형식: `"레인파일명:태스크명"` (확장자 `.json` 제외)
+
+### 실행 흐름 예시
+
+```
+01-backend: [setup] → [implement] → [test]
+                          ↓ 완료!
+02-frontend: [setup] ─────┴─ 대기 → [integrate] → [test]
+```
+
+- 백엔드와 프론트엔드 **동시 시작**
+- 프론트의 `integrate`는 백엔드 `implement` 완료까지 대기
+- 완료되면 백엔드 브랜치 **자동 머지** 후 시작
+
+### 순환 의존성 검사
 
 ```bash
-# Create 3 sequential lanes (1 → 2 → 3)
-cursorflow prepare Pipeline --lanes 3 --sequential --preset complex
-
-# Add a merge lane that depends on multiple lanes
-cursorflow prepare --add-lane _cursorflow/tasks/2412211530_Pipeline \
-  --depends-on "01-lane-1,02-lane-2"
+cursorflow doctor --tasks-dir _cursorflow/tasks/MyFeature
+# ❌ Cyclic dependency: 01-a:task1 → 02-b:task2 → 01-a:task1
 ```
 
 ## 🩺 Pre-flight Checks

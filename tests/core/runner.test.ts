@@ -1,4 +1,4 @@
-import { extractDependencyRequest, wrapPromptForDependencyPolicy } from '../../src/core/runner';
+import { extractDependencyRequest, wrapPromptForDependencyPolicy, wrapPrompt } from '../../src/core/runner';
 
 describe('Runner Core', () => {
   test('extractDependencyRequest should find marker and JSON', () => {
@@ -34,5 +34,19 @@ describe('Runner Core', () => {
     const wrapped = wrapPromptForDependencyPolicy(prompt, policy);
     
     expect(wrapped).toBe(prompt);
+  });
+
+  test('wrapPrompt should include previous task state if provided', () => {
+    const prompt = 'Test task';
+    const config: any = { 
+      dependencyPolicy: { allowDependencyChange: true, lockfileReadOnly: false } 
+    };
+    const previousState = '{"key": "value"}';
+    
+    const wrapped = wrapPrompt(prompt, config, { previousState });
+    
+    expect(wrapped).toContain('### 💡 Previous Task State');
+    expect(wrapped).toContain('{"key": "value"}');
+    expect(wrapped).toContain(prompt);
   });
 });

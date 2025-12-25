@@ -115,7 +115,6 @@ interface LaneInfo {
   dir: string;
   state: LaneState | null;
   needsResume: boolean;
-  dependsOn: string[];
   isCompleted: boolean;
 }
 
@@ -295,39 +294,22 @@ function getAllLaneStatuses(runDir: string): LaneInfo[] {
       ) : true;
       
       const isCompleted = state?.status === 'completed';
-      const dependsOn = state?.dependsOn || [];
       
-      return { name, dir, state, needsResume, dependsOn, isCompleted };
+      return { name, dir, state, needsResume, isCompleted };
     });
   
   return lanes;
 }
 
 /**
- * Check if all dependencies of a lane are completed
+ * Check if lane can be resumed (lane-level deps removed, always true)
  */
 function areDependenciesCompleted(
-  lane: LaneInfo, 
-  allLanes: LaneInfo[],
-  completedLanes: Set<string>
+  _lane: LaneInfo, 
+  _allLanes: LaneInfo[],
+  _completedLanes: Set<string>
 ): boolean {
-  if (!lane.dependsOn || lane.dependsOn.length === 0) {
-    return true;
-  }
-  
-  for (const depName of lane.dependsOn) {
-    // Check if dependency is in completed set (already succeeded in this resume session)
-    if (completedLanes.has(depName)) {
-      continue;
-    }
-    
-    // Check if dependency was already completed before this resume
-    const depLane = allLanes.find(l => l.name === depName);
-    if (!depLane || !depLane.isCompleted) {
-      return false;
-    }
-  }
-  
+  // Lane-level dependencies removed - use task-level dependsOn instead
   return true;
 }
 
@@ -371,40 +353,25 @@ function printAllLaneStatus(runDir: string): { total: number; completed: number;
     const status = state?.status || 'unknown';
     const color = STATUS_COLORS[status] || STATUS_COLORS.unknown;
     const progress = state ? `${state.currentTaskIndex}/${state.totalTasks}` : '-/-';
-    const dependsOnStr = lane.dependsOn.length > 0 ? lane.dependsOn.join(',').substring(0, 12) : '-';
-    
-    // Check if dependencies are met
-    const depsCompleted = areDependenciesCompleted(lane, lanes, completedSet);
-    const canResume = lane.needsResume && depsCompleted;
-    const blockedByDep = lane.needsResume && !depsCompleted;
     
     if (status === 'completed') completedCount++;
     if (lane.needsResume) needsResumeCount++;
     
     let resumeIndicator = '';
-    if (canResume) {
-      resumeIndicator = '\x1b[33m✓\x1b[0m';
-    } else if (blockedByDep) {
-      resumeIndicator = '\x1b[90m⏳ waiting\x1b[0m';
+    if (lane.needsResume) {
+      resumeIndicator = '\x1b[33m✓ resumable\x1b[0m';
     }
     
     console.log('  ' + 
-      lane.name.padEnd(25) + 
+      lane.name.padEnd(30) + 
       `${color}${status.padEnd(12)}${RESET}` +
       progress.padEnd(12) +
-      dependsOnStr.padEnd(15) +
       resumeIndicator
     );
     
     // Show error if failed
     if (status === 'failed' && state?.error) {
-      console.log(`  ${''.padEnd(25)}\x1b[31m└─ ${state.error.substring(0, 50)}${state.error.length > 50 ? '...' : ''}\x1b[0m`);
-    }
-    
-    // Show blocked dependency info
-    if (blockedByDep) {
-      const pendingDeps = lane.dependsOn.filter(d => !completedSet.has(d));
-      console.log(`  ${''.padEnd(25)}\x1b[90m└─ waiting for: ${pendingDeps.join(', ')}\x1b[0m`);
+      console.log(`  ${''.padEnd(30)}\x1b[31m└─ ${state.error.substring(0, 50)}${state.error.length > 50 ? '...' : ''}\x1b[0m`);
     }
   }
   
@@ -532,17 +499,8 @@ async function resumeLanes(
   const resolvableLanes: LaneInfo[] = [];
   
   for (const lane of lanesToResume) {
-    // Check if all dependencies can be satisfied (either already completed or in the resume list)
-    const unmetDeps = lane.dependsOn.filter(dep => 
-      !completedSet.has(dep) && !toResumeNames.has(dep)
-    );
-    
-    if (unmetDeps.length > 0) {
-      logger.warn(`⏭ Skipping ${lane.name}: unresolvable dependencies (${unmetDeps.join(', ')})`);
-      skippedLanes.push(lane.name);
-    } else {
-      resolvableLanes.push(lane);
-    }
+    // Lane-level dependencies removed - all lanes can be resumed
+    resolvableLanes.push(lane);
   }
   
   if (resolvableLanes.length === 0) {
@@ -612,8 +570,7 @@ async function resumeLanes(
       }
       
       pending.delete(lane.name);
-      const depsInfo = lane.dependsOn.length > 0 ? ` (after: ${lane.dependsOn.join(', ')})` : '';
-      logger.info(`Starting: ${lane.name} (task ${lane.state!.currentTaskIndex}/${lane.state!.totalTasks})${depsInfo}`);
+      logger.info(`Starting: ${lane.name} (task ${lane.state!.currentTaskIndex}/${lane.state!.totalTasks})`);
       
       const { child } = spawnLaneResume(lane.name, lane.dir, lane.state!, {
         restart: options.restart,

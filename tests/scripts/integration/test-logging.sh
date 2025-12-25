@@ -232,7 +232,7 @@ EOF
     
     # Run the task
     local exit_code=0
-    timeout 90 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor 2>&1 || exit_code=$?
+    timeout 90 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor 2>&1 || exit_code=$?
     
     # Check if logs were created
     local latest_run="$TEST_ROOT/_cursorflow/logs/runs/latest"

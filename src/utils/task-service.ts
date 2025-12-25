@@ -106,7 +106,6 @@ export class TaskService {
         
         const laneName = this.extractLaneName(fileName);
         const tasks = content.tasks || [];
-        const dependsOn = content.dependsOn || [];
         const preset = this.detectPreset(tasks);
         const taskFlow = this.generateTaskFlow(tasks);
 
@@ -116,7 +115,6 @@ export class TaskService {
           preset,
           taskCount: tasks.length,
           taskFlow,
-          dependsOn,
         });
       } catch (error) {
         logger.debug(`Failed to parse lane file ${fileName}: ${error}`);
@@ -224,16 +222,6 @@ export class TaskService {
         errors.push(`Lane ${lane.fileName} has no tasks defined`);
       }
 
-      // Check dependencies exist
-      for (const dep of lane.dependsOn) {
-        const depExists = taskInfo.lanes.some(l => 
-          l.laneName === dep || l.fileName === dep || l.fileName === `${dep}.json`
-        );
-        if (!depExists) {
-          warnings.push(`Lane ${lane.fileName} depends on unknown lane: ${dep}`);
-        }
-      }
-
       // Validate lane file structure
       try {
         const filePath = path.join(taskInfo.path, lane.fileName);
@@ -259,10 +247,10 @@ export class TaskService {
       }
     }
 
-    // Check for circular dependencies
-    const circularDeps = this.detectCircularDependencies(taskInfo.lanes);
+    // Check for circular task-level dependencies
+    const circularDeps = this.detectTaskCircularDependencies(taskInfo);
     if (circularDeps.length > 0) {
-      errors.push(`Circular dependencies detected: ${circularDeps.join(' -> ')}`);
+      errors.push(`Circular task dependencies detected: ${circularDeps.join(' -> ')}`);
     }
 
     // Determine overall status
@@ -289,45 +277,65 @@ export class TaskService {
   }
 
   /**
-   * Detect circular dependencies in lane dependency graph
+   * Detect circular dependencies in task-level dependency graph
    */
-  private detectCircularDependencies(lanes: LaneFileInfo[]): string[] {
+  private detectTaskCircularDependencies(taskInfo: TaskDirInfo): string[] {
+    // Build task graph from all lane files
+    const taskGraph = new Map<string, string[]>(); // taskId -> dependencies
+    
+    for (const lane of taskInfo.lanes) {
+      try {
+        const filePath = path.join(taskInfo.path, lane.fileName);
+        const content = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const laneName = lane.fileName.replace('.json', '');
+        
+        if (Array.isArray(content.tasks)) {
+          for (const task of content.tasks) {
+            const taskId = `${laneName}:${task.name}`;
+            const deps = task.dependsOn || [];
+            taskGraph.set(taskId, deps);
+          }
+        }
+      } catch {
+        // Skip invalid files
+      }
+    }
+    
+    // DFS to detect cycles
     const visited = new Set<string>();
     const stack = new Set<string>();
     const cycle: string[] = [];
-
-    const dfs = (laneName: string): boolean => {
-      if (stack.has(laneName)) {
-        cycle.push(laneName);
-        return true; // Cycle found
+    
+    const dfs = (taskId: string): boolean => {
+      if (stack.has(taskId)) {
+        cycle.push(taskId);
+        return true;
       }
-      if (visited.has(laneName)) {
+      if (visited.has(taskId)) {
         return false;
       }
-
-      visited.add(laneName);
-      stack.add(laneName);
-
-      const lane = lanes.find(l => l.laneName === laneName);
-      if (lane) {
-        for (const dep of lane.dependsOn) {
-          if (dfs(dep)) {
-            cycle.unshift(laneName);
-            return true;
-          }
+      
+      visited.add(taskId);
+      stack.add(taskId);
+      
+      const deps = taskGraph.get(taskId) || [];
+      for (const dep of deps) {
+        if (dfs(dep)) {
+          cycle.unshift(taskId);
+          return true;
         }
       }
-
-      stack.delete(laneName);
+      
+      stack.delete(taskId);
       return false;
     };
-
-    for (const lane of lanes) {
-      if (dfs(lane.laneName)) {
+    
+    for (const taskId of taskGraph.keys()) {
+      if (dfs(taskId)) {
         break;
       }
     }
-
+    
     return cycle;
   }
 

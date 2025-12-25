@@ -211,7 +211,7 @@ EOF
     
     local start_time=$(date +%s)
     local exit_code=0
-    timeout 180 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 2 2>&1 || exit_code=$?
+    timeout 180 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 2 2>&1 || exit_code=$?
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
     
@@ -250,7 +250,7 @@ EOF
     done
     
     local exit_code=0
-    timeout 300 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 5 2>&1 || exit_code=$?
+    timeout 300 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 5 2>&1 || exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         # Check that multiple branches were created

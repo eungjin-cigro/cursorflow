@@ -2,20 +2,35 @@
  * Dependency management utilities for CursorFlow
  * 
  * Features:
- * - Cyclic dependency detection
+ * - Task-level cyclic dependency detection
  * - Dependency wait with timeout
  * - Topological sorting
+ * 
+ * Note: Lane-level dependencies have been removed.
+ * Use task-level dependencies (format: "lane:task") for fine-grained control.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { safeJoin } from './path';
 import { loadState } from './state';
-import { LaneState } from './types';
+import { LaneState, Task, RunnerConfig } from './types';
 import * as logger from './logger';
 
 export interface DependencyInfo {
   name: string;
+  dependsOn: string[];
+}
+
+/** Task-level dependency info for cycle detection */
+export interface TaskDependencyInfo {
+  /** Full identifier: "lane:task" */
+  id: string;
+  /** Lane name */
+  lane: string;
+  /** Task name */
+  task: string;
+  /** Dependencies in "lane:task" format */
   dependsOn: string[];
 }
 
@@ -475,6 +490,300 @@ export function printDependencyGraph(lanes: DependencyInfo[]): void {
   if (cycleResult.sortedOrder) {
     console.log('');
     console.log(`  Execution order: ${cycleResult.sortedOrder.reverse().join(' → ')}`);
+  }
+  
+  console.log('');
+}
+
+// ============================================================================
+// Task-Level Dependency Detection (New)
+// ============================================================================
+
+/**
+ * Extract all task dependencies from lane configuration files
+ */
+export function extractTaskDependencies(tasksDir: string): TaskDependencyInfo[] {
+  if (!fs.existsSync(tasksDir)) {
+    return [];
+  }
+  
+  const tasks: TaskDependencyInfo[] = [];
+  const files = fs.readdirSync(tasksDir).filter(f => f.endsWith('.json'));
+  
+  for (const file of files) {
+    const filePath = safeJoin(tasksDir, file);
+    const laneName = path.basename(file, '.json');
+    
+    try {
+      const config = JSON.parse(fs.readFileSync(filePath, 'utf8')) as RunnerConfig;
+      
+      for (const task of config.tasks || []) {
+        const taskId = `${laneName}:${task.name}`;
+        tasks.push({
+          id: taskId,
+          lane: laneName,
+          task: task.name,
+          dependsOn: task.dependsOn || [],
+        });
+      }
+    } catch (e) {
+      logger.warn(`Failed to parse task config from ${file}: ${e}`);
+    }
+  }
+  
+  return tasks;
+}
+
+/**
+ * Detect cyclic dependencies in task-level dependencies
+ */
+export function detectTaskCyclicDependencies(tasks: TaskDependencyInfo[]): CycleDetectionResult {
+  // Build adjacency graph using task IDs (lane:task format)
+  const graph = new Map<string, Set<string>>();
+  const allNodes = new Set<string>();
+  
+  for (const task of tasks) {
+    allNodes.add(task.id);
+    graph.set(task.id, new Set(task.dependsOn));
+    
+    // Add dependency nodes even if they're not in the list
+    for (const dep of task.dependsOn) {
+      allNodes.add(dep);
+      if (!graph.has(dep)) {
+        graph.set(dep, new Set());
+      }
+    }
+  }
+  
+  // Kahn's algorithm for topological sort with cycle detection
+  const inDegree = new Map<string, number>();
+  
+  // Initialize in-degrees
+  for (const node of allNodes) {
+    inDegree.set(node, 0);
+  }
+  
+  for (const [, deps] of graph) {
+    for (const dep of deps) {
+      inDegree.set(dep, (inDegree.get(dep) || 0) + 1);
+    }
+  }
+  
+  // Queue of nodes with no incoming edges
+  const queue: string[] = [];
+  for (const [node, degree] of inDegree) {
+    if (degree === 0) {
+      queue.push(node);
+    }
+  }
+  
+  const sorted: string[] = [];
+  
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    sorted.push(node);
+    
+    const deps = graph.get(node) || new Set();
+    for (const dep of deps) {
+      const newDegree = (inDegree.get(dep) || 0) - 1;
+      inDegree.set(dep, newDegree);
+      
+      if (newDegree === 0) {
+        queue.push(dep);
+      }
+    }
+  }
+  
+  // If not all nodes are in sorted order, there's a cycle
+  if (sorted.length !== allNodes.size) {
+    const cycle = findTaskCycle(graph, allNodes);
+    return {
+      hasCycle: true,
+      cycle,
+      sortedOrder: null,
+    };
+  }
+  
+  return {
+    hasCycle: false,
+    cycle: null,
+    sortedOrder: sorted,
+  };
+}
+
+/**
+ * Find a cycle in task dependency graph using DFS
+ */
+function findTaskCycle(graph: Map<string, Set<string>>, allNodes: Set<string>): string[] | null {
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+  const parent = new Map<string, string>();
+  
+  function dfs(node: string): string | null {
+    visited.add(node);
+    recursionStack.add(node);
+    
+    const deps = graph.get(node) || new Set();
+    for (const dep of deps) {
+      if (!visited.has(dep)) {
+        parent.set(dep, node);
+        const cycleNode = dfs(dep);
+        if (cycleNode) return cycleNode;
+      } else if (recursionStack.has(dep)) {
+        // Found a cycle
+        parent.set(dep, node);
+        return dep;
+      }
+    }
+    
+    recursionStack.delete(node);
+    return null;
+  }
+  
+  for (const node of allNodes) {
+    if (!visited.has(node)) {
+      const cycleNode = dfs(node);
+      if (cycleNode) {
+        // Reconstruct the cycle
+        const cycle: string[] = [cycleNode];
+        let current = parent.get(cycleNode);
+        while (current && current !== cycleNode) {
+          cycle.push(current);
+          current = parent.get(current);
+        }
+        cycle.push(cycleNode);
+        return cycle.reverse();
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Validate task-level dependencies across all lanes
+ */
+export function validateTaskDependencies(tasksDir: string): {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  tasks: TaskDependencyInfo[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  
+  const tasks = extractTaskDependencies(tasksDir);
+  const taskIds = new Set(tasks.map(t => t.id));
+  const laneNames = new Set(tasks.map(t => t.lane));
+  
+  // Check for missing dependencies
+  for (const task of tasks) {
+    for (const dep of task.dependsOn) {
+      // Validate format
+      if (!dep.includes(':')) {
+        errors.push(`Task "${task.id}" has invalid dependency format "${dep}". Expected "lane:task".`);
+        continue;
+      }
+      
+      const [depLane, depTask] = dep.split(':');
+      
+      // Check if lane exists
+      if (!laneNames.has(depLane!)) {
+        errors.push(`Task "${task.id}" depends on unknown lane "${depLane}"`);
+        continue;
+      }
+      
+      // Check if task exists (warning only, since task might be created later)
+      if (!taskIds.has(dep)) {
+        warnings.push(`Task "${task.id}" depends on "${dep}" which doesn't exist yet`);
+      }
+      
+      // Check for self-dependency
+      if (dep === task.id) {
+        errors.push(`Task "${task.id}" depends on itself`);
+      }
+    }
+  }
+  
+  // Check for cycles
+  const cycleResult = detectTaskCyclicDependencies(tasks);
+  if (cycleResult.hasCycle && cycleResult.cycle) {
+    errors.push(`Cyclic task dependency detected: ${cycleResult.cycle.join(' → ')}`);
+  }
+  
+  // Warning for deeply nested dependencies
+  const dependencyCounts = new Map<string, number>();
+  for (const task of tasks) {
+    let count = 0;
+    const visited = new Set<string>();
+    const queue = [...task.dependsOn];
+    
+    while (queue.length > 0) {
+      const dep = queue.shift()!;
+      if (visited.has(dep)) continue;
+      visited.add(dep);
+      count++;
+      
+      const depTask = tasks.find(t => t.id === dep);
+      if (depTask) {
+        queue.push(...depTask.dependsOn);
+      }
+    }
+    
+    dependencyCounts.set(task.id, count);
+    if (count > 10) {
+      warnings.push(`Task "${task.id}" has ${count} transitive dependencies`);
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    tasks,
+  };
+}
+
+/**
+ * Print task-level dependency graph to console
+ */
+export function printTaskDependencyGraph(tasks: TaskDependencyInfo[]): void {
+  const cycleResult = detectTaskCyclicDependencies(tasks);
+  
+  logger.section('📊 Task Dependency Graph');
+  
+  if (cycleResult.hasCycle) {
+    logger.error(`⚠️  Cyclic dependency detected: ${cycleResult.cycle?.join(' → ')}`);
+    console.log('');
+  }
+  
+  // Group tasks by lane
+  const byLane = new Map<string, TaskDependencyInfo[]>();
+  for (const task of tasks) {
+    const existing = byLane.get(task.lane) || [];
+    existing.push(task);
+    byLane.set(task.lane, existing);
+  }
+  
+  for (const [lane, laneTasks] of byLane) {
+    console.log(`  ${logger.COLORS.cyan}${lane}${logger.COLORS.reset}`);
+    
+    for (const task of laneTasks) {
+      const deps = task.dependsOn.length > 0 
+        ? ` → ${task.dependsOn.join(', ')}` 
+        : '';
+      console.log(`    • ${task.task}${logger.COLORS.gray}${deps}${logger.COLORS.reset}`);
+    }
+  }
+  
+  if (cycleResult.sortedOrder) {
+    console.log('');
+    const order = cycleResult.sortedOrder.reverse();
+    if (order.length <= 10) {
+      console.log(`  Execution order: ${order.join(' → ')}`);
+    } else {
+      console.log(`  Execution order: ${order.slice(0, 5).join(' → ')} ... (${order.length} total)`);
+    }
   }
   
   console.log('');

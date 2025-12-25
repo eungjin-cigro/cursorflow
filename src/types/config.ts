@@ -51,6 +51,8 @@ export interface EnhancedLogConfig {
 
 export interface CursorFlowConfig {
   tasksDir: string;
+  /** New flows directory (replaces tasksDir in new architecture) */
+  flowsDir: string;
   logsDir: string;
   pofDir: string;
   /** Base branch (optional, auto-detected from current branch if not specified) */
@@ -60,10 +62,6 @@ export interface CursorFlowConfig {
   pollInterval: number;
   allowDependencyChange: boolean;
   lockfileReadOnly: boolean;
-  enableReview: boolean;
-  reviewModel: string;
-  reviewAllTasks?: boolean;
-  maxReviewIterations: number;
   defaultLaneConfig: LaneConfig;
   logLevel: string;
   verboseGit: boolean;
@@ -75,5 +73,7 @@ export interface CursorFlowConfig {
   webhooks?: WebhookConfig[];
   /** Enhanced logging configuration */
   enhancedLogging?: Partial<EnhancedLogConfig>;
+  /** Default AI model for tasks (default: 'gemini-3-flash') */
+  defaultModel: string;
 }
 

@@ -35,7 +35,6 @@ export interface LaneState {
   dependencyRequest: DependencyRequestPlan | null;
   updatedAt?: number;
   tasksFile?: string; // Original tasks file path
-  dependsOn?: string[];
   pid?: number;
   /** List of completed task names in this lane */
   completedTasks?: string[];
@@ -51,6 +50,5 @@ export interface LaneFileInfo {
   preset: string;
   taskCount: number;
   taskFlow: string;
-  dependsOn: string[];
 }
 

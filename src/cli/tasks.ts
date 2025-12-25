@@ -107,9 +107,8 @@ function printTaskDetail(info: TaskDirInfo): void {
       const fileName = lane.fileName.padEnd(18);
       const preset = `[${lane.preset}]`.padEnd(10);
       const flow = lane.taskFlow;
-      const depends = lane.dependsOn.length > 0 ? ` ${COLORS.gray}(depends: ${lane.dependsOn.join(', ')})${COLORS.reset}` : '';
       
-      console.log(`  ${fileName} ${COLORS.blue}${preset}${COLORS.reset} ${flow}${depends}`);
+      console.log(`  ${fileName} ${COLORS.blue}${preset}${COLORS.reset} ${flow}`);
     }
   }
 

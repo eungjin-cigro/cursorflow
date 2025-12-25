@@ -6,6 +6,16 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { safeJoin } from './path';
+import * as logger from './logger';
+
+let verboseGitEnabled = true;
+
+/**
+ * Enable or disable verbose git logging
+ */
+export function setVerboseGit(enabled: boolean): void {
+  verboseGitEnabled = enabled;
+}
 
 /**
  * Acquire a file-based lock for Git operations
@@ -132,8 +142,11 @@ function filterGitStderr(stderr: string): string {
 export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
   
-  if (process.env['DEBUG_GIT']) {
-    console.log(`[DEBUG_GIT] Running: git ${args.join(' ')} (cwd: ${cwd || process.cwd()})`);
+  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+    logger.debug(`Running: git ${args.join(' ')}`, { context: 'git', emoji: '🛠️' });
+    if (cwd) {
+      logger.debug(`  cwd: ${cwd}`, { context: 'git' });
+    }
   }
   
   try {
@@ -182,8 +195,11 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
 export function runGitResult(args: string[], options: GitRunOptions = {}): GitResult {
   const { cwd } = options;
   
-  if (process.env['DEBUG_GIT']) {
-    console.log(`[DEBUG_GIT] Running: git ${args.join(' ')} (result mode, cwd: ${cwd || process.cwd()})`);
+  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+    logger.debug(`Running: git ${args.join(' ')} (result mode)`, { context: 'git', emoji: '🛠️' });
+    if (cwd) {
+      logger.debug(`  cwd: ${cwd}`, { context: 'git' });
+    }
   }
 
   const result = spawnSync('git', args, {
@@ -267,7 +283,8 @@ export function createWorktree(worktreePath: string, branchName: string, options
   }
 
   // Ensure baseBranch is unambiguous (branch name rather than tag)
-  const unambiguousBase = (baseBranch.startsWith('refs/') || baseBranch.includes('/')) 
+  // Special case: HEAD should not be prefixed with refs/heads/
+  const unambiguousBase = (baseBranch === 'HEAD' || baseBranch.startsWith('refs/') || baseBranch.includes('/')) 
     ? baseBranch 
     : `refs/heads/${baseBranch}`;
 
@@ -586,6 +603,129 @@ export interface SafeMergeResult {
   conflictingFiles: string[];
   error?: string;
   aborted: boolean;
+}
+
+/**
+ * Check if merging a branch would cause conflicts (dry-run)
+ * This does NOT actually perform the merge - it only checks for potential conflicts
+ */
+export function checkMergeConflict(branchName: string, options: { cwd?: string } = {}): {
+  willConflict: boolean;
+  conflictingFiles: string[];
+  error?: string;
+} {
+  const { cwd } = options;
+  
+  // Use merge-tree to check for conflicts without actually merging
+  // First, get the merge base
+  const mergeBaseResult = runGitResult(['merge-base', 'HEAD', branchName], { cwd });
+  if (!mergeBaseResult.success) {
+    return { willConflict: false, conflictingFiles: [], error: `Cannot find merge base: ${mergeBaseResult.stderr}` };
+  }
+  
+  const mergeBase = mergeBaseResult.stdout.trim();
+  
+  // Use merge-tree to simulate the merge
+  const mergeTreeResult = runGitResult(['merge-tree', mergeBase, 'HEAD', branchName], { cwd });
+  
+  // Check for conflict markers in the output
+  const output = mergeTreeResult.stdout;
+  const hasConflict = output.includes('<<<<<<<') || output.includes('>>>>>>>') || output.includes('=======');
+  
+  if (hasConflict) {
+    // Extract conflicting file names from merge-tree output
+    const conflictingFiles: string[] = [];
+    const lines = output.split('\n');
+    let currentFile = '';
+    
+    for (const line of lines) {
+      // merge-tree output format includes file paths
+      if (line.startsWith('changed in both')) {
+        const match = line.match(/changed in both\s+(.+)/);
+        if (match) {
+          conflictingFiles.push(match[1]!.trim());
+        }
+      } else if (line.match(/^[a-f0-9]+ [a-f0-9]+ [a-f0-9]+\t(.+)$/)) {
+        const match = line.match(/\t(.+)$/);
+        if (match) {
+          currentFile = match[1]!;
+        }
+      } else if (line.includes('<<<<<<<') && currentFile) {
+        if (!conflictingFiles.includes(currentFile)) {
+          conflictingFiles.push(currentFile);
+        }
+      }
+    }
+    
+    return { willConflict: true, conflictingFiles };
+  }
+  
+  return { willConflict: false, conflictingFiles: [] };
+}
+
+/**
+ * Sync local branch with remote before starting work
+ * Fetches the latest from remote and fast-forwards if possible
+ */
+export function syncBranchWithRemote(branchName: string, options: { 
+  cwd?: string;
+  createIfMissing?: boolean;
+} = {}): { 
+  success: boolean; 
+  updated: boolean;
+  error?: string;
+  ahead?: number;
+  behind?: number;
+} {
+  const { cwd, createIfMissing = false } = options;
+  
+  // Fetch the branch from origin
+  const fetchResult = runGitResult(['fetch', 'origin', branchName], { cwd });
+  
+  if (!fetchResult.success) {
+    // Branch might not exist on remote yet
+    if (createIfMissing || fetchResult.stderr.includes("couldn't find remote ref")) {
+      return { success: true, updated: false };
+    }
+    return { success: false, updated: false, error: fetchResult.stderr };
+  }
+  
+  // Check if we're ahead/behind
+  const statusResult = runGitResult(['rev-list', '--left-right', '--count', `${branchName}...origin/${branchName}`], { cwd });
+  
+  if (!statusResult.success) {
+    // Remote tracking branch might not exist
+    return { success: true, updated: false };
+  }
+  
+  const [aheadStr, behindStr] = statusResult.stdout.trim().split(/\s+/);
+  const ahead = parseInt(aheadStr || '0');
+  const behind = parseInt(behindStr || '0');
+  
+  if (behind === 0) {
+    // Already up to date or ahead
+    return { success: true, updated: false, ahead, behind };
+  }
+  
+  if (ahead > 0 && behind > 0) {
+    // Diverged - cannot fast-forward
+    return { 
+      success: false, 
+      updated: false, 
+      ahead, 
+      behind,
+      error: `Branch has diverged: ${ahead} commits ahead, ${behind} commits behind. Manual resolution required.`
+    };
+  }
+  
+  // Can fast-forward
+  const mergeResult = runGitResult(['merge', '--ff-only', `origin/${branchName}`], { cwd });
+  
+  if (mergeResult.success) {
+    return { success: true, updated: true, ahead: 0, behind: 0 };
+  }
+  
+  return { success: false, updated: false, error: mergeResult.stderr };
 }
 
 /**

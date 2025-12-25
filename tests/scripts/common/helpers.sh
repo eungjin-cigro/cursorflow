@@ -23,6 +23,11 @@ export SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PROJECT_ROOT="$(cd "$SCRIPTS_DIR/../.." && pwd)"
 export CLI_BIN="$PROJECT_ROOT/dist/cli/index.js"
 
+# Git Mock Server
+export GIT_MOCK_SERVER_PORT="${GIT_MOCK_SERVER_PORT:-8174}"
+export GIT_MOCK_SERVER_ROOT=""
+export GIT_MOCK_SERVER_PID=""
+
 # Test counters
 export TESTS_PASSED=0
 export TESTS_FAILED=0
@@ -206,15 +211,130 @@ assert_command_fails() {
 }
 
 # ============================================================================
+# Git Mock Server Functions
+# ============================================================================
+
+# Start git-http-mock-server for testing git operations
+# Usage: start_git_mock_server "/path/to/bare/repos"
+start_git_mock_server() {
+    local repos_dir="$1"
+    
+    if [ -z "$repos_dir" ]; then
+        echo "Error: repos_dir required for start_git_mock_server" >&2
+        return 1
+    fi
+    
+    # Create repos directory if it doesn't exist
+    mkdir -p "$repos_dir"
+    GIT_MOCK_SERVER_ROOT="$repos_dir"
+    
+    # Check if git-http-mock-server is available
+    local mock_server_bin="$PROJECT_ROOT/node_modules/.bin/git-http-mock-server"
+    if [ ! -f "$mock_server_bin" ]; then
+        echo "Warning: git-http-mock-server not found at $mock_server_bin" >&2
+        return 1
+    fi
+    
+    # Start the mock server in background using daemon mode
+    cd "$repos_dir"
+    GIT_HTTP_MOCK_SERVER_PORT="$GIT_MOCK_SERVER_PORT" "$mock_server_bin" start > /dev/null 2>&1
+    local start_result=$?
+    
+    if [ $start_result -ne 0 ]; then
+        echo "Warning: git-http-mock-server start command failed" >&2
+        cd - > /dev/null 2>&1 || true
+        return 1
+    fi
+    
+    # Wait for server to be ready by checking if port is listening
+    local max_attempts=20
+    local attempt=0
+    while [ $attempt -lt $max_attempts ]; do
+        # Check if port is listening using ss (more reliable on WSL2)
+        if ss -tln 2>/dev/null | grep -q ":$GIT_MOCK_SERVER_PORT " || \
+           netstat -tln 2>/dev/null | grep -q ":$GIT_MOCK_SERVER_PORT "; then
+            # Give server a moment to fully initialize
+            sleep 0.5
+            break
+        fi
+        sleep 0.3
+        attempt=$((attempt + 1))
+    done
+    
+    cd - > /dev/null 2>&1 || true
+    
+    if [ $attempt -eq $max_attempts ]; then
+        echo "Warning: Git mock server failed to start (timeout)" >&2
+        return 1
+    fi
+    
+    return 0
+}
+
+# Stop git-http-mock-server
+stop_git_mock_server() {
+    if [ -n "$GIT_MOCK_SERVER_ROOT" ] && [ -d "$GIT_MOCK_SERVER_ROOT" ]; then
+        local mock_server_bin="$PROJECT_ROOT/node_modules/.bin/git-http-mock-server"
+        if [ -f "$mock_server_bin" ]; then
+            cd "$GIT_MOCK_SERVER_ROOT"
+            "$mock_server_bin" stop > /dev/null 2>&1 || true
+            cd - > /dev/null
+        fi
+        
+        # Also try to kill by port if daemon stop didn't work
+        local pid=$(lsof -ti:$GIT_MOCK_SERVER_PORT 2>/dev/null || true)
+        if [ -n "$pid" ]; then
+            kill $pid 2>/dev/null || true
+        fi
+    fi
+    GIT_MOCK_SERVER_ROOT=""
+}
+
+# Create a bare git repository for mock server
+# Usage: create_bare_repo "/path/to/repos" "repo-name"
+create_bare_repo() {
+    local repos_dir="$1"
+    local repo_name="$2"
+    
+    mkdir -p "$repos_dir"
+    local bare_repo="$repos_dir/${repo_name}.git"
+    
+    # Create bare repo
+    git init --bare "$bare_repo" > /dev/null 2>&1
+    
+    # Enable push for the bare repo
+    cd "$bare_repo"
+    git config receive.denyCurrentBranch ignore
+    cd - > /dev/null
+    
+    echo "$bare_repo"
+}
+
+# Get mock server URL for a repo
+# Usage: get_mock_repo_url "repo-name"
+get_mock_repo_url() {
+    local repo_name="$1"
+    echo "http://localhost:$GIT_MOCK_SERVER_PORT/${repo_name}.git"
+}
+
+# ============================================================================
 # Environment Setup
 # ============================================================================
 
+# Setup test repo with local bare git repository
+# This creates a working repo and a bare repo that can be used with file:// URL
 setup_test_repo() {
     local test_root="${1:-$PROJECT_ROOT/_test_tmp}"
+    local use_local_remote="${2:-true}"
     
     rm -rf "$test_root"
     mkdir -p "$test_root"
-    cd "$test_root"
+    
+    local repos_dir="$test_root/__bare_repos__"
+    local work_dir="$test_root/work"
+    
+    mkdir -p "$work_dir"
+    cd "$work_dir"
     
     # Init Git
     git init > /dev/null 2>&1
@@ -234,24 +354,42 @@ EOF
     git commit -m "initial commit" > /dev/null 2>&1
     git branch -m main > /dev/null 2>&1 || true
     
-    # Add dummy origin remote for doctor checks
-    git remote add origin https://github.com/cursorflow/test-repo.git > /dev/null 2>&1
+    if [ "$use_local_remote" = "true" ]; then
+        # Create bare repo for local git operations
+        create_bare_repo "$repos_dir" "test-repo" > /dev/null
+        
+        # Use local file:// URL for remote
+        git remote add origin "file://$repos_dir/test-repo.git" > /dev/null 2>&1
+        
+        # Push initial content to local bare repo
+        git push -u origin main > /dev/null 2>&1 || true
+    else
+        # Use dummy remote (for tests that don't need real git operations)
+        git remote add origin https://github.com/cursorflow/test-repo.git > /dev/null 2>&1
+    fi
     
-    echo "$test_root"
+    echo "$work_dir"
 }
 
 cleanup_test_repo() {
     local test_root="${1:-$PROJECT_ROOT/_test_tmp}"
     
-    # Clean up worktrees first
+    # Determine actual root (might be work dir or parent)
+    local actual_root="$test_root"
+    if [[ "$test_root" == */work ]]; then
+        actual_root="${test_root%/work}"
+    fi
+    
+    # Clean up worktrees
     if [ -d "$test_root" ]; then
         cd "$test_root"
         git worktree list --porcelain 2>/dev/null | grep "^worktree" | grep -v "$test_root\$" | cut -d' ' -f2 | while read wt; do
             git worktree remove "$wt" --force 2>/dev/null || true
         done
+        cd - > /dev/null 2>&1 || true
     fi
     
-    rm -rf "$test_root"
+    rm -rf "$actual_root"
 }
 
 # ============================================================================
@@ -359,6 +497,7 @@ export -f log_header log_module log_phase log_test log_success log_fail log_warn
 export -f record_pass record_fail record_skip
 export -f assert_eq assert_contains assert_not_contains assert_file_exists assert_dir_exists assert_exit_code
 export -f assert_command_succeeds assert_command_fails
+export -f start_git_mock_server stop_git_mock_server create_bare_repo get_mock_repo_url
 export -f setup_test_repo cleanup_test_repo
 export -f cursorflow_run cursorflow_out check_cursor_agent check_cursor_agent_auth
 export -f print_module_summary print_final_summary reset_counters ensure_build

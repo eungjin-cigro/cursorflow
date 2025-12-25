@@ -44,6 +44,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
   const defaults: CursorFlowConfig = {
     // Directories
     tasksDir: '_cursorflow/tasks',
+    flowsDir: '_cursorflow/flows',
     logsDir: '_cursorflow/logs',
     pofDir: '_cursorflow/pof',
     
@@ -59,12 +60,6 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     allowDependencyChange: false,
     lockfileReadOnly: true,
     
-    // Review
-    enableReview: false,
-    reviewModel: 'sonnet-4.5-thinking',
-    reviewAllTasks: false,
-    maxReviewIterations: 3,
-    
     // Lane defaults
     defaultLaneConfig: {
       devPort: 3001,
@@ -73,7 +68,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     
     // Logging
     logLevel: 'info',
-    verboseGit: false,
+    verboseGit: true,
     
     // Advanced
     worktreePrefix: 'cursorflow-',
@@ -94,6 +89,9 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
       writeJsonLog: true,
       timestampFormat: 'iso',
     },
+    
+    // Default AI model
+    defaultModel: 'gemini-3-flash',
     
     // Internal
     projectRoot,
@@ -188,12 +186,6 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   allowDependencyChange: false,
   lockfileReadOnly: true,
   
-  // Review configuration
-  enableReview: false,
-  reviewModel: 'sonnet-4.5-thinking',
-  reviewAllTasks: false,
-  maxReviewIterations: 3,
-  
   // Lane configuration
   defaultLaneConfig: {
     devPort: 3001,           // 3000 + laneNumber
@@ -202,7 +194,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   
   // Logging
   logLevel: 'info',          // 'error' | 'warn' | 'info' | 'debug'
-  verboseGit: false,
+  verboseGit: true,
   
   // Advanced
   worktreePrefix: 'cursorflow-',

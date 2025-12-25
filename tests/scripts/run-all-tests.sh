@@ -31,6 +31,7 @@ declare -A TEST_MODULES=(
     ["templates"]="$SCRIPT_DIR/templates/test-templates.sh"
     ["git"]="$SCRIPT_DIR/git/test-git-integration.sh"
     ["integration-lifecycle"]="$SCRIPT_DIR/integration/test-lifecycle.sh"
+    ["integration-lifecycle-local"]="$SCRIPT_DIR/integration/test-lifecycle-local.sh"
     ["integration-logging"]="$SCRIPT_DIR/integration/test-logging.sh"
     ["integration-parallel"]="$SCRIPT_DIR/integration/test-parallel.sh"
 )
@@ -198,15 +199,34 @@ run_module() {
     
     echo "$output"
     
-    # Parse results from output
-    local passed=$(echo "$output" | grep "Passed:" | tail -1 | sed -E 's/.*Passed: ([0-9]+).*/\1/')
-    local failed=$(echo "$output" | grep "Failed:" | tail -1 | sed -E 's/.*Failed: ([0-9]+).*/\1/')
-    local skipped=$(echo "$output" | grep "Skipped:" | tail -1 | sed -E 's/.*Skipped: ([0-9]+).*/\1/')
+    # Strip ANSI color codes for parsing
+    local clean_output
+    clean_output=$(echo "$output" | sed 's/\x1b\[[0-9;]*m//g')
+    
+    # Parse results from output - look for "Module Summary" section
+    # Format: "Passed: X | Failed: Y | Skipped: Z | Total: N"
+    local summary_line
+    summary_line=$(echo "$clean_output" | grep -E "Passed:.*Failed:.*Skipped:" | tail -1)
+    
+    local passed=""
+    local failed=""
+    local skipped=""
+    
+    if [[ -n "$summary_line" ]]; then
+        passed=$(echo "$summary_line" | sed -E 's/.*Passed:[[:space:]]*([0-9]+).*/\1/')
+        failed=$(echo "$summary_line" | sed -E 's/.*Failed:[[:space:]]*([0-9]+).*/\1/')
+        skipped=$(echo "$summary_line" | sed -E 's/.*Skipped:[[:space:]]*([0-9]+).*/\1/')
+    fi
+    
+    # Validate parsed values are numbers
+    [[ "$passed" =~ ^[0-9]+$ ]] || passed=0
+    [[ "$failed" =~ ^[0-9]+$ ]] || failed=0
+    [[ "$skipped" =~ ^[0-9]+$ ]] || skipped=0
     
     # Update totals
-    if [[ -n "$passed" ]]; then TESTS_PASSED=$((TESTS_PASSED + passed)); fi
-    if [[ -n "$failed" ]]; then TESTS_FAILED=$((TESTS_FAILED + failed)); fi
-    if [[ -n "$skipped" ]]; then TESTS_SKIPPED=$((TESTS_SKIPPED + skipped)); fi
+    TESTS_PASSED=$((TESTS_PASSED + passed))
+    TESTS_FAILED=$((TESTS_FAILED + failed))
+    TESTS_SKIPPED=$((TESTS_SKIPPED + skipped))
     
     return $exit_code
 }

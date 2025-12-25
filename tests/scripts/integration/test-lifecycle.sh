@@ -41,18 +41,20 @@ setup_module() {
 }
 
 cleanup_module() {
-    # Clean up worktrees first
+    # Clean up worktrees first (ignore errors)
     if [ -d "$TEST_ROOT" ]; then
-        cd "$TEST_ROOT"
+        cd "$TEST_ROOT" 2>/dev/null || true
         git worktree list --porcelain 2>/dev/null | grep "^worktree" | grep -v "$TEST_ROOT\$" | cut -d' ' -f2 | while read wt; do
             git worktree remove "$wt" --force 2>/dev/null || true
-        done
+        done || true
         
-        # Clean up branches
-        git branch | grep -v "^\*" | grep -v "main" | xargs -r git branch -D 2>/dev/null || true
+        # Clean up branches (ignore errors)
+        git branch 2>/dev/null | grep -v "^\*" | grep -v "main" | xargs -r git branch -D 2>/dev/null || true
     fi
     
-    cleanup_test_repo "$TEST_ROOT"
+    # Return to project root before cleanup
+    cd "$PROJECT_ROOT" 2>/dev/null || true
+    cleanup_test_repo "$TEST_ROOT" 2>/dev/null || true
 }
 
 # ============================================================================
@@ -95,7 +97,8 @@ test_run_no_tasks() {
     rm -rf "$TEST_ROOT/_cursorflow/tasks/"*
     
     local output
-    output=$(cursorflow_out run 2>&1) || true
+    # Use timeout and --skip-preflight to avoid hang
+    output=$(timeout 10 node "$CLI_BIN" run --skip-preflight 2>&1) || true
     
     if echo "$output" | grep -qiE "(no task|not found|empty|specify)"; then
         record_pass "run handles no tasks gracefully"
@@ -141,7 +144,8 @@ test_run_dry_run() {
 EOF
     
     local output
-    output=$(cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --dry-run 2>&1) || true
+    # Use timeout and --skip-preflight to avoid hang
+    output=$(timeout 10 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --dry-run --skip-preflight 2>&1) || true
     
     if echo "$output" | grep -qiE "(dry|would|preview|simulate)"; then
         record_pass "run --dry-run shows preview"
@@ -211,7 +215,7 @@ test_real_single_lane_execution() {
 EOF
     
     local exit_code=0
-    timeout 120 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 1 2>&1 || exit_code=$?
+    timeout 120 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --skip-preflight --max-concurrent 1 2>&1 || exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         record_pass "Single lane execution completed"
@@ -243,7 +247,7 @@ EOF
     done
     
     local exit_code=0
-    timeout 180 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 2 2>&1 || exit_code=$?
+    timeout 180 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --skip-preflight --max-concurrent 2 2>&1 || exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         # Verify both branches were created
@@ -289,7 +293,7 @@ EOF
 EOF
     
     local exit_code=0
-    timeout 240 cursorflow_out run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --max-concurrent 1 2>&1 || exit_code=$?
+    timeout 240 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --skip-preflight --max-concurrent 1 2>&1 || exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         record_pass "Sequential execution completed"
@@ -298,6 +302,61 @@ EOF
     fi
     
     rm -f "$TEST_ROOT/_cursorflow/tasks/seq-"*.json
+}
+
+test_real_state_passing() {
+    log_test "Inter-task state passing real execution"
+    
+    if ! check_agent_available; then
+        record_skip "cursor-agent not available"
+        return
+    fi
+    
+    mkdir -p "$TEST_ROOT/_cursorflow/tasks"
+    
+    cat > "$TEST_ROOT/_cursorflow/tasks/state-passing.json" << 'EOF'
+{
+  "name": "state-passing-lane",
+  "tasks": [
+    { 
+      "name": "task-1", 
+      "prompt": "Create a file named '_cursorflow/lane-state.json' with content '{\"key\": \"value-from-task-1\"}'. Also create a dummy file 'done1.txt'. Commit and push.", 
+      "model": "sonnet-4.5" 
+    },
+    { 
+      "name": "task-2", 
+      "prompt": "Read the 'Previous Task State' provided in your prompt. If it contains 'value-from-task-1', create a file named 'success.txt'. Commit and push.", 
+      "model": "sonnet-4.5" 
+    }
+  ],
+  "timeout": 120000
+}
+EOF
+    
+    local exit_code=0
+    timeout 300 node "$CLI_BIN" run "$TEST_ROOT/_cursorflow/tasks" --skip-doctor --skip-preflight --max-concurrent 1 2>&1 || exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        # Check if success.txt exists in the final branch
+        local branch
+        branch=$(git branch -a | grep "state-passing-lane" | head -n 1 | sed 's/* //;s/ //g;s/remotes\/origin\///')
+        
+        if [ -n "$branch" ]; then
+            git checkout "$branch" > /dev/null 2>&1
+            if [ -f "success.txt" ]; then
+                record_pass "State passed successfully between tasks"
+            else
+                record_fail "State passing failed: success.txt not found on branch $branch"
+            fi
+            git checkout main > /dev/null 2>&1
+        else
+            record_fail "State passing failed: branch not found"
+        fi
+    else
+        record_fail "State passing execution failed (exit: $exit_code)"
+    fi
+    
+    rm -f "$TEST_ROOT/_cursorflow/tasks/state-passing.json"
 }
 
 # ============================================================================
@@ -380,6 +439,7 @@ run_tests() {
     test_real_single_lane_execution
     test_real_parallel_execution
     test_real_sequential_execution
+    test_real_state_passing
     
     log_phase "Phase 4: Worktree Management"
     test_worktree_creation

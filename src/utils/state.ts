@@ -333,7 +333,6 @@ export function repairLaneState(statePath: string): LaneState | null {
     error: null,
     dependencyRequest: null,
     tasksFile: state.tasksFile,
-    dependsOn: state.dependsOn || [],
     completedTasks: state.completedTasks || [],
     updatedAt: Date.now(),
   };
@@ -465,7 +464,6 @@ export function createLaneState(
     error: null,
     dependencyRequest: null,
     tasksFile,
-    dependsOn: config.dependsOn || [],
   };
 }
 

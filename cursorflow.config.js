@@ -29,7 +29,7 @@ module.exports = {
   
   // Logging
   logLevel: 'info',          // 'error' | 'warn' | 'info' | 'debug'
-  verboseGit: false,
+  verboseGit: true,
   
   // Advanced
   worktreePrefix: 'cursorflow-',
