@@ -78,7 +78,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     // Advanced
     worktreePrefix: 'cursorflow-',
     maxConcurrentLanes: 10,
-    agentOutputFormat: 'stream-json',
+    agentOutputFormat: 'json',
     
     // Webhooks
     webhooks: [],
@@ -207,7 +207,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Advanced
   worktreePrefix: 'cursorflow-',
   maxConcurrentLanes: 10,
-  agentOutputFormat: 'stream-json', // 'stream-json' | 'json' | 'plain'
+  agentOutputFormat: 'json', // 'json' | 'plain'
 
   // Webhook configuration
   // webhooks: [

@@ -261,7 +261,7 @@ export function spawnLane({
     });
   } else {
     // Fallback to simple file logging
-    logPath = safeJoin(laneRunDir, 'terminal.log');
+    logPath = safeJoin(laneRunDir, 'terminal-readable.log');
     const logFd = fs.openSync(logPath, 'a');
     
     child = spawn('node', args, {

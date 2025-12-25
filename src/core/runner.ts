@@ -192,11 +192,11 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   signalDir?: string;
   timeout?: number;
   enableIntervention?: boolean;
-  outputFormat?: 'stream-json' | 'json' | 'plain';
+  outputFormat?: 'json' | 'plain';
   taskName?: string;
 }): Promise<AgentSendResult> {
-  // Use stream-json format for structured output with tool calls and results
-  const format = outputFormat || 'stream-json';
+  // Use json format for structured output
+  const format = outputFormat || 'json';
   const args = [
     '--print',
     '--force',
@@ -374,7 +374,7 @@ export async function cursorAgentSend(options: {
   signalDir?: string;
   timeout?: number;
   enableIntervention?: boolean;
-  outputFormat?: 'stream-json' | 'json' | 'plain';
+  outputFormat?: 'json' | 'plain';
   taskName?: string;
 }): Promise<AgentSendResult> {
   const laneName = options.signalDir ? path.basename(path.dirname(options.signalDir)) : 'agent';
@@ -1434,7 +1434,7 @@ if (require.main === module) {
   };
   
   // Add agent output format default
-  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'stream-json';
+  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'json';
   
   // Run tasks
   runTasks(tasksFile, config, runDir, { startIndex, noGit })

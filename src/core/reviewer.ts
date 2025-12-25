@@ -155,7 +155,7 @@ export async function reviewTask({ taskResult, worktreeDir, runDir, config, mode
     chatId: string; 
     prompt: string; 
     model?: string;
-    outputFormat?: 'stream-json' | 'json' | 'plain';
+    outputFormat?: 'json' | 'plain';
     taskName?: string;
   }) => Promise<AgentSendResult>; 
   cursorAgentCreateChat: () => string; 
@@ -221,7 +221,7 @@ export async function runReviewLoop({ taskResult, worktreeDir, runDir, config, w
     chatId: string; 
     prompt: string; 
     model?: string;
-    outputFormat?: 'stream-json' | 'json' | 'plain';
+    outputFormat?: 'json' | 'plain';
     taskName?: string;
   }) => Promise<AgentSendResult>; 
   cursorAgentCreateChat: () => string; 

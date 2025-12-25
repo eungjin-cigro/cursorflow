@@ -70,8 +70,8 @@ export interface CursorFlowConfig {
   worktreePrefix: string;
   maxConcurrentLanes: number;
   projectRoot: string;
-  /** Output format for cursor-agent (default: 'stream-json') */
-  agentOutputFormat: 'stream-json' | 'json' | 'plain';
+  /** Output format for cursor-agent (default: 'json') */
+  agentOutputFormat: 'json' | 'plain';
   webhooks?: WebhookConfig[];
   /** Enhanced logging configuration */
   enhancedLogging?: Partial<EnhancedLogConfig>;

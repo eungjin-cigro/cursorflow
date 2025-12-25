@@ -160,17 +160,12 @@ function displayTextLogs(
   let logFile: string;
   const readableLog = safeJoin(laneDir, 'terminal-readable.log');
   const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-  const cleanLog = safeJoin(laneDir, 'terminal.log');
 
   if (options.raw) {
     logFile = rawLog;
-  } else if (options.clean) {
-    logFile = cleanLog;
-  } else if (options.readable && fs.existsSync(readableLog)) {
-    logFile = readableLog;
   } else {
-    // Default or fallback to clean log
-    logFile = cleanLog;
+    // Default to readable log (clean option also uses readable now)
+    logFile = readableLog;
   }
   
   if (!fs.existsSync(logFile)) {
@@ -686,17 +681,12 @@ function followLogs(laneDir: string, options: LogsOptions): void {
   let logFile: string;
   const readableLog = safeJoin(laneDir, 'terminal-readable.log');
   const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-  const cleanLog = safeJoin(laneDir, 'terminal.log');
 
   if (options.raw) {
     logFile = rawLog;
-  } else if (options.clean) {
-    logFile = cleanLog;
-  } else if (options.readable && fs.existsSync(readableLog)) {
-    logFile = readableLog;
   } else {
-    // Default or fallback to clean log
-    logFile = cleanLog;
+    // Default to readable log
+    logFile = readableLog;
   }
   
   if (!fs.existsSync(logFile)) {
@@ -778,33 +768,19 @@ function displaySummary(runDir: string): void {
   
   for (const lane of lanes) {
     const laneDir = safeJoin(runDir, 'lanes', lane);
-    const cleanLog = safeJoin(laneDir, 'terminal.log');
     const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-    const jsonLog = safeJoin(laneDir, 'terminal.jsonl');
     const readableLog = safeJoin(laneDir, 'terminal-readable.log');
     
     console.log(`  ${logger.COLORS.green}📁 ${lane}${logger.COLORS.reset}`);
     
-    if (fs.existsSync(cleanLog)) {
-      const stats = fs.statSync(cleanLog);
-      console.log(`     └─ terminal.log          ${formatSize(stats.size)}`);
+    if (fs.existsSync(readableLog)) {
+      const stats = fs.statSync(readableLog);
+      console.log(`     └─ terminal-readable.log ${formatSize(stats.size)} ${logger.COLORS.yellow}(default)${logger.COLORS.reset}`);
     }
     
     if (fs.existsSync(rawLog)) {
       const stats = fs.statSync(rawLog);
       console.log(`     └─ terminal-raw.log      ${formatSize(stats.size)}`);
-    }
-    
-    if (fs.existsSync(readableLog)) {
-      const stats = fs.statSync(readableLog);
-      console.log(`     └─ terminal-readable.log ${formatSize(stats.size)} ${logger.COLORS.yellow}(parsed AI output)${logger.COLORS.reset}`);
-    }
-    
-    if (fs.existsSync(jsonLog)) {
-      const stats = fs.statSync(jsonLog);
-      const entries = readJsonLog(jsonLog);
-      const errors = entries.filter(e => e.level === 'error' || e.level === 'stderr').length;
-      console.log(`     └─ terminal.jsonl        ${formatSize(stats.size)} (${entries.length} entries, ${errors} errors)`);
     }
     
     console.log('');

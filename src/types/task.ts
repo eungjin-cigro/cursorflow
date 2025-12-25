@@ -28,8 +28,8 @@ export interface RunnerConfig {
   model?: string;
   dependencyPolicy: DependencyPolicy;
   enableReview?: boolean;
-  /** Output format for cursor-agent (default: 'stream-json') */
-  agentOutputFormat?: 'stream-json' | 'json' | 'plain';
+  /** Output format for cursor-agent (default: 'json') */
+  agentOutputFormat?: 'json' | 'plain';
   reviewModel?: string;
   reviewAllTasks?: boolean;
   maxReviewIterations?: number;

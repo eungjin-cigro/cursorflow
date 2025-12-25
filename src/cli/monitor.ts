@@ -1075,7 +1075,7 @@ class InteractiveMonitor {
 
     // Live terminal preview
     this.renderSectionTitle('Live Terminal', 'last 10 lines');
-    const logPath = safeJoin(lane.path, 'terminal.log');
+    const logPath = safeJoin(lane.path, 'terminal-readable.log');
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, 'utf8');
       const lines = content.split('\n').slice(-10);
@@ -1326,8 +1326,8 @@ class InteractiveMonitor {
       logLines = this.getReadableLogLines(jsonlPath, lane.name);
       totalLines = logLines.length;
     } else {
-      // Use raw log
-      const logPath = safeJoin(lane.path, 'terminal.log');
+      // Use readable log
+      const logPath = safeJoin(lane.path, 'terminal-readable.log');
       if (fs.existsSync(logPath)) {
         const content = fs.readFileSync(logPath, 'utf8');
         logLines = content.split('\n');
