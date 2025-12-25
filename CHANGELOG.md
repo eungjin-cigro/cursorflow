@@ -9,8 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Auto-Resume on Run**: `cursorflow run` now automatically resumes incomplete lanes if an existing run is found for the same tasks directory.
-- **Prepare Commit Option**: Added `--commit` flag to `cursorflow prepare` to commit and push current changes before preparing tasks.
-  - Optional `--commit-message` / `-m` flag for custom commit messages.
 
 ### Fixed
 - **Stall Detection**: Fixed false positive STALL_NO_PROGRESS warnings when agent is actively working (THNK/TOOL events now reset progress tracking).
