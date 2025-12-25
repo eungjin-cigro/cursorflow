@@ -651,6 +651,8 @@ export async function orchestrate(tasksDir: string, options: {
     printLaneStatus(lanes, laneRunDirs);
   }, options.pollInterval || 60000);
   
+  let lastStallCheck = Date.now();
+  
   while (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length || (blockedLanes.size > 0 && running.size === 0)) {
     // 1. Identify lanes ready to start
     const readyToStart = lanes.filter(lane => {
@@ -721,11 +723,24 @@ export async function orchestrate(tasksDir: string, options: {
         spawnResult.child.stdout.on('data', (data: Buffer) => {
           const info = running.get(lane.name);
           if (info) {
-            info.lastOutput = data.toString().trim().split('\n').pop() || '';
-            info.bytesReceived += data.length;
+            const output = data.toString();
+            const lines = output.split('\n').filter(l => l.trim());
             
-            // Update auto-recovery manager
-            autoRecoveryManager.recordActivity(lane.name, data.length, info.lastOutput);
+            // Filter out heartbeats from activity tracking to avoid resetting stall detection
+            const realLines = lines.filter(line => !(line.includes('Heartbeat') && line.includes('bytes received')));
+            
+            if (realLines.length > 0) {
+              // Real activity detected
+              const lastRealLine = realLines[realLines.length - 1]!;
+              info.lastOutput = lastRealLine;
+              info.bytesReceived += data.length;
+              
+              // Update auto-recovery manager with real activity
+              autoRecoveryManager.recordActivity(lane.name, data.length, info.lastOutput);
+            } else if (lines.length > 0) {
+              // Only heartbeats received - update auto-recovery manager with 0 bytes to avoid resetting idle timer
+              autoRecoveryManager.recordActivity(lane.name, 0, info.lastOutput);
+            }
           }
         });
       }
@@ -773,10 +788,12 @@ export async function orchestrate(tasksDir: string, options: {
       const result = await Promise.race([...promises, pollPromise]);
       if (pollTimeout) clearTimeout(pollTimeout);
       
-      if (result.name === '__poll__') {
+      const now = Date.now();
+      if (result.name === '__poll__' || (now - lastStallCheck >= 10000)) {
+        lastStallCheck = now;
+        
         // Periodic stall check with multi-layer detection and escalating recovery
         for (const [laneName, info] of running.entries()) {
-          const now = Date.now();
           const idleTime = now - info.lastActivity;
           const lane = lanes.find(l => l.name === laneName)!;
           

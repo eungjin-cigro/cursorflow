@@ -14,14 +14,34 @@ NC='\033[0m'
 
 echo -e "${BLUE}🔍 Starting Local Security Gate...${NC}"
 
-# 1. 의존성 취약점 검사 (npm audit)
-echo -e "\n${BLUE}[1/4] Checking dependencies (npm audit)...${NC}"
-if npm audit --audit-level=high; then
-    echo -e "${GREEN}✅ No high-severity dependency issues found.${NC}"
+# 1. 의존성 취약점 검사 (pnpm or npm audit)
+echo -e "\n${BLUE}[1/4] Checking dependencies...${NC}"
+if [ -f "pnpm-lock.yaml" ]; then
+    echo -e "${BLUE}Using pnpm audit...${NC}"
+    if pnpm audit --audit-level=high; then
+        echo -e "${GREEN}✅ No high-severity dependency issues found.${NC}"
+    else
+        echo -e "${RED}❌ High-severity dependency issues found!${NC}"
+        echo -e "${YELLOW}Please run 'pnpm audit' to resolve them.${NC}"
+        exit 1
+    fi
+elif [ -f "yarn.lock" ]; then
+    echo -e "${BLUE}Using yarn audit...${NC}"
+    if yarn audit --level high; then
+        echo -e "${GREEN}✅ No high-severity dependency issues found.${NC}"
+    else
+        echo -e "${RED}❌ High-severity dependency issues found!${NC}"
+        exit 1
+    fi
 else
-    echo -e "${RED}❌ High-severity dependency issues found!${NC}"
-    echo -e "${YELLOW}Please run 'npm audit fix' to resolve them.${NC}"
-    exit 1
+    echo -e "${BLUE}Using npm audit...${NC}"
+    if npm audit --audit-level=high; then
+        echo -e "${GREEN}✅ No high-severity dependency issues found.${NC}"
+    else
+        echo -e "${RED}❌ High-severity dependency issues found!${NC}"
+        echo -e "${YELLOW}Please run 'npm audit fix' to resolve them.${NC}"
+        exit 1
+    fi
 fi
 
 # 2. 정적 코드 분석 (Semgrep - CodeQL 대안)

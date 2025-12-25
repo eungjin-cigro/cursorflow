@@ -283,9 +283,11 @@ export class AutoRecoveryManager {
     if (!state) return;
 
     const now = Date.now();
-    state.lastActivityTime = now;
     
+    // Only update activity time if we actually received bytes
+    // This allows heartbeats to be recorded (for logs/bytes) without resetting the idle timer
     if (bytesReceived > 0) {
+      state.lastActivityTime = now;
       state.lastBytesReceived = bytesReceived;
       state.totalBytesReceived += bytesReceived;
     }
