@@ -514,6 +514,20 @@ export function wrapPrompt(
   
   if (isWorktree) {
     wrapped += `- **File Availability**: Git 추적 파일만 존재합니다. (node_modules, .env 등은 기본적으로 없음)\n`;
+    
+    // Add environment file copy instructions
+    if (worktreePath) {
+      // Extract main repo path from worktree path (remove _cursorflow/worktrees/xxx part)
+      const mainRepoPath = worktreePath.replace(/\/_cursorflow\/worktrees\/[^/]+$/, '');
+      wrapped += `\n### 🔐 Environment Files Setup\n`;
+      wrapped += `워크트리에 환경변수 파일이 없다면, 메인 레포에서 복사하세요:\n`;
+      wrapped += `\`\`\`bash\n`;
+      wrapped += `# 메인 레포 경로: ${mainRepoPath}\n`;
+      wrapped += `[ ! -f .env ] && [ -f "${mainRepoPath}/.env" ] && cp "${mainRepoPath}/.env" .env\n`;
+      wrapped += `[ ! -f .env.local ] && [ -f "${mainRepoPath}/.env.local" ] && cp "${mainRepoPath}/.env.local" .env.local\n`;
+      wrapped += `\`\`\`\n`;
+      wrapped += `⚠️ 이 작업은 **터미널 명령어 실행 전** 반드시 확인하세요!\n`;
+    }
   }
 
   // 2. Previous Task State (if available)
