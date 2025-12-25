@@ -143,7 +143,8 @@ export function withContext(context: string) {
  */
 export function laneOutput(laneName: string, message: string, isError = false): void {
   const timestamp = `${COLORS.gray}[${formatTimestamp()}]${COLORS.reset}`;
-  const laneLabel = `${COLORS.magenta}${laneName.padEnd(10)}${COLORS.reset}`;
+  const shortName = laneName.substring(0, 10).padEnd(10);
+  const laneLabel = `${COLORS.magenta}${shortName}${COLORS.reset}`;
   const output = isError ? `${COLORS.red}${message}${COLORS.reset}` : message;
   
   if (isError) {

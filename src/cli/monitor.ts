@@ -14,7 +14,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { loadState, readLog } from '../utils/state';
 import { LaneState, ConversationEntry } from '../utils/types';
-import { loadConfig } from '../utils/config';
+import { loadConfig, getLogsDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
 import { getLaneProcessStatus, getFlowSummary, LaneProcessStatus } from '../services/process';
 import { LogBufferService, BufferedLogEntry } from '../services/logging/buffer';
@@ -142,6 +142,13 @@ class InteractiveMonitor {
   }
 
   constructor(runDir: string, interval: number, logsDir?: string, initialView: View = View.LIST) {
+    const config = loadConfig();
+    
+    // Change current directory to project root for consistent path handling
+    if (config.projectRoot !== process.cwd()) {
+      process.chdir(config.projectRoot);
+    }
+
     this.runDir = runDir;
     this.interval = interval;
     this.view = initialView;
@@ -150,8 +157,7 @@ class InteractiveMonitor {
     if (logsDir) {
       this.logsDir = logsDir;
     } else {
-      const config = loadConfig();
-      this.logsDir = safeJoin(config.logsDir, 'runs');
+      this.logsDir = safeJoin(getLogsDir(config), 'runs');
     }
     
     // Initialize unified log buffer
@@ -1775,15 +1781,20 @@ async function monitor(args: string[]): Promise<void> {
   const interval = intervalIdx >= 0 ? parseInt(args[intervalIdx + 1] || '2') || 2 : 2;
   
   const runDirArg = args.find(arg => !arg.startsWith('--') && args.indexOf(arg) !== intervalIdx + 1);
+  const originalCwd = process.cwd();
   const config = loadConfig();
   
   let runDir = runDirArg;
+  if (runDir && runDir !== 'latest' && !path.isAbsolute(runDir)) {
+    runDir = path.resolve(originalCwd, runDir);
+  }
+
   if (!runDir || runDir === 'latest') {
-    runDir = findLatestRunDir(config.logsDir) || undefined;
+    runDir = findLatestRunDir(getLogsDir(config)) || undefined;
     if (!runDir && !list) throw new Error('No run directories found');
     if (!runDir && list) {
       // Create a dummy runDir if none exists but we want to see the list (dashboard will handle empty list)
-      runDir = path.join(config.logsDir, 'runs', 'empty');
+      runDir = path.join(getLogsDir(config), 'runs', 'empty');
     }
   }
   

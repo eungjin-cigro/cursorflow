@@ -19,6 +19,8 @@ import * as git from './git';
 import { checkCursorAgentInstalled, checkCursorAuth } from './cursor-agent';
 import { areCommandsInstalled } from '../cli/setup-commands';
 import { safeJoin } from './path';
+import { findFlowDir } from './flow';
+import { loadConfig, getFlowsDir } from './config';
 
 export type DoctorSeverity = 'error' | 'warn';
 
@@ -150,7 +152,7 @@ function branchExists(repoRoot: string, branchName: string): boolean {
 function readLaneJsonFiles(tasksDir: string): { path: string; json: any; fileName: string }[] {
   const files = fs
     .readdirSync(tasksDir)
-    .filter(f => f.endsWith('.json'))
+    .filter(f => f.endsWith('.json') && f !== 'flow.meta.json')
     .sort()
     .map(f => safeJoin(tasksDir, f));
 
@@ -858,20 +860,46 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 
   // 2) Tasks-dir checks (optional; used by `cursorflow run` preflight)
   if (options.tasksDir) {
-    const tasksDirAbs = path.isAbsolute(options.tasksDir)
-      ? options.tasksDir
-      : safeJoin(cwd, options.tasksDir);
+    // Resolve tasks dir with flow name support:
+    // 1. Absolute paths are used as-is
+    // 2. Relative paths that exist are used as-is
+    // 3. Try finding as a flow name in flowsDir
+    // 4. Fall back to relative path from cwd
+    let tasksDirAbs = '';
+    if (path.isAbsolute(options.tasksDir)) {
+      tasksDirAbs = options.tasksDir;
+    } else {
+      const relPath = safeJoin(cwd, options.tasksDir);
+      if (fs.existsSync(relPath)) {
+        tasksDirAbs = relPath;
+      } else {
+        // Try finding as a flow name
+        try {
+          const config = loadConfig(repoRoot || cwd);
+          const flowsDir = getFlowsDir(config);
+          const foundFlow = findFlowDir(flowsDir, options.tasksDir);
+          if (foundFlow) {
+            tasksDirAbs = foundFlow;
+          } else {
+            tasksDirAbs = relPath;
+          }
+        } catch {
+          tasksDirAbs = relPath;
+        }
+      }
+    }
     context.tasksDir = tasksDirAbs;
 
     if (!fs.existsSync(tasksDirAbs)) {
       addIssue(issues, {
         id: 'tasks.missing_dir',
         severity: 'error',
-        title: 'Tasks directory not found',
-        message: `Tasks directory does not exist: ${tasksDirAbs}`,
+        title: 'Tasks or Flow directory not found',
+        message: `Tasks/Flow directory does not exist: ${options.tasksDir} (resolved to: ${tasksDirAbs})`,
         fixes: [
-          'Double-check the path you passed to `cursorflow run`',
-          'If needed, run: cursorflow init --example',
+          'Double-check the path or flow name you passed',
+          'Use: cursorflow new <FlowName> --lanes "lane1,lane2" to create a new flow',
+          'Or run: cursorflow init --example for legacy tasks',
         ],
       });
     } else {

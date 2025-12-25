@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as logger from '../utils/logger';
-import { loadConfig } from '../utils/config';
+import { loadConfig, getLogsDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
 import { 
   readJsonLog, 
@@ -808,11 +808,22 @@ async function logs(args: string[]): Promise<void> {
   }
   
   const config = loadConfig();
+  const originalCwd = process.cwd();
+
+  // Change current directory to project root for consistent path handling
+  if (config.projectRoot !== originalCwd) {
+    logger.debug(`Changing directory to project root: ${config.projectRoot}`);
+    process.chdir(config.projectRoot);
+  }
   
   // Find run directory
   let runDir = options.runDir;
+  if (runDir && runDir !== 'latest' && !path.isAbsolute(runDir)) {
+    runDir = path.resolve(originalCwd, runDir);
+  }
+
   if (!runDir || runDir === 'latest') {
-    runDir = findLatestRunDir(config.logsDir) || undefined;
+    runDir = findLatestRunDir(getLogsDir(config)) || undefined;
   }
   
   if (!runDir || !fs.existsSync(runDir)) {

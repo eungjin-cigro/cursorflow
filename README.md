@@ -266,23 +266,54 @@ cursorflow doctor --tasks-dir _cursorflow/tasks/my-feature
 
 ## 📚 Commands Reference
 
+### Flow Commands (New)
+| Command | Description |
+|---------|-------------|
+| `cursorflow new` | Create Flow with Lanes |
+| `cursorflow add` | Add Tasks to Lane |
+| `cursorflow config` | View/set configuration |
+| `cursorflow tasks` | Browse flows and legacy tasks |
+
+### Execution
+| Command | Description |
+|---------|-------------|
+| `cursorflow run` | Run orchestration (DAG-based) |
+| `cursorflow monitor` | Interactive lane dashboard |
+| `cursorflow resume` | Resume lane(s) - use --all for batch resume |
+| `cursorflow stop` | Stop running workflows |
+
+### Inspection
+| Command | Description |
+|---------|-------------|
+| `cursorflow doctor` | Check environment and preflight |
+| `cursorflow logs` | View, export, and follow logs |
+| `cursorflow models` | List available AI models |
+
+### Utility
 | Command | Description |
 |---------|-------------|
 | `cursorflow init` | Initialize CursorFlow in project |
 | `cursorflow setup` | Install Cursor IDE commands |
-| `cursorflow prepare` | Prepare task directory and JSON files |
-| `cursorflow run` | Run orchestration (DAG-based) |
-| `cursorflow monitor` | Interactive lane dashboard |
 | `cursorflow clean` | Clean branches/worktrees/logs/tasks |
-| `cursorflow resume` | Resume lane(s) - use --all for batch resume |
-| `cursorflow doctor` | Check environment and preflight |
 | `cursorflow signal` | Directly intervene in a running lane |
-| `cursorflow models` | List available AI models |
-| `cursorflow logs` | View, export, and follow logs |
+
+### Legacy
+| Command | Description |
+|---------|-------------|
+| `cursorflow prepare` | (deprecated) Use 'new' + 'add' instead |
 
 ## 📝 Enhanced Logging
 
-CursorFlow provides comprehensive logging with automatic cleanup and export options:
+CursorFlow provides comprehensive logging with automatic cleanup and export options.
+
+### Log Format
+
+Logs use the format `[L{n}-T{t}-{lanename}]`:
+- `L{n}`: Lane number (1-indexed, single digit)
+- `T{t}`: Task number (1-indexed, single digit)
+- `{lanename}`: First 10 characters of lane name
+
+Example: `[L1-T2-backend]` = Lane 1, Task 2, lane "backend"
 
 ### Features
 - **ANSI Stripping**: Clean logs without terminal escape codes

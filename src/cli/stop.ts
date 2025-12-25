@@ -86,7 +86,15 @@ async function stop(args: string[]): Promise<void> {
     return;
   }
   
+  const originalCwd = process.cwd();
   const config = loadConfig();
+  
+  // Change current directory to project root for consistent path handling
+  if (config.projectRoot !== originalCwd) {
+    logger.debug(`Changing directory to project root: ${config.projectRoot}`);
+    process.chdir(config.projectRoot);
+  }
+
   const logsDir = getLogsDir(config);
   const runsDir = safeJoin(logsDir, 'runs');
   const runService = new RunService(runsDir);

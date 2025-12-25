@@ -13,12 +13,18 @@
  */
 
 import * as logger from '../utils/logger';
+import * as path from 'path';
+import * as fs from 'fs';
 import { runDoctor, saveDoctorStatus } from '../utils/doctor';
 import { runInteractiveAgentTest } from '../utils/cursor-agent';
+import { loadConfig, findProjectRoot } from '../utils/config';
+import { safeJoin } from '../utils/path';
+import { findFlowDir } from '../utils/flow';
 
 interface DoctorCliOptions {
   json: boolean;
   tasksDir: string | null;
+  flowOrTaskName: string | null;
   executor: string | null;
   includeCursorAgentChecks: boolean;
   testAgent: boolean;
@@ -26,13 +32,16 @@ interface DoctorCliOptions {
 
 function printHelp(): void {
   console.log(`
-Usage: cursorflow doctor [options]
+Usage: cursorflow doctor [flow-name] [options]
 
 Verify your environment is ready for CursorFlow runs.
 
+Arguments:
+  [flow-name]            Flow or task name to validate (optional)
+
 Options:
   --json                 Output machine-readable JSON
-  --tasks-dir <path>     Also validate lane files (run preflight)
+  --tasks-dir <path>     Validate specific directory (legacy)
   --executor <type>      cursor-agent | cloud
   --no-cursor            Skip Cursor Agent install/auth checks
   --test-agent           Run interactive agent test (to approve MCP/permissions)
@@ -40,18 +49,30 @@ Options:
 
 Examples:
   cursorflow doctor
+  cursorflow doctor TestFeature
   cursorflow doctor --test-agent
-  cursorflow doctor --tasks-dir _cursorflow/tasks/demo-test/
+  cursorflow doctor --tasks-dir _cursorflow/flows/001_TestFeature
   `);
 }
 
 function parseArgs(args: string[]): DoctorCliOptions {
   const tasksDirIdx = args.indexOf('--tasks-dir');
   const executorIdx = args.indexOf('--executor');
+  
+  // Find positional argument (flow/task name)
+  // Exclude args that are values for options
+  const optionValueIndices = new Set<number>();
+  if (tasksDirIdx >= 0 && tasksDirIdx + 1 < args.length) optionValueIndices.add(tasksDirIdx + 1);
+  if (executorIdx >= 0 && executorIdx + 1 < args.length) optionValueIndices.add(executorIdx + 1);
+  
+  const flowOrTaskName = args.find((arg, idx) => 
+    !arg.startsWith('--') && !optionValueIndices.has(idx)
+  ) || null;
 
   const options: DoctorCliOptions = {
     json: args.includes('--json'),
     tasksDir: tasksDirIdx >= 0 ? (args[tasksDirIdx + 1] || null) : null,
+    flowOrTaskName,
     executor: executorIdx >= 0 ? (args[executorIdx + 1] || null) : null,
     includeCursorAgentChecks: !args.includes('--no-cursor'),
     testAgent: args.includes('--test-agent'),
@@ -117,9 +138,32 @@ async function doctor(args: string[]): Promise<void> {
     process.exit(success ? 0 : 1);
   }
 
+  // Resolve tasksDir from flow name if provided
+  let tasksDir = options.tasksDir;
+  if (!tasksDir && options.flowOrTaskName) {
+    try {
+      const config = loadConfig();
+      const flowsDir = safeJoin(config.projectRoot, config.flowsDir);
+      const foundFlow = findFlowDir(flowsDir, options.flowOrTaskName);
+      if (foundFlow) {
+        tasksDir = foundFlow;
+      } else {
+        // Try as a direct path
+        const directPath = path.resolve(process.cwd(), options.flowOrTaskName);
+        if (fs.existsSync(directPath)) {
+          tasksDir = directPath;
+        } else {
+          tasksDir = options.flowOrTaskName;
+        }
+      }
+    } catch {
+      tasksDir = options.flowOrTaskName;
+    }
+  }
+
   const report = runDoctor({
     cwd: process.cwd(),
-    tasksDir: options.tasksDir || undefined,
+    tasksDir: tasksDir || undefined,
     executor: options.executor || undefined,
     includeCursorAgentChecks: options.includeCursorAgentChecks,
   });

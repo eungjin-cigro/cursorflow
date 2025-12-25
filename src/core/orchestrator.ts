@@ -278,11 +278,12 @@ export function spawnLane({
   };
   
   if (logConfig.enabled) {
-    // Helper to get dynamic lane label like [L01-T01-laneName]
+    // Helper to get dynamic lane label like [L1-T1-lanename10]
     const getDynamicLabel = () => {
-      const laneNum = `L${(laneIndex + 1).toString().padStart(2, '0')}`;
-      const taskPart = info.currentTaskIndex ? `-T${info.currentTaskIndex.toString().padStart(2, '0')}` : '';
-      return `[${laneNum}${taskPart}-${laneName}]`;
+      const laneNum = `L${laneIndex + 1}`;
+      const taskPart = info.currentTaskIndex ? `-T${info.currentTaskIndex}` : '';
+      const shortLaneName = laneName.substring(0, 10);
+      return `[${laneNum}${taskPart}-${shortLaneName}]`;
     };
 
     // Create callback for clean console output
@@ -474,7 +475,7 @@ export function listLaneFiles(tasksDir: string): LaneInfo[] {
   
   const files = fs.readdirSync(tasksDir);
   return files
-    .filter(f => f.endsWith('.json'))
+    .filter(f => f.endsWith('.json') && f !== 'flow.meta.json')
     .sort()
     .map(f => {
       const filePath = safeJoin(tasksDir, f);

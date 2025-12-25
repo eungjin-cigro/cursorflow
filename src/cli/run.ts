@@ -10,6 +10,7 @@ import { getLogsDir, loadConfig } from '../utils/config';
 import { runDoctor, getDoctorStatus } from '../utils/doctor';
 import { areCommandsInstalled, setupCommands } from './setup-commands';
 import { safeJoin } from '../utils/path';
+import { findFlowDir } from '../utils/flow';
 import { loadState } from '../utils/state';
 import { LaneState } from '../types';
 
@@ -191,19 +192,40 @@ async function run(args: string[]): Promise<void> {
   
   const config = loadConfig();
   const logsDir = getLogsDir(config);
+  const originalCwd = process.cwd();
+
+  // Change current directory to project root for consistent path handling
+  if (config.projectRoot !== originalCwd) {
+    logger.debug(`Changing directory to project root: ${config.projectRoot}`);
+    process.chdir(config.projectRoot);
+  }
 
   // Resolve tasks dir:
-  // - Prefer the exact path if it exists relative to cwd
-  // - Otherwise, fall back to projectRoot-relative path for better ergonomics
-  const tasksDir =
-    path.isAbsolute(options.tasksDir)
-      ? options.tasksDir
-      : (fs.existsSync(options.tasksDir)
-        ? path.resolve(process.cwd(), options.tasksDir) // nosemgrep
-        : safeJoin(config.projectRoot, options.tasksDir));
+  // 1. Prefer the exact path if it exists relative to original cwd
+  // 2. Search in flowsDir by name
+  // 3. Fall back to projectRoot-relative tasksDir for backward compatibility
+  let tasksDir = '';
+  if (path.isAbsolute(options.tasksDir)) {
+    tasksDir = options.tasksDir;
+  } else {
+    const relPath = path.resolve(originalCwd, options.tasksDir);
+    if (fs.existsSync(relPath)) {
+      tasksDir = relPath;
+    } else {
+      // Try finding in flowsDir
+      const flowsDir = safeJoin(config.projectRoot, config.flowsDir);
+      const foundFlow = findFlowDir(flowsDir, options.tasksDir);
+      if (foundFlow) {
+        tasksDir = foundFlow;
+      } else {
+        // Fallback to legacy tasksDir
+        tasksDir = safeJoin(config.projectRoot, options.tasksDir);
+      }
+    }
+  }
 
   if (!fs.existsSync(tasksDir)) {
-    throw new Error(`Tasks directory not found: ${tasksDir}`);
+    throw new Error(`Tasks or Flow directory not found: ${options.tasksDir} (resolved to: ${tasksDir})`);
   }
 
   // Check for existing incomplete run and auto-resume

@@ -112,10 +112,17 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
 }
 
 /**
- * Get absolute path for tasks directory
+ * Get absolute path for tasks directory (legacy)
  */
 export function getTasksDir(config: CursorFlowConfig): string {
   return safeJoin(config.projectRoot, config.tasksDir);
+}
+
+/**
+ * Get absolute path for flows directory (new architecture)
+ */
+export function getFlowsDir(config: CursorFlowConfig): string {
+  return safeJoin(config.projectRoot, config.flowsDir);
 }
 
 /**

@@ -11,6 +11,7 @@ import { loadState, saveState } from '../utils/state';
 import { LaneState } from '../types';
 import { runDoctor } from '../utils/doctor';
 import { safeJoin } from '../utils/path';
+import { findFlowDir } from '../utils/flow';
 import { 
   EnhancedLogManager, 
   createLogManager, 
@@ -431,9 +432,10 @@ function spawnLaneResume(
     runnerArgs.push('--executor', options.executor);
   }
 
+  const shortLaneName = laneName.substring(0, 10);
   const logManager = createLogManager(laneDir, laneName, options.enhancedLogConfig || {}, (msg) => {
     const formatted = formatMessageForConsole(msg, { 
-      laneLabel: `[${laneName}]`,
+      laneLabel: `[${shortLaneName}]`,
       includeTimestamp: true 
     });
     process.stdout.write(formatted + '\n');
@@ -632,8 +634,19 @@ async function resume(args: string[]): Promise<void> {
 
   const config = loadConfig();
   const logsDir = getLogsDir(config);
+  const originalCwd = process.cwd();
+
+  // Change current directory to project root for consistent path handling
+  if (config.projectRoot !== originalCwd) {
+    logger.debug(`Changing directory to project root: ${config.projectRoot}`);
+    process.chdir(config.projectRoot);
+  }
   
   let runDir = options.runDir;
+  if (runDir && !path.isAbsolute(runDir)) {
+    runDir = path.resolve(originalCwd, runDir);
+  }
+
   if (!runDir) {
     runDir = findLatestRunDir(logsDir);
   }
@@ -645,30 +658,45 @@ async function resume(args: string[]): Promise<void> {
   const allLanes = getAllLaneStatuses(runDir);
   let lanesToResume: LaneInfo[] = [];
 
-  // Check if the lane argument is actually a tasks directory
-  if (options.lane && fs.existsSync(options.lane) && fs.statSync(options.lane).isDirectory()) {
-    const tasksDir = path.resolve(options.lane);
-    lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile && path.resolve(l.state.tasksFile).startsWith(tasksDir));
+  // Check if the lane argument is actually a tasks directory or a flow name
+  if (options.lane) {
+    let tasksDir = '';
+    const lanePathAbs = path.resolve(originalCwd, options.lane);
     
-    if (lanesToResume.length > 0) {
-      logger.info(`📂 Task directory detected: ${options.lane}`);
-      logger.info(`Resuming ${lanesToResume.length} lane(s) from this directory.`);
+    if (fs.existsSync(lanePathAbs) && fs.statSync(lanePathAbs).isDirectory()) {
+      tasksDir = lanePathAbs;
     } else {
-      logger.warn(`No incomplete lanes found using tasks from directory: ${options.lane}`);
-      return;
+      // Try finding in flowsDir
+      const flowsDir = safeJoin(config.projectRoot, config.flowsDir);
+      const foundFlow = findFlowDir(flowsDir, options.lane);
+      if (foundFlow) {
+        tasksDir = foundFlow;
+      }
+    }
+
+    if (tasksDir) {
+      lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile && path.resolve(l.state.tasksFile).startsWith(tasksDir));
+      
+      if (lanesToResume.length > 0) {
+        logger.info(`📂 Flow/Task directory detected: ${options.lane}`);
+        logger.info(`Resuming ${lanesToResume.length} lane(s) from this directory.`);
+      } else {
+        logger.warn(`No incomplete lanes found using tasks from directory: ${options.lane}`);
+        return;
+      }
+    } else {
+      const lane = allLanes.find(l => l.name === options.lane);
+      if (!lane) {
+        throw new Error(`Lane '${options.lane}' not found in run directory.`);
+      }
+      if (!lane.needsResume) {
+        logger.success(`Lane '${options.lane}' is already completed.`);
+        return;
+      }
+      lanesToResume = [lane];
     }
   } else if (options.all) {
     lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
-  } else if (options.lane) {
-    const lane = allLanes.find(l => l.name === options.lane);
-    if (!lane) {
-      throw new Error(`Lane '${options.lane}' not found in run directory.`);
-    }
-    if (!lane.needsResume) {
-      logger.success(`Lane '${options.lane}' is already completed.`);
-      return;
-    }
-    lanesToResume = [lane];
   }
 
   // Check for zombie lanes

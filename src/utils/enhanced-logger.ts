@@ -131,12 +131,13 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Get lane-task label like [L01-T02]
+   * Get lane-task label like [L1-T2-lanename10]
    */
   private getLaneTaskLabel(): string {
     const laneNum = (this.session.laneIndex ?? 0) + 1;
     const taskNum = (this.session.taskIndex ?? 0) + 1;
-    return `L${laneNum.toString().padStart(2, '0')}-T${taskNum.toString().padStart(2, '0')}`;
+    const shortLaneName = this.session.laneName.substring(0, 10);
+    return `L${laneNum}-T${taskNum}-${shortLaneName}`;
   }
 
   /**

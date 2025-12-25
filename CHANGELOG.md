@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.35] - 2025-12-26
+
+### Changed
+- **Log Format**: Updated log format to `L{n}-T{t}-{lanename}` with single-digit numbers and 10-char max lane name for cleaner output.
+- **Flow Support**: All commands now support flow names in addition to directory paths.
+  - `run`, `resume`, `doctor` can now use flow names like `cursorflow run MyFlow`
+  - `tasks` command now browses flows from `_cursorflow/flows/` directory
+
+### Fixed
+- **Build Errors**: Fixed missing `getLogsDir` import in `logs.ts` and `monitor.ts`.
+- **Flow Recognition**: Fixed `flow.meta.json` being incorrectly treated as a lane file in orchestrator.
+- **Doctor CLI**: Fixed positional argument parsing for flow names.
+
+### Added
+- `getFlowsDir()` function in config.ts for consistent flow directory resolution.
+- `findFlowDir()` utility for resolving flow names to paths.
+
 ## [0.1.30] - 2025-12-25
 
 ### Added
