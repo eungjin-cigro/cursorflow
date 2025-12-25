@@ -10,6 +10,105 @@ import { getLogsDir, loadConfig } from '../utils/config';
 import { runDoctor, getDoctorStatus } from '../utils/doctor';
 import { areCommandsInstalled, setupCommands } from './setup-commands';
 import { safeJoin } from '../utils/path';
+import { loadState } from '../utils/state';
+import { LaneState } from '../types';
+
+interface IncompleteLaneInfo {
+  name: string;
+  status: string;
+  taskIndex: number;
+  totalTasks: number;
+  error?: string;
+}
+
+interface ExistingRunInfo {
+  runDir: string;
+  runId: string;
+  incompleteLanes: IncompleteLaneInfo[];
+  completedLanes: string[];
+  totalLanes: number;
+}
+
+/**
+ * Find existing run for a tasks directory
+ */
+function findExistingRunForTasks(logsDir: string, tasksDir: string): ExistingRunInfo | null {
+  const runsDir = safeJoin(logsDir, 'runs');
+  if (!fs.existsSync(runsDir)) return null;
+  
+  const runs = fs.readdirSync(runsDir)
+    .filter(d => d.startsWith('run-'))
+    .sort()
+    .reverse(); // Latest first
+  
+  for (const runId of runs) {
+    const runDir = safeJoin(runsDir, runId);
+    const lanesDir = safeJoin(runDir, 'lanes');
+    
+    if (!fs.existsSync(lanesDir)) continue;
+    
+    const laneDirs = fs.readdirSync(lanesDir)
+      .filter(f => fs.statSync(safeJoin(lanesDir, f)).isDirectory());
+    
+    if (laneDirs.length === 0) continue;
+    
+    // Check if any lane belongs to this tasks directory
+    let matchesTasksDir = false;
+    const incompleteLanes: IncompleteLaneInfo[] = [];
+    const completedLanes: string[] = [];
+    
+    for (const laneName of laneDirs) {
+      const statePath = safeJoin(lanesDir, laneName, 'state.json');
+      if (!fs.existsSync(statePath)) continue;
+      
+      const state = loadState<LaneState>(statePath);
+      if (!state) continue;
+      
+      // Check if this lane's tasks file is in the target tasks directory
+      if (state.tasksFile) {
+        const taskFileDir = path.dirname(state.tasksFile);
+        if (path.resolve(taskFileDir) === path.resolve(tasksDir)) {
+          matchesTasksDir = true;
+        }
+      }
+      
+      // Check completion status
+      if (state.status === 'completed') {
+        completedLanes.push(laneName);
+      } else {
+        // Check if process is alive (zombie detection)
+        let isZombie = false;
+        if (state.status === 'running' && state.pid) {
+          try {
+            process.kill(state.pid, 0);
+          } catch {
+            isZombie = true;
+          }
+        }
+        
+        incompleteLanes.push({
+          name: laneName,
+          status: isZombie ? 'zombie' : state.status,
+          taskIndex: state.currentTaskIndex,
+          totalTasks: state.totalTasks,
+          error: state.error || undefined,
+        });
+      }
+    }
+    
+    if (matchesTasksDir && incompleteLanes.length > 0) {
+      return {
+        runDir,
+        runId,
+        incompleteLanes,
+        completedLanes,
+        totalLanes: laneDirs.length,
+      };
+    }
+  }
+  
+  return null;
+}
 
 interface RunOptions {
   tasksDir?: string;
@@ -27,6 +126,9 @@ function printHelp(): void {
 Usage: cursorflow run <tasks-dir> [options]
 
 Run task orchestration based on dependency graph.
+
+If an existing run with incomplete lanes is found for the same tasks directory,
+it will automatically resume instead of starting a new run.
 
 Options:
   <tasks-dir>            Directory containing task JSON files
@@ -99,6 +201,49 @@ async function run(args: string[]): Promise<void> {
 
   if (!fs.existsSync(tasksDir)) {
     throw new Error(`Tasks directory not found: ${tasksDir}`);
+  }
+
+  // Check for existing incomplete run and auto-resume
+  const existingRun = findExistingRunForTasks(logsDir, tasksDir);
+  if (existingRun && existingRun.incompleteLanes.length > 0) {
+    logger.section('📋 Existing Run Detected');
+    logger.info(`Run: ${existingRun.runId}`);
+    logger.info(`Completed: ${existingRun.completedLanes.length}/${existingRun.totalLanes} lanes`);
+    
+    console.log('');
+    logger.info('Incomplete lanes:');
+    for (const lane of existingRun.incompleteLanes) {
+      const statusEmoji = lane.status === 'failed' ? '❌' : 
+                          lane.status === 'zombie' ? '🧟' :
+                          lane.status === 'running' ? '🔄' : '⏸';
+      logger.info(`  ${statusEmoji} ${lane.name}: ${lane.status} (${lane.taskIndex}/${lane.totalTasks})`);
+      if (lane.error) {
+        logger.warn(`     └─ ${lane.error.substring(0, 60)}${lane.error.length > 60 ? '...' : ''}`);
+      }
+    }
+    
+    console.log('');
+    logger.info('🔄 Auto-resuming from existing run...');
+    console.log('');
+    
+    // Call the resume command with --all flag
+    const resumeCmd = require('./resume');
+    const resumeArgs = [
+      '--all',
+      '--run-dir', existingRun.runDir,
+    ];
+    
+    if (options.skipDoctor) resumeArgs.push('--skip-doctor');
+    if (options.noGit) resumeArgs.push('--no-git');
+    if (options.executor) {
+      resumeArgs.push('--executor', options.executor);
+    }
+    if (options.maxConcurrent) {
+      resumeArgs.push('--max-concurrent', String(options.maxConcurrent));
+    }
+    
+    await resumeCmd(resumeArgs);
+    return;
   }
 
   // Check if doctor has been run at least once

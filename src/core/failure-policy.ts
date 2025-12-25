@@ -76,7 +76,7 @@ export interface StallDetectionConfig {
 }
 
 export const DEFAULT_STALL_CONFIG: StallDetectionConfig = {
-  idleTimeoutMs: 60 * 1000,           // 1 minute without output (quick detection)
+  idleTimeoutMs: 2 * 60 * 1000,       // 2 minutes without output (idle detection)
   progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes without progress
   taskTimeoutMs: 30 * 60 * 1000,      // 30 minutes max per task
   longOperationGraceMs: 10 * 60 * 1000, // 10 minute grace for long ops
@@ -131,8 +131,8 @@ export interface FailureContext {
  * 
  * Recovery escalation stages:
  * 1. Phase 0 → Phase 1: Send continue signal (after 2 min idle)
- * 2. Phase 1 → Phase 2: Send stronger prompt (after 1.5 min grace)
- * 3. Phase 2 → Phase 3: Kill and restart process (after 1 min grace)
+ * 2. Phase 1 → Phase 2: Send stronger prompt (after 2 min grace)
+ * 3. Phase 2 → Phase 3: Kill and restart process (after 2 min grace)
  * 4. Phase 3+: Abort after max restarts exceeded
  */
 export function analyzeStall(context: StallContext, config: StallDetectionConfig = DEFAULT_STALL_CONFIG): FailureAnalysis {
@@ -199,7 +199,7 @@ export function analyzeStall(context: StallContext, config: StallDetectionConfig
   
   // Phase 1: Continue signal sent, wait for response
   if (stallPhase === 1) {
-    const graceTimeout = 90 * 1000; // 1.5 minutes grace after continue
+    const graceTimeout = 2 * 60 * 1000; // 2 minutes grace after continue
     
     if (idleTimeMs > graceTimeout) {
       return {
@@ -214,7 +214,7 @@ export function analyzeStall(context: StallContext, config: StallDetectionConfig
   
   // Phase 2: Stronger prompt sent, wait or escalate
   if (stallPhase === 2) {
-    const strongerGraceTimeout = 60 * 1000; // 1 minute grace after stronger prompt
+    const strongerGraceTimeout = 2 * 60 * 1000; // 2 minutes grace after stronger prompt
     
     if (idleTimeMs > strongerGraceTimeout) {
       if (restartCount < config.maxRestarts) {

@@ -40,11 +40,11 @@ export enum RecoveryStage {
 
 /** Configuration for auto-recovery behavior */
 export interface AutoRecoveryConfig {
-  /** Time without activity before sending continue signal (default: 1 minute) */
+  /** Time without activity before sending continue signal (default: 2 minutes) */
   idleTimeoutMs: number;
-  /** Time to wait after continue signal before escalating (default: 1 minute) */
+  /** Time to wait after continue signal before escalating (default: 2 minutes) */
   continueGraceMs: number;
-  /** Time to wait after stronger prompt before escalating (default: 1 minute) */
+  /** Time to wait after stronger prompt before escalating (default: 2 minutes) */
   strongerPromptGraceMs: number;
   /** Maximum number of restarts before aborting (default: 2) */
   maxRestarts: number;
@@ -60,9 +60,9 @@ export interface AutoRecoveryConfig {
 
 /** Default auto-recovery configuration */
 export const DEFAULT_AUTO_RECOVERY_CONFIG: AutoRecoveryConfig = {
-  idleTimeoutMs: 60 * 1000,              // 1 minute - quick detection
-  continueGraceMs: 60 * 1000,            // 1 minute after continue
-  strongerPromptGraceMs: 60 * 1000,      // 1 minute after stronger prompt
+  idleTimeoutMs: 2 * 60 * 1000,          // 2 minutes - idle detection
+  continueGraceMs: 2 * 60 * 1000,        // 2 minutes after continue
+  strongerPromptGraceMs: 2 * 60 * 1000,  // 2 minutes after stronger prompt
   maxRestarts: 2,
   runDoctorOnFailure: true,
   longOperationPatterns: [

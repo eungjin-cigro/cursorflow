@@ -44,11 +44,11 @@ import { preflightCheck, printPreflightReport, autoRepair } from '../utils/healt
 import { getLatestCheckpoint } from '../utils/checkpoint';
 import { cleanStaleLocks, getLockDir } from '../utils/lock';
 
-/** Default stall detection configuration - 1 minute idle timeout for fast recovery */
+/** Default stall detection configuration - 2 minute idle timeout for recovery */
 const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
   ...DEFAULT_STALL_CONFIG,
-  idleTimeoutMs: 60 * 1000,          // 1 minute (quick detection for continue signal)
-  progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes
+  idleTimeoutMs: 2 * 60 * 1000,       // 2 minutes (idle detection for continue signal)
+  progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes (only triggers if no activity at all)
   maxRestarts: 2,
 };
 
@@ -192,7 +192,7 @@ export function spawnLane({
           
           if (trimmed && !isJson) {
             if (onActivity) onActivity();
-            // If line already has timestamp format, just add lane prefix
+            // If line alreedy has timestamp format, just add lane prefix
             if (hasTimestamp) {
               // Insert lane name after first timestamp
               const formatted = trimmed.replace(/^(\[[^\]]+\])/, `$1 ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset}`);
@@ -706,7 +706,12 @@ export async function orchestrate(tasksDir: string, options: {
         onActivity: () => {
           const info = running.get(lane.name);
           if (info) {
-            info.lastActivity = Date.now();
+            const now = Date.now();
+            info.lastActivity = now;
+            // Also reset progress tracking when there's activity (THNK/TOOL events)
+            // This prevents STALL_NO_PROGRESS from firing when agent is actively working
+            info.lastStateUpdate = now;
+            info.stallPhase = 0; // Reset stall phase since agent is responding
           }
         }
       });
