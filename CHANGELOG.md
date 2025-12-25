@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.27] - 2025-12-25
+
+### Added
+- **Auto-Resume on Run**: `cursorflow run` now automatically resumes incomplete lanes if an existing run is found for the same tasks directory.
+- **Prepare Commit Option**: Added `--commit` flag to `cursorflow prepare` to commit and push current changes before preparing tasks.
+  - Optional `--commit-message` / `-m` flag for custom commit messages.
+
+### Fixed
+- **Stall Detection**: Fixed false positive STALL_NO_PROGRESS warnings when agent is actively working (THNK/TOOL events now reset progress tracking).
+- **Recovery Timing**: Changed all stall recovery intervals from 1 minute to 2 minutes for more stable operation.
+
 ## [0.1.26] - 2025-12-22
 
 ### Fixed
