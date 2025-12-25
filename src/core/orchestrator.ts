@@ -209,9 +209,12 @@ export function spawnLane({
           // or if it's NOT a noisy JSON line
           const hasTimestamp = /^\[\d{4}-\d{2}-\d{2}T|\^\[\d{2}:\d{2}:\d{2}\]/.test(trimmed);
           const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
+          // Filter out heartbeats - they should NOT reset the idle timer
+          const isHeartbeat = trimmed.includes('Heartbeat') && trimmed.includes('bytes received');
           
           if (trimmed && !isJson) {
-            if (onActivity) onActivity();
+            // Only trigger activity for non-heartbeat lines
+            if (onActivity && !isHeartbeat) onActivity();
             // If line alreedy has timestamp format, just add lane prefix
             if (hasTimestamp) {
               // Insert lane name after first timestamp
@@ -788,7 +791,11 @@ export async function orchestrate(tasksDir: string, options: {
             const realLines = lines.filter(line => !(line.includes('Heartbeat') && line.includes('bytes received')));
             
             if (realLines.length > 0) {
-              // Real activity detected
+              // Real activity detected - update lastActivity to reset stall timer
+              const actNow = Date.now();
+              info.lastActivity = actNow;
+              info.stallPhase = 0; // Reset stall phase on real activity
+              
               const lastRealLine = realLines[realLines.length - 1]!;
               info.lastOutput = lastRealLine;
               info.bytesReceived += data.length;
@@ -796,7 +803,7 @@ export async function orchestrate(tasksDir: string, options: {
               // Update auto-recovery manager with real activity
               autoRecoveryManager.recordActivity(lane.name, data.length, info.lastOutput);
             } else if (lines.length > 0) {
-              // Only heartbeats received - update auto-recovery manager with 0 bytes to avoid resetting idle timer
+              // Only heartbeats received - do NOT update lastActivity (keep stall timer running)
               autoRecoveryManager.recordActivity(lane.name, 0, info.lastOutput);
             }
           }
