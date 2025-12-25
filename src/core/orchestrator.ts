@@ -120,6 +120,7 @@ export function spawnLane({
   enhancedLogConfig,
   noGit = false,
   onActivity,
+  laneIndex = 0,
 }: { 
   laneName: string; 
   tasksFile: string; 
@@ -131,6 +132,7 @@ export function spawnLane({
   enhancedLogConfig?: Partial<EnhancedLogConfig>;
   noGit?: boolean;
   onActivity?: () => void;
+  laneIndex?: number;
 }): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
   
@@ -179,7 +181,7 @@ export function spawnLane({
       process.stdout.write(formatted + '\n');
     };
 
-    logManager = createLogManager(laneRunDir, laneName, logConfig, onParsedMessage);
+    logManager = createLogManager(laneRunDir, laneName, logConfig, onParsedMessage, laneIndex);
     logPath = logManager.getLogPaths().clean;
     
     // Spawn with pipe for enhanced logging
@@ -754,6 +756,7 @@ export async function orchestrate(tasksDir: string, options: {
       });
 
       let lastOutput = '';
+      const laneIdx = lanes.findIndex(l => l.name === lane.name);
       const spawnResult = spawnLane({
         laneName: lane.name,
         tasksFile: lane.path,
@@ -764,6 +767,7 @@ export async function orchestrate(tasksDir: string, options: {
         worktreeDir: laneWorktreeDirs[lane.name],
         enhancedLogConfig: options.enhancedLogging,
         noGit: options.noGit,
+        laneIndex: laneIdx >= 0 ? laneIdx : 0,
         onActivity: () => {
           const info = running.get(lane.name);
           if (info) {

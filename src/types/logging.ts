@@ -71,6 +71,10 @@ export interface LogSession {
   model?: string;
   startTime: number;
   metadata?: Record<string, any>;
+  /** Lane index (0-based) for display as L01, L02, etc. */
+  laneIndex?: number;
+  /** Task index (0-based) for display as T01, T02, etc. */
+  taskIndex?: number;
 }
 
 export interface ConversationEntry {

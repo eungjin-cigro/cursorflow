@@ -124,6 +124,25 @@ export class EnhancedLogManager {
   }
 
   /**
+   * Get short time format (HH:MM)
+   */
+  private getShortTime(): string {
+    const now = new Date();
+    const h = now.getHours().toString().padStart(2, '0');
+    const m = now.getMinutes().toString().padStart(2, '0');
+    return `${h}:${m}`;
+  }
+
+  /**
+   * Get lane-task label like [L01-T02]
+   */
+  private getLaneTaskLabel(): string {
+    const laneNum = (this.session.laneIndex ?? 0) + 1;
+    const taskNum = (this.session.taskIndex ?? 0) + 1;
+    return `L${laneNum.toString().padStart(2, '0')}-T${taskNum.toString().padStart(2, '0')}`;
+  }
+
+  /**
    * Initialize log files and write session headers
    */
   private initLogFiles(): void {
@@ -247,14 +266,16 @@ export class EnhancedLogManager {
    */
   public writeReadableMessage(msg: ParsedMessage): void {
     // Use formatMessageForConsole for consistent formatting
+    // Use short lane-task label like [L01-T02]
     const formatted = formatMessageForConsole(msg, {
-      laneLabel: `[${this.session.laneName}]`,
-      includeTimestamp: true,
+      laneLabel: `[${this.getLaneTaskLabel()}]`,
+      includeTimestamp: false, // We'll add our own short timestamp
     });
     
-    // Strip ANSI codes for file output
+    // Strip ANSI codes and add short timestamp for file output
     const clean = stripAnsi(formatted);
-    this.writeToReadableLog(clean + '\n');
+    const ts = this.getShortTime();
+    this.writeToReadableLog(`[${ts}] ${clean}\n`);
     
     // Callback for console output
     if (this.onParsedMessage) {
@@ -291,11 +312,12 @@ export class EnhancedLogManager {
         }
       }
       
-      // Non-JSON line - write as-is with timestamp
-      const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+      // Non-JSON line - write as-is with short timestamp and lane-task label
+      const ts = this.getShortTime();
+      const label = this.getLaneTaskLabel();
       const cleanLine = stripAnsi(trimmed);
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        this.writeToReadableLog(`[${ts}] [${this.session.laneName}] ${cleanLine}\n`);
+        this.writeToReadableLog(`[${ts}] [${label}] ${cleanLine}\n`);
       }
     }
   }
@@ -411,8 +433,9 @@ export class EnhancedLogManager {
     for (const line of lines) {
       const cleanLine = stripAnsi(line).trim();
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-        this.writeToReadableLog(`[${ts}] [${this.session.laneName}] ❌ ERR ${cleanLine}\n`);
+        const ts = this.getShortTime();
+        const label = this.getLaneTaskLabel();
+        this.writeToReadableLog(`[${ts}] [${label}] ❌ ERR ${cleanLine}\n`);
       }
     }
   }
@@ -421,9 +444,10 @@ export class EnhancedLogManager {
    * Write a custom log entry
    */
   public log(level: 'info' | 'error' | 'debug', message: string, metadata?: Record<string, any>): void {
-    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const ts = this.getShortTime();
+    const label = this.getLaneTaskLabel();
     const emoji = level === 'error' ? '❌' : level === 'info' ? 'ℹ️' : '🔍';
-    const line = `[${ts}] [${this.session.laneName}] ${emoji} ${level.toUpperCase()} ${message}\n`;
+    const line = `[${ts}] [${label}] ${emoji} ${level.toUpperCase()} ${message}\n`;
     
     this.writeToRawLog(line);
     this.writeToReadableLog(line);
@@ -443,10 +467,13 @@ export class EnhancedLogManager {
   /**
    * Update task context
    */
-  public setTask(taskName: string, model?: string): void {
+  public setTask(taskName: string, model?: string, taskIndex?: number): void {
     this.session.taskName = taskName;
     if (model) {
       this.session.model = model;
+    }
+    if (taskIndex !== undefined) {
+      this.session.taskIndex = taskIndex;
     }
     
     this.section(`Task: ${taskName}${model ? ` (Model: ${model})` : ''}`);
@@ -568,12 +595,15 @@ export function createLogManager(
   laneRunDir: string,
   laneName: string,
   config?: Partial<EnhancedLogConfig>,
-  onParsedMessage?: (msg: ParsedMessage) => void
+  onParsedMessage?: (msg: ParsedMessage) => void,
+  laneIndex?: number
 ): EnhancedLogManager {
   const session: LogSession = {
     id: `${laneName}-${Date.now().toString(36)}`,
     laneName,
     startTime: Date.now(),
+    laneIndex: laneIndex ?? 0,
+    taskIndex: 0,
   };
   
   return new EnhancedLogManager(laneRunDir, session, config, onParsedMessage);
