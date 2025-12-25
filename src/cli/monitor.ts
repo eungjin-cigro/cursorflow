@@ -159,6 +159,21 @@ class InteractiveMonitor {
   }
 
   public async start() {
+    // Non-interactive mode for CI/pipes
+    if (!process.stdout.isTTY || !process.stdin.isTTY) {
+      this.discoverFlows();
+      this.refresh();
+      // Print summary and exit
+      if (this.view === View.FLOWS_DASHBOARD) {
+        console.log(`\nFound ${this.allFlows.length} flows`);
+      } else {
+        console.log(`\nMonitoring run: ${path.basename(this.runDir)}`);
+        const flowSummary = getFlowSummary(this.runDir);
+        console.log(`Status: ${flowSummary.running} running, ${flowSummary.completed} completed, ${flowSummary.failed} failed`);
+      }
+      return;
+    }
+
     this.setupTerminal();
     
     // Start unified log streaming
