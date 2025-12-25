@@ -496,14 +496,21 @@ export function wrapPrompt(
     noGit?: boolean; 
     isWorktree?: boolean;
     previousState?: string | null;
+    worktreePath?: string;
   } = {}
 ): string {
-  const { noGit = false, isWorktree = true, previousState = null } = options;
+  const { noGit = false, isWorktree = true, previousState = null, worktreePath } = options;
   
   // 1. PREFIX: Environment & Worktree context
   let wrapped = `### 🛠 Environment & Context\n`;
   wrapped += `- **Workspace**: 당신은 독립된 **Git 워크트리** (프로젝트 루트)에서 작업 중입니다.\n`;
-  wrapped += `- **Path Rule**: 모든 파일 참조 및 터미널 명령어는 **현재 디렉토리(./)**를 기준으로 하세요.\n`;
+  
+  if (worktreePath) {
+    wrapped += `- **Worktree Path**: \`${worktreePath}\`\n`;
+    wrapped += `- **CRITICAL**: 터미널 명령어 실행 시 반드시 먼저 \`cd ${worktreePath}\` 를 실행하세요!\n`;
+  }
+  
+  wrapped += `- **Path Rule**: 모든 파일 참조는 워크트리 루트 기준입니다.\n`;
   
   if (isWorktree) {
     wrapped += `- **File Availability**: Git 추적 파일만 존재합니다. (node_modules, .env 등은 기본적으로 없음)\n`;
@@ -740,7 +747,8 @@ export async function runTask({
   const wrappedPrompt = wrapPrompt(task.prompt, config, { 
     noGit, 
     isWorktree: !noGit,
-    previousState
+    previousState,
+    worktreePath: worktreeDir,
   });
   
   // Log ONLY the original prompt to keep logs clean
