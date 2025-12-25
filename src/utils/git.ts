@@ -829,6 +829,94 @@ export function getWorktreeForPath(targetPath: string, cwd?: string): WorktreeIn
 /**
  * Sync branch with remote (fetch + merge or rebase)
  */
+/**
+ * Push branch to remote, creating it if it doesn't exist
+ * Returns success status and any error message
+ */
+export function pushBranchSafe(branchName: string, options: { cwd?: string; force?: boolean } = {}): { success: boolean; error?: string } {
+  const { cwd, force = false } = options;
+  
+  // Check if origin exists
+  if (!remoteExists('origin', { cwd })) {
+    return { success: false, error: 'No remote "origin" configured' };
+  }
+  
+  const args = ['push'];
+  if (force) {
+    args.push('--force');
+  }
+  args.push('-u', 'origin', branchName);
+  
+  const result = runGitResult(args, { cwd });
+  
+  if (result.success) {
+    return { success: true };
+  }
+  
+  return { success: false, error: result.stderr };
+}
+
+/**
+ * Auto-commit any uncommitted changes and push to remote
+ * Used for checkpoint before destructive operations
+ */
+export function checkpointAndPush(options: { 
+  cwd?: string; 
+  message?: string;
+  branchName?: string;
+} = {}): { success: boolean; committed: boolean; pushed: boolean; error?: string } {
+  const { cwd, message = '[cursorflow] checkpoint before clean' } = options;
+  
+  let committed = false;
+  let pushed = false;
+  
+  // Get current branch if not specified
+  let branchName = options.branchName;
+  if (!branchName) {
+    try {
+      branchName = getCurrentBranch(cwd);
+    } catch {
+      return { success: false, committed: false, pushed: false, error: 'Failed to get current branch' };
+    }
+  }
+  
+  // Check for uncommitted changes
+  if (hasUncommittedChanges(cwd)) {
+    // Stage all changes
+    const addResult = runGitResult(['add', '-A'], { cwd });
+    if (!addResult.success) {
+      return { success: false, committed: false, pushed: false, error: `Failed to stage changes: ${addResult.stderr}` };
+    }
+    
+    // Commit
+    const commitResult = runGitResult(['commit', '-m', message], { cwd });
+    if (!commitResult.success) {
+      return { success: false, committed: false, pushed: false, error: `Failed to commit: ${commitResult.stderr}` };
+    }
+    committed = true;
+  }
+  
+  // Push to remote
+  const pushResult = pushBranchSafe(branchName, { cwd });
+  if (pushResult.success) {
+    pushed = true;
+  } else {
+    // Push failed but commit succeeded - partial success
+    if (committed) {
+      return { success: true, committed: true, pushed: false, error: `Commit succeeded but push failed: ${pushResult.error}` };
+    }
+    // Nothing to commit and push failed - check if there's anything to push
+    const localCommits = runGitResult(['rev-list', `origin/${branchName}..HEAD`], { cwd });
+    if (localCommits.success && localCommits.stdout.trim()) {
+      return { success: false, committed: false, pushed: false, error: `Push failed: ${pushResult.error}` };
+    }
+    // Nothing to push
+    pushed = true;
+  }
+  
+  return { success: true, committed, pushed };
+}
+
 export function syncWithRemote(branch: string, options: { 
   cwd?: string; 
   strategy?: 'merge' | 'rebase';

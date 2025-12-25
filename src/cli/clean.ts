@@ -24,6 +24,7 @@ interface CleanOptions {
   run?: string;
   olderThan?: number;
   orphaned: boolean;
+  noPush: boolean;  // Skip auto-push before cleaning
 }
 
 function printHelp(): void {
@@ -46,7 +47,12 @@ Options:
   --dry-run              Show what would be removed without deleting
   --force                Force removal (ignore uncommitted changes)
   --include-latest       Also remove the most recent item (by default, latest is kept)
+  --no-push              Skip auto-push to remote before cleaning worktrees
   --help, -h             Show help
+
+Safety:
+  By default, worktrees are pushed to remote before deletion to prevent data loss.
+  Use --no-push only for truly ephemeral work that doesn't need backup.
   `);
 }
 
@@ -67,6 +73,7 @@ function parseArgs(args: string[]): CleanOptions {
     run: runIdx >= 0 ? args[runIdx + 1] : undefined,
     olderThan: olderThanIdx >= 0 ? parseInt(args[olderThanIdx + 1] || '0') : undefined,
     orphaned: args.includes('--orphaned'),
+    noPush: args.includes('--no-push'),
   };
 }
 
@@ -80,6 +87,73 @@ function getModTime(targetPath: string): number {
   } catch {
     return 0;
   }
+}
+
+interface ActiveFlowInfo {
+  runId: string;
+  activeLanes: number;
+  pids: number[];
+}
+
+/**
+ * Detect active flows by checking for running processes
+ */
+function detectActiveFlows(runsDir: string): ActiveFlowInfo[] {
+  if (!fs.existsSync(runsDir)) {
+    return [];
+  }
+  
+  const activeFlows: ActiveFlowInfo[] = [];
+  
+  try {
+    const runs = fs.readdirSync(runsDir)
+      .filter(d => d.startsWith('run-'));
+    
+    for (const runId of runs) {
+      const lanesDir = safeJoin(runsDir, runId, 'lanes');
+      if (!fs.existsSync(lanesDir)) continue;
+      
+      const activePids: number[] = [];
+      
+      const lanes = fs.readdirSync(lanesDir)
+        .filter(f => fs.statSync(safeJoin(lanesDir, f)).isDirectory());
+      
+      for (const laneName of lanes) {
+        const statePath = safeJoin(lanesDir, laneName, 'state.json');
+        if (!fs.existsSync(statePath)) continue;
+        
+        try {
+          const stateContent = fs.readFileSync(statePath, 'utf8');
+          const state = JSON.parse(stateContent);
+          
+          // Check if lane has a running process
+          if (state.status === 'running' && state.pid) {
+            // Verify process is actually alive
+            try {
+              process.kill(state.pid, 0);
+              activePids.push(state.pid);
+            } catch {
+              // Process is dead - not active
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+      
+      if (activePids.length > 0) {
+        activeFlows.push({
+          runId,
+          activeLanes: activePids.length,
+          pids: activePids,
+        });
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  
+  return activeFlows;
 }
 
 async function clean(args: string[]): Promise<void> {
@@ -97,6 +171,26 @@ async function clean(args: string[]): Promise<void> {
   const runService = new RunService(runsDir);
 
   logger.section('🧹 Cleaning CursorFlow Resources');
+
+  // Check for active flows and warn
+  const activeFlows = detectActiveFlows(runsDir);
+  if (activeFlows.length > 0 && !options.dryRun) {
+    logger.warn(`\n⚠️  Active flows detected: ${activeFlows.length}`);
+    for (const flow of activeFlows) {
+      logger.warn(`   - ${flow.runId}: ${flow.activeLanes} active lane(s)`);
+    }
+    
+    if (!options.force) {
+      logger.error('\nCleaning with active flows may cause data loss!');
+      logger.info('Options:');
+      logger.info('  --force       Proceed anyway (branches will be pushed first)');
+      logger.info('  --dry-run     See what would be cleaned');
+      logger.info('  --run <id>    Clean only a specific (non-active) run');
+      throw new Error('Active flows detected. Use --force to proceed or wait for flows to complete.');
+    }
+    
+    logger.warn('\nProceeding with --force. Branches will be pushed to remote before deletion.\n');
+  }
 
   // Handle specific run cleanup
   if (options.run) {
@@ -139,6 +233,43 @@ async function clean(args: string[]): Promise<void> {
   logger.success('\n✨ Cleaning complete!');
 }
 
+/**
+ * Push worktree changes to remote before deletion
+ */
+function pushWorktreeToRemote(wt: git.WorktreeInfo, options: CleanOptions): { success: boolean; skipped: boolean; error?: string } {
+  if (options.noPush) {
+    return { success: true, skipped: true };
+  }
+  
+  if (!wt.branch) {
+    return { success: true, skipped: true, error: 'No branch associated with worktree' };
+  }
+  
+  // Extract branch name (remove refs/heads/ prefix if present)
+  const branchName = wt.branch.replace('refs/heads/', '');
+  
+  // Check if worktree directory exists
+  if (!fs.existsSync(wt.path)) {
+    return { success: true, skipped: true };
+  }
+  
+  // Push any uncommitted changes
+  const result = git.checkpointAndPush({
+    cwd: wt.path,
+    message: '[cursorflow] checkpoint before clean',
+    branchName,
+  });
+  
+  if (result.success) {
+    if (result.committed || result.pushed) {
+      logger.info(`    📤 Pushed to remote: ${branchName}`);
+    }
+    return { success: true, skipped: false };
+  }
+  
+  return { success: false, skipped: false, error: result.error };
+}
+
 async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptions) {
   logger.info('\nChecking worktrees...');
   const worktrees = git.listWorktrees(repoRoot);
@@ -166,6 +297,21 @@ async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptio
     const kept = toRemove[0];
     toRemove = toRemove.slice(1);
     logger.info(`  Keeping latest worktree: ${kept.path} (${kept.branch || 'no branch'})`);
+  }
+
+  // Auto-push worktrees before deletion (unless --no-push specified)
+  if (!options.noPush && !options.dryRun) {
+    logger.info('  📦 Backing up worktrees to remote before deletion...');
+    for (const wt of toRemove) {
+      const pushResult = pushWorktreeToRemote(wt, options);
+      if (!pushResult.success && !pushResult.skipped) {
+        logger.warn(`    ⚠️ Failed to push ${wt.branch || wt.path}: ${pushResult.error}`);
+        if (!options.force) {
+          logger.warn(`    Skipping deletion of ${wt.path}. Use --force to delete anyway.`);
+          continue;
+        }
+      }
+    }
   }
 
   for (const wt of toRemove) {
