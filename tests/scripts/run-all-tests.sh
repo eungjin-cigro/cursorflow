@@ -39,7 +39,6 @@ declare -A TEST_MODULES=(
 # Quick test modules (no cursor-agent required)
 QUICK_MODULES=(
     "cli-doctor"
-    "cli-commands"
     "prepare"
     "validation"
     "templates"
