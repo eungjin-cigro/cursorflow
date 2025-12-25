@@ -56,3 +56,4 @@ test-projects/
 
 # Private deployment docs (for maintainer only)
 docs/
+*.tgz

@@ -11,6 +11,7 @@ import { loadConfig, getTasksDir } from '../utils/config';
 import { Task, RunnerConfig } from '../utils/types';
 import { safeJoin } from '../utils/path';
 import { resolveTemplate } from '../utils/template';
+import * as git from '../utils/git';
 
 // Preset template types
 type PresetType = 'complex' | 'simple' | 'merge';
@@ -32,6 +33,9 @@ interface PrepareOptions {
   addLane: string | null;      // Add lane to existing task dir
   addTask: string | null;      // Add task to existing lane file
   dependsOnLanes: string[];    // --depends-on for new lane
+  // Git options
+  commit: boolean;             // Commit and push current changes before prepare
+  commitMessage: string | null; // Custom commit message
   force: boolean;
   help: boolean;
 }
@@ -114,6 +118,10 @@ Prepare task files for a new feature - Terminal-first workflow.
     --add-lane <dir>          Add a new lane to existing task directory
     --add-task <file>         Append task(s) to existing lane JSON file
 
+  Git (commit before prepare):
+    --commit                    Commit and push current changes before prepare
+    --commit-message <msg>      Custom commit message (default: auto-generated)
+
   Advanced:
     --template <path|url|name>  External template JSON file, URL, or built-in name
     --force                     Overwrite existing files
@@ -157,6 +165,8 @@ function parseArgs(args: string[]): PrepareOptions {
     addLane: null,
     addTask: null,
     dependsOnLanes: [],
+    commit: false,
+    commitMessage: null,
     force: false,
     help: false,
   };
@@ -198,6 +208,11 @@ function parseArgs(args: string[]): PrepareOptions {
       result.addTask = args[++i];
     } else if (arg === '--depends-on' && args[i + 1]) {
       result.dependsOnLanes = args[++i].split(',').map(d => d.trim()).filter(d => d);
+    } else if (arg === '--commit') {
+      result.commit = true;
+    } else if ((arg === '--commit-message' || arg === '-m') && args[i + 1]) {
+      result.commitMessage = args[++i];
+      result.commit = true; // Implicitly enable commit if message is provided
     } else if (!arg.startsWith('--') && !result.featureName) {
       result.featureName = arg;
     }
@@ -852,12 +867,90 @@ cursorflow prepare --add-task ${path.relative(config.projectRoot, taskDir)}/01-l
   console.log('');
 }
 
+/**
+ * Commit and push current changes before prepare
+ */
+async function commitAndPush(featureName: string, customMessage: string | null): Promise<boolean> {
+  // Check if there are uncommitted changes
+  const statusResult = git.runGitResult(['status', '--porcelain']);
+  if (!statusResult.success) {
+    logger.error('Failed to check git status');
+    return false;
+  }
+  
+  const hasChanges = statusResult.stdout.trim().length > 0;
+  
+  if (!hasChanges) {
+    logger.info('No uncommitted changes to commit');
+    return true;
+  }
+  
+  // Show what will be committed
+  logger.section('📦 Committing Current Changes');
+  const changedFiles = statusResult.stdout.trim().split('\n');
+  logger.info(`${changedFiles.length} file(s) to commit:`);
+  for (const file of changedFiles.slice(0, 5)) {
+    console.log(`  ${file}`);
+  }
+  if (changedFiles.length > 5) {
+    console.log(`  ... and ${changedFiles.length - 5} more`);
+  }
+  console.log('');
+  
+  // Stage all changes
+  const addResult = git.runGitResult(['add', '-A']);
+  if (!addResult.success) {
+    logger.error(`Failed to stage changes: ${addResult.stderr}`);
+    return false;
+  }
+  
+  // Generate commit message
+  const message = customMessage || `chore: pre-prepare checkpoint for ${featureName}`;
+  
+  // Commit
+  const commitResult = git.runGitResult(['commit', '-m', message]);
+  if (!commitResult.success) {
+    logger.error(`Failed to commit: ${commitResult.stderr}`);
+    return false;
+  }
+  logger.success(`Committed: ${message}`);
+  
+  // Push
+  logger.info('Pushing to remote...');
+  const currentBranch = git.getCurrentBranch();
+  const pushResult = git.runGitResult(['push', 'origin', currentBranch]);
+  if (!pushResult.success) {
+    // Try to provide helpful error message
+    if (pushResult.stderr.includes('rejected') || pushResult.stderr.includes('non-fast-forward')) {
+      logger.warn('Push rejected. Try pulling first:');
+      console.log(`  git pull --rebase origin ${currentBranch}`);
+      console.log('  Then run prepare again');
+    } else {
+      logger.error(`Failed to push: ${pushResult.stderr}`);
+    }
+    return false;
+  }
+  logger.success(`Pushed to origin/${currentBranch}`);
+  console.log('');
+  
+  return true;
+}
+
 async function prepare(args: string[]): Promise<void> {
   const options = parseArgs(args);
 
   if (options.help) {
     printHelp();
     return;
+  }
+
+  // Handle --commit option first (before any prepare operation)
+  if (options.commit) {
+    const featureName = options.featureName || options.addLane || options.addTask || 'tasks';
+    const success = await commitAndPush(featureName, options.commitMessage);
+    if (!success) {
+      throw new Error('Failed to commit and push. Fix the issue and try again.');
+    }
   }
 
   // Mode 1: Add task to existing lane
