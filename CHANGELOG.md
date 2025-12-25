@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.30] - 2025-12-25
+
+### Added
+- **Modular Test Suite**: Restructured the comprehensive lifecycle test into a modular directory structure under `tests/scripts/`.
+- **New Test Modules**:
+  - `cli/`: Tests for `doctor` and other CLI commands.
+  - `git/`: Tests for Git worktree and branch management.
+  - `integration/`: Full lifecycle, logging, and parallel execution tests.
+  - `prepare/`: Task generation and preset validation tests.
+  - `templates/`: Template loading and processing tests.
+  - `validation/`: Edge cases and bug scenario tests.
+- **CI/CD Integration**: Integrated the new `test:quick` suite into GitHub Actions workflows (`ci.yml` and `npm-publish.yml`).
+- **NPM Scripts**: Added granular test commands to `package.json` (`test:all`, `test:quick`, `test:cli`, etc.).
+
+### Changed
+- **Validation**: Enhanced `cursorflow doctor` validation checks for circular dependencies, duplicate task names, and branch prefix collisions.
+
 ## [0.1.28] - 2025-12-25
 
 ### Added
