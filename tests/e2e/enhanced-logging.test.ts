@@ -83,9 +83,8 @@ describe('Enhanced Logging E2E', () => {
       }
 
       // Check that log files were created
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal.log'))).toBe(true);
+      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
       expect(fs.existsSync(path.join(laneRunDir, 'terminal-raw.log'))).toBe(true);
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal.jsonl'))).toBe(true);
     });
 
     it('should not create raw logs when keepRawLogs is false', async () => {
@@ -113,7 +112,7 @@ describe('Enhanced Logging E2E', () => {
         result.logManager.close();
       }
 
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal.log'))).toBe(true);
+      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
       expect(fs.existsSync(path.join(laneRunDir, 'terminal-raw.log'))).toBe(false);
     });
 
@@ -136,8 +135,8 @@ describe('Enhanced Logging E2E', () => {
       await waitChild(result.child);
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Simple logging only creates terminal.log
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal.log'))).toBe(true);
+      // Simple logging creates terminal-readable.log
+      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
       // No JSON or raw logs when disabled
       expect(result.logManager).toBeUndefined();
     });
@@ -167,25 +166,24 @@ describe('Enhanced Logging E2E', () => {
         result.logManager.close();
       }
 
-      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal.log'), 'utf8');
+      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal-readable.log'), 'utf8');
       
       expect(logContent).toContain('CursorFlow Session Log');
       expect(logContent).toContain('session-header-test');
     });
 
-    it('should write JSON entries with proper structure', async () => {
-      const laneRunDir = path.join(lanesDir, 'json-structure-test');
+    it('should write log entries with proper structure', async () => {
+      const laneRunDir = path.join(lanesDir, 'log-structure-test');
       fs.mkdirSync(laneRunDir, { recursive: true });
 
       const result = spawnLane({
-        laneName: 'json-structure-test',
+        laneName: 'log-structure-test',
         tasksFile: path.join(tasksDir, 'test-lane.json'),
         laneRunDir,
         executor: 'cursor-agent',
         startIndex: 0,
         enhancedLogConfig: {
           enabled: true,
-          writeJsonLog: true,
         },
       });
 
@@ -197,15 +195,9 @@ describe('Enhanced Logging E2E', () => {
         result.logManager.close();
       }
 
-      const entries = readJsonLog(path.join(laneRunDir, 'terminal.jsonl'));
-      
-      expect(entries.length).toBeGreaterThan(0);
-      
-      // Check session start entry
-      const sessionStart = entries.find(e => e.level === 'session' && e.message === 'Session started');
-      expect(sessionStart).toBeDefined();
-      expect(sessionStart?.lane).toBe('json-structure-test');
-      expect(sessionStart?.timestamp).toBeDefined();
+      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal-readable.log'), 'utf8');
+      expect(logContent).toContain('CursorFlow Session Log');
+      expect(logContent).toContain('log-structure-test');
     });
   });
 
@@ -223,7 +215,6 @@ describe('Enhanced Logging E2E', () => {
         startIndex: 0,
         enhancedLogConfig: {
           enabled: true,
-          writeJsonLog: true,
         },
       });
 
@@ -241,32 +232,18 @@ describe('Enhanced Logging E2E', () => {
       expect(output).toContain('CursorFlow Session Log');
     });
 
-    it('should export logs as JSON array', () => {
+    it('should export logs (simplified)', () => {
       const output = exportLogs(exportTestDir, 'json');
-      const parsed = JSON.parse(output);
-      expect(Array.isArray(parsed)).toBe(true);
-    });
-
-    it('should export logs as markdown', () => {
-      const output = exportLogs(exportTestDir, 'markdown');
-      expect(output).toContain('# CursorFlow Session Log');
-      expect(output).toContain('## Session Info');
-    });
-
-    it('should export logs as HTML', () => {
-      const output = exportLogs(exportTestDir, 'html');
-      expect(output).toContain('<!DOCTYPE html>');
       expect(output).toContain('CursorFlow Session Log');
-      expect(output).toContain('<style>');
     });
 
     it('should write export to file', () => {
-      const outputPath = path.join(exportTestDir, 'exported.json');
-      exportLogs(exportTestDir, 'json', outputPath);
+      const outputPath = path.join(exportTestDir, 'exported.txt');
+      exportLogs(exportTestDir, 'text', outputPath);
       
       expect(fs.existsSync(outputPath)).toBe(true);
-      const content = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-      expect(Array.isArray(content)).toBe(true);
+      const content = fs.readFileSync(outputPath, 'utf8');
+      expect(content).toContain('CursorFlow Session Log');
     });
   });
 

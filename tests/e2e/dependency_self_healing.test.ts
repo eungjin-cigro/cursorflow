@@ -17,6 +17,7 @@ jest.mock('../../src/utils/git', () => ({
   remoteExists: jest.fn().mockReturnValue(true),
   hasUncommittedChanges: jest.fn().mockReturnValue(false),
   getCurrentBranch: jest.fn().mockReturnValue('main'),
+  setVerboseGit: jest.fn(),
 }));
 
 // Mock child_process
@@ -107,6 +108,7 @@ describe('Dependency Self-Healing E2E', () => {
         skipPreflight: true
       });
     } catch (e: any) {
+      console.log('Orchestrate failed with error:', e.message);
       if (!e.message.includes('process.exit(0)')) {
         // expect(e.message).toBe('process.exit(0)');
       }

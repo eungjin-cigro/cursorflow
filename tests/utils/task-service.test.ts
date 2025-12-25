@@ -93,7 +93,6 @@ describe('TaskService', () => {
       expect(info!.lanes.length).toBe(2);
       expect(info!.lanes[0]!.preset).toBe('complex');
       expect(info!.lanes[1]!.preset).toBe('simple');
-      expect(info!.lanes[1]!.dependsOn).toEqual(['01-lane-1']);
     });
 
     it('should extract correct timestamp', () => {

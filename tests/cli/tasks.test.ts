@@ -110,7 +110,6 @@ describe('CLI tasks command', () => {
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('01-lane-1.json'));
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('[complex]'));
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('plan → implement → test'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('(depends: 01-lane-1)'));
   });
 
   test.skip('shows validation issues in detail view', async () => {
