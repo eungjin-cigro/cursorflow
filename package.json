@@ -1,6 +1,6 @@
 {
   "name": "@litmers/cursorflow-orchestrator",
-  "version": "0.1.26",
+  "version": "0.1.28",
   "description": "Git worktree-based parallel AI agent orchestration system for Cursor",
   "main": "dist/cli/index.js",
   "bin": {
