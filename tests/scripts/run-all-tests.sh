@@ -191,12 +191,24 @@ run_module() {
         agent_args="--skip-agent"
     fi
     
-    # Run module
-    if "$module_script" $agent_args; then
-        return 0
-    else
-        return 1
-    fi
+    # Run module and capture output
+    local output
+    local exit_code=0
+    output=$("$module_script" $agent_args 2>&1) || exit_code=$?
+    
+    echo "$output"
+    
+    # Parse results from output
+    local passed=$(echo "$output" | grep "Passed:" | tail -1 | sed -E 's/.*Passed: ([0-9]+).*/\1/')
+    local failed=$(echo "$output" | grep "Failed:" | tail -1 | sed -E 's/.*Failed: ([0-9]+).*/\1/')
+    local skipped=$(echo "$output" | grep "Skipped:" | tail -1 | sed -E 's/.*Skipped: ([0-9]+).*/\1/')
+    
+    # Update totals
+    if [[ -n "$passed" ]]; then TESTS_PASSED=$((TESTS_PASSED + passed)); fi
+    if [[ -n "$failed" ]]; then TESTS_FAILED=$((TESTS_FAILED + failed)); fi
+    if [[ -n "$skipped" ]]; then TESTS_SKIPPED=$((TESTS_SKIPPED + skipped)); fi
+    
+    return $exit_code
 }
 
 main() {
