@@ -25,28 +25,35 @@ import {
   EnhancedLogManager, 
   createLogManager, 
   DEFAULT_LOG_CONFIG,
-  ParsedMessage
+  ParsedMessage,
+  stripAnsi
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
-import { analyzeStall, RecoveryAction, logFailure, DEFAULT_STALL_CONFIG, StallDetectionConfig, FailureType } from './failure-policy';
+import { FailureType, analyzeFailure as analyzeFailureFromPolicy } from './failure-policy';
 import { 
-  getAutoRecoveryManager, 
-  DEFAULT_AUTO_RECOVERY_CONFIG,
-  AutoRecoveryConfig,
   savePOF,
   createPOFFromRecoveryState,
   getGitPushFailureGuidance,
   getMergeConflictGuidance,
   getGitErrorGuidance,
+  LaneRecoveryState,
 } from './auto-recovery';
+import {
+  StallDetectionService,
+  getStallService,
+  StallDetectionConfig,
+  DEFAULT_STALL_CONFIG,
+  RecoveryAction,
+  StallPhase,
+  StallAnalysis,
+} from './stall-detection';
 import { detectCyclicDependencies, validateDependencies, printDependencyGraph, DependencyInfo } from '../utils/dependency';
 import { preflightCheck, printPreflightReport, autoRepair } from '../utils/health';
 import { getLatestCheckpoint } from '../utils/checkpoint';
 import { cleanStaleLocks, getLockDir } from '../utils/lock';
 
 /** Default stall detection configuration - 2 minute idle timeout for recovery */
-const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
-  ...DEFAULT_STALL_CONFIG,
+const DEFAULT_ORCHESTRATOR_STALL_CONFIG: Partial<StallDetectionConfig> = {
   idleTimeoutMs: 2 * 60 * 1000,       // 2 minutes (idle detection for continue signal)
   progressTimeoutMs: 10 * 60 * 1000,  // 10 minutes (only triggers if no activity at all)
   maxRestarts: 2,
@@ -55,7 +62,6 @@ const DEFAULT_ORCHESTRATOR_STALL_CONFIG: StallDetectionConfig = {
 export interface LaneInfo {
   name: string;
   path: string;
-  dependsOn: string[];
   startIndex?: number; // Current task index to resume from
   restartCount?: number; // Number of times restarted due to stall
   lastStateUpdate?: number; // Timestamp of last state file update
@@ -66,24 +72,22 @@ export interface SpawnLaneResult {
   child: ChildProcess;
   logPath: string;
   logManager?: EnhancedLogManager;
+  info: RunningLaneInfo;
 }
 
 /**
  * Lane execution tracking info
+ * 
+ * NOTE: Stall 감지 관련 상태(lastActivity, stallPhase 등)는 StallDetectionService에서 관리
+ * 여기서는 프로세스 관리에 필요한 최소한의 정보만 유지
  */
 interface RunningLaneInfo {
   child: ChildProcess;
   logPath: string;
   logManager?: EnhancedLogManager;
-  lastActivity: number;
-  lastStateUpdate: number;
-  stallPhase: number; // 0: normal, 1: continued, 2: stronger_prompt, 3: restarted
-  taskStartTime: number;
-  lastOutput: string;
   statePath: string;
-  bytesReceived: number; // Total bytes received from agent
-  lastBytesCheck: number; // Bytes at last check (for delta calculation)
-  continueSignalsSent: number; // Number of continue signals sent
+  laneIndex: number;
+  currentTaskIndex?: number;
 }
 
 /**
@@ -103,6 +107,109 @@ function logFileTail(filePath: string, lines: number = 10): void {
     }
   } catch (e) {
     // Ignore log reading errors
+  }
+}
+
+/**
+ * Handle RUN_DOCTOR action - runs async health diagnostics
+ */
+async function handleDoctorDiagnostics(
+  laneName: string,
+  laneRunDir: string,
+  runId: string,
+  runRoot: string,
+  stallService: StallDetectionService,
+  child: ChildProcess
+): Promise<void> {
+  // Import health check dynamically to avoid circular dependency
+  const { checkAgentHealth, checkAuthHealth } = await import('../utils/health');
+  
+  const [agentHealth, authHealth] = await Promise.all([
+    checkAgentHealth(),
+    checkAuthHealth(),
+  ]);
+  
+  const issues: string[] = [];
+  if (!agentHealth.ok) issues.push(`Agent: ${agentHealth.message}`);
+  if (!authHealth.ok) issues.push(`Auth: ${authHealth.message}`);
+  
+  if (issues.length > 0) {
+    logger.error(`[${laneName}] Diagnostic issues found:\n  ${issues.join('\n  ')}`);
+  } else {
+    logger.warn(`[${laneName}] No obvious issues found. The problem may be with the AI model or network.`);
+  }
+  
+  // Save diagnostic to file
+  const diagnosticPath = safeJoin(laneRunDir, 'diagnostic.json');
+  fs.writeFileSync(diagnosticPath, JSON.stringify({
+    timestamp: Date.now(),
+    agentHealthy: agentHealth.ok,
+    authHealthy: authHealth.ok,
+    issues,
+  }, null, 2));
+  
+  // Kill the process
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // Process might already be dead
+  }
+  
+  logger.error(`[${laneName}] Aborting lane after diagnostic. Check ${diagnosticPath} for details.`);
+  
+  // Save POF for failed recovery
+  const stallState = stallService.getState(laneName);
+  if (stallState) {
+    try {
+      const laneStatePath = safeJoin(laneRunDir, 'state.json');
+      const laneState = loadState<LaneState>(laneStatePath);
+      const pofDir = safeJoin(runRoot, '..', '..', 'pof');
+      
+      // Convert stall state to recovery state format for POF
+      // Note: StallPhase and RecoveryStage have compatible numeric values (0-5)
+      const recoveryState: LaneRecoveryState = {
+        laneName,
+        stage: stallState.phase as unknown as number,  // Both enums use 0-5
+        lastActivityTime: stallState.lastRealActivityTime,
+        lastBytesReceived: stallState.bytesSinceLastCheck,
+        totalBytesReceived: stallState.totalBytesReceived,
+        lastOutput: stallState.lastOutput,
+        restartCount: stallState.restartCount,
+        continueSignalsSent: stallState.continueSignalCount,
+        lastStageChangeTime: stallState.lastPhaseChangeTime,
+        isLongOperation: stallState.isLongOperation,
+        failureHistory: stallState.failureHistory.map(f => ({
+          timestamp: f.timestamp,
+          stage: f.phase as unknown as number,  // Both enums use 0-5
+          action: f.action as string,
+          message: f.message,
+          idleTimeMs: f.idleTimeMs,
+          bytesReceived: f.bytesReceived,
+          lastOutput: f.lastOutput,
+        })),
+      };
+      
+      const diagnosticInfo = {
+        timestamp: Date.now(),
+        agentHealthy: agentHealth.ok,
+        authHealthy: authHealth.ok,
+        systemHealthy: true,
+        suggestedAction: issues.length > 0 ? 'Fix the issues above and retry' : 'Try with a different model',
+        details: issues.join('\n') || 'No obvious issues found',
+      };
+      
+      const pofEntry = createPOFFromRecoveryState(
+        runId,
+        runRoot,
+        laneName,
+        recoveryState,
+        laneState,
+        diagnosticInfo
+      );
+      savePOF(runId, pofDir, pofEntry);
+    } catch (pofError: any) {
+      logger.warn(`[${laneName}] Failed to save POF: ${pofError.message}`);
+    }
   }
 }
 
@@ -171,11 +278,18 @@ export function spawnLane({
   };
   
   if (logConfig.enabled) {
+    // Helper to get dynamic lane label like [L01-T01-laneName]
+    const getDynamicLabel = () => {
+      const laneNum = `L${(laneIndex + 1).toString().padStart(2, '0')}`;
+      const taskPart = info.currentTaskIndex ? `-T${info.currentTaskIndex.toString().padStart(2, '0')}` : '';
+      return `[${laneNum}${taskPart}-${laneName}]`;
+    };
+
     // Create callback for clean console output
     const onParsedMessage = (msg: ParsedMessage) => {
       if (onActivity) onActivity();
       const formatted = formatMessageForConsole(msg, { 
-        laneLabel: `[${laneName}]`,
+        laneLabel: getDynamicLabel(),
         includeTimestamp: true 
       });
       process.stdout.write(formatted + '\n');
@@ -191,6 +305,16 @@ export function spawnLane({
       detached: false,
     });
     
+    // Initialize info object for stdout handler to use
+    const info: RunningLaneInfo = {
+      child,
+      logManager,
+      logPath,
+      statePath: safeJoin(laneRunDir, 'state.json'),
+      laneIndex,
+      currentTaskIndex: startIndex > 0 ? startIndex + 1 : 0
+    };
+
     // Buffer for non-JSON lines
     let lineBuffer = '';
 
@@ -207,24 +331,52 @@ export function spawnLane({
         
         for (const line of lines) {
           const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // Detect task start/progress to update label
+          // Example: [1/1] hello-task
+          const cleanLine = stripAnsi(trimmed);
+          const taskMatch = cleanLine.match(/^\s*\[(\d+)\/(\d+)\]\s+(.+)$/);
+          if (taskMatch) {
+            info.currentTaskIndex = parseInt(taskMatch[1]!);
+            // Update log manager's task index to keep it in sync for readable log
+            if (logManager) {
+              logManager.setTask(taskMatch[3]!.trim(), undefined, info.currentTaskIndex - 1);
+            }
+          }
+
           // Show if it's a timestamped log line (starts with [YYYY-MM-DD... or [HH:MM:SS])
           // or if it's NOT a noisy JSON line
-          const hasTimestamp = /^\[\d{4}-\d{2}-\d{2}T|\^\[\d{2}:\d{2}:\d{2}\]/.test(trimmed);
           const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
           // Filter out heartbeats - they should NOT reset the idle timer
           const isHeartbeat = trimmed.includes('Heartbeat') && trimmed.includes('bytes received');
           
-          if (trimmed && !isJson) {
+          if (!isJson) {
             // Only trigger activity for non-heartbeat lines
             if (onActivity && !isHeartbeat) onActivity();
-            // If line alreedy has timestamp format, just add lane prefix
-            if (hasTimestamp) {
-              // Insert lane name after first timestamp
-              const formatted = trimmed.replace(/^(\[[^\]]+\])/, `$1 ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset}`);
-              process.stdout.write(formatted + '\n');
+
+            const currentLabel = getDynamicLabel();
+            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
+            
+            // Regex that matches timestamp even if it has ANSI color codes
+            // Matches: [24:39:14] or \x1b[90m[24:39:14]\x1b[0m
+            const timestampRegex = /^((?:\x1b\[[0-9;]*m)*)\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/;
+            const tsMatch = trimmed.match(timestampRegex);
+
+            if (tsMatch) {
+              // If line already has timestamp format, just add lane prefix
+              // Check if lane label is already present to avoid triple duplication
+              if (!trimmed.includes(currentLabel)) {
+                // Insert label after the timestamp part
+                const tsPart = tsMatch[0];
+                const formatted = trimmed.replace(tsPart, `${tsPart} ${coloredLabel}`);
+                process.stdout.write(formatted + '\n');
+              } else {
+                process.stdout.write(trimmed + '\n');
+              }
             } else {
               // Add full prefix: timestamp + lane
-              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${line}\n`);
+              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${coloredLabel} ${line}\n`);
             }
           }
         }
@@ -246,11 +398,14 @@ export function spawnLane({
                              trimmed.includes('actual output');
             
             const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const currentLabel = getDynamicLabel();
+            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
+
             if (isStatus) {
-              process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${trimmed}\n`);
+              process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${trimmed}\n`);
             } else {
               if (onActivity) onActivity();
-              process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
+              process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
             }
           }
         }
@@ -261,6 +416,8 @@ export function spawnLane({
     child.on('exit', () => {
       logManager?.close();
     });
+
+    return { child, logPath, logManager, info };
   } else {
     // Fallback to simple file logging
     logPath = safeJoin(laneRunDir, 'terminal-readable.log');
@@ -277,9 +434,19 @@ export function spawnLane({
     } catch {
       // Ignore
     }
+
+    return { 
+      child, 
+      logPath, 
+      logManager, 
+      info: {
+        child,
+        logPath,
+        statePath: safeJoin(laneRunDir, 'state.json'),
+        laneIndex
+      }
+    };
   }
-  
-  return { child, logPath, logManager };
 }
 
 /**
@@ -298,7 +465,7 @@ export function waitChild(proc: ChildProcess): Promise<number> {
 }
 
 /**
- * List lane task files in directory and load their configs for dependencies
+ * List lane task files in directory
  */
 export function listLaneFiles(tasksDir: string): LaneInfo[] {
   if (!fs.existsSync(tasksDir)) {
@@ -312,19 +479,10 @@ export function listLaneFiles(tasksDir: string): LaneInfo[] {
     .map(f => {
       const filePath = safeJoin(tasksDir, f);
       const name = path.basename(f, '.json');
-      let dependsOn: string[] = [];
-      
-      try {
-        const config = JSON.parse(fs.readFileSync(filePath, 'utf8')) as RunnerConfig;
-        dependsOn = config.dependsOn || [];
-      } catch (e) {
-        logger.warn(`Failed to parse config for lane ${name}: ${e}`);
-      }
       
       return {
         name,
         path: filePath,
-        dependsOn,
       };
     });
 }
@@ -341,8 +499,7 @@ export function printLaneStatus(lanes: LaneInfo[], laneRunDirs: Record<string, s
     const state = loadState<LaneState>(statePath);
     
     if (!state) {
-      const isWaiting = lane.dependsOn.length > 0;
-      return { lane: lane.name, status: isWaiting ? 'waiting' : 'pending', task: '-' };
+      return { lane: lane.name, status: 'pending', task: '-' };
     }
     
     const idx = (state.currentTaskIndex || 0) + 1;
@@ -390,12 +547,12 @@ async function resolveAllDependencies(
   const worktreeDir = state?.worktreeDir || safeJoin(runRoot, 'resolution-worktree');
 
   if (!fs.existsSync(worktreeDir)) {
-    logger.info(`Creating resolution worktree at ${worktreeDir}`);
+    logger.info(`🏗️ Creating resolution worktree at ${worktreeDir}`);
     git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: git.getCurrentBranch() });
   }
 
   // 3. Resolve on pipeline branch
-  logger.info(`Resolving dependencies on ${pipelineBranch}`);
+  logger.info(`🔄 Resolving dependencies on branch ${pipelineBranch}`);
   git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
   
   for (const cmd of uniqueCommands) {
@@ -476,7 +633,6 @@ export async function orchestrate(tasksDir: string, options: {
   noGit?: boolean;
   skipPreflight?: boolean;
   stallConfig?: Partial<StallDetectionConfig>;
-  autoRecoveryConfig?: Partial<AutoRecoveryConfig>;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -512,34 +668,11 @@ export async function orchestrate(tasksDir: string, options: {
     logger.success('✓ Preflight checks passed');
   }
   
-  // Validate dependencies and detect cycles
-  logger.section('📊 Dependency Analysis');
-  
-  const depInfos: DependencyInfo[] = lanes.map(l => ({
-    name: l.name,
-    dependsOn: l.dependsOn,
-  }));
-  
-  const depValidation = validateDependencies(depInfos);
-  
-  if (!depValidation.valid) {
-    logger.error('❌ Dependency validation failed:');
-    for (const err of depValidation.errors) {
-      logger.error(`   • ${err}`);
-    }
-    throw new Error('Invalid dependency configuration');
-  }
-  
-  if (depValidation.warnings.length > 0) {
-    for (const warn of depValidation.warnings) {
-      logger.warn(`⚠️  ${warn}`);
-    }
-  }
-  
-  // Print dependency graph
-  printDependencyGraph(depInfos);
-  
   const config = loadConfig();
+  
+  // Set verbose git logging from config
+  git.setVerboseGit(config.verboseGit || false);
+
   const logsDir = getLogsDir(config);
   const runId = `run-${Date.now()}`;
   // Use absolute path for runRoot to avoid issues with subfolders
@@ -563,17 +696,11 @@ export async function orchestrate(tasksDir: string, options: {
   const randomSuffix = Math.random().toString(36).substring(2, 7);
   const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}-${randomSuffix}`;
 
-  // Stall detection configuration
-  const stallConfig: StallDetectionConfig = {
+  // Initialize unified stall detection service (Single Source of Truth)
+  const stallService = getStallService({
     ...DEFAULT_ORCHESTRATOR_STALL_CONFIG,
     ...options.stallConfig,
-  };
-  
-  // Initialize auto-recovery manager
-  const autoRecoveryManager = getAutoRecoveryManager({
-    ...DEFAULT_AUTO_RECOVERY_CONFIG,
-    idleTimeoutMs: stallConfig.idleTimeoutMs, // Sync with stall config
-    ...options.autoRecoveryConfig,
+    verbose: process.env['DEBUG_STALL'] === 'true',
   });
 
   // Initialize event system
@@ -634,6 +761,7 @@ export async function orchestrate(tasksDir: string, options: {
       
       laneWorktreeDirs[lane.name] = laneWorktreeDir;
       
+      logger.info(`🏗️ Initializing lane ${lane.name}: branch=${lanePipelineBranch}`);
       const initialState = createLaneState(lane.name, taskConfig, lane.path, {
         pipelineBranch: lanePipelineBranch,
         worktreeDir: laneWorktreeDir
@@ -648,21 +776,6 @@ export async function orchestrate(tasksDir: string, options: {
   logger.info(`Tasks directory: ${tasksDir}`);
   logger.info(`Run directory: ${runRoot}`);
   logger.info(`Lanes: ${lanes.length}`);
-
-  // Display dependency graph
-  logger.info('\n📊 Dependency Graph:');
-  for (const lane of lanes) {
-    const deps = lane.dependsOn.length > 0 ? ` [depends on: ${lane.dependsOn.join(', ')}]` : '';
-    console.log(`  ${logger.COLORS.cyan}${lane.name}${logger.COLORS.reset}${deps}`);
-    
-    // Simple tree-like visualization for deep dependencies
-    if (lane.dependsOn.length > 0) {
-      for (const dep of lane.dependsOn) {
-        console.log(`    └─ ${dep}`);
-      }
-    }
-  }
-  console.log('');
 
   // Disable auto-resolve when noGit mode is enabled
   const autoResolve = !options.noGit && options.autoResolveDependencies !== false;
@@ -698,28 +811,11 @@ export async function orchestrate(tasksDir: string, options: {
   
   try {
     while (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length || (blockedLanes.size > 0 && running.size === 0)) {
-    // 1. Identify lanes ready to start
+    // 1. Identify lanes ready to start (all lanes can start immediately - no lane-level dependencies)
     const readyToStart = lanes.filter(lane => {
       // Not already running or completed or failed or blocked
       if (running.has(lane.name) || completedLanes.has(lane.name) || failedLanes.has(lane.name) || blockedLanes.has(lane.name)) {
         return false;
-      }
-      
-      // Check dependencies
-      for (const dep of lane.dependsOn) {
-        if (failedLanes.has(dep)) {
-          logger.error(`Lane ${lane.name} will not start because dependency ${dep} failed`);
-          failedLanes.add(lane.name);
-          exitCodes[lane.name] = 1;
-          return false;
-        }
-        if (blockedLanes.has(dep)) {
-          // If a dependency is blocked, wait
-          return false;
-        }
-        if (!completedLanes.has(dep)) {
-          return false;
-        }
       }
       return true;
     });
@@ -739,24 +835,23 @@ export async function orchestrate(tasksDir: string, options: {
       logger.info(`Lane started: ${lane.name}${lane.startIndex ? ` (resuming from ${lane.startIndex})` : ''}`);
       
       const now = Date.now();
-      // Pre-register lane in running map so onActivity can find it immediately
+      
+      // Register lane with unified stall detection service FIRST
+      stallService.registerLane(lane.name, {
+        laneRunDir: laneRunDirs[lane.name]!,
+      });
+      
+      const laneIdx = lanes.findIndex(l => l.name === lane.name);
+      
+      // Pre-register lane in running map
       running.set(lane.name, {
         child: {} as any, // Placeholder, will be replaced below
         logManager: undefined,
         logPath: '',
-        lastActivity: now,
-        lastStateUpdate: now,
-        stallPhase: 0,
-        taskStartTime: now,
-        lastOutput: '',
         statePath: laneStatePath,
-        bytesReceived: 0,
-        lastBytesCheck: 0,
-        continueSignalsSent: 0,
+        laneIndex: laneIdx >= 0 ? laneIdx : 0,
       });
 
-      let lastOutput = '';
-      const laneIdx = lanes.findIndex(l => l.name === lane.name);
       const spawnResult = spawnLane({
         laneName: lane.name,
         tasksFile: lane.path,
@@ -769,53 +864,37 @@ export async function orchestrate(tasksDir: string, options: {
         noGit: options.noGit,
         laneIndex: laneIdx >= 0 ? laneIdx : 0,
         onActivity: () => {
-          const info = running.get(lane.name);
-          if (info) {
-            const actNow = Date.now();
-            info.lastActivity = actNow;
-            info.lastStateUpdate = actNow;
-            info.stallPhase = 0;
-          }
+          // Record state file update activity
+          stallService.recordStateUpdate(lane.name);
         }
       });
       
       // Update with actual spawn result
       const existingInfo = running.get(lane.name)!;
-      Object.assign(existingInfo, spawnResult);
+      Object.assign(existingInfo, spawnResult.info);
       
-      // Track last output and bytes received for long operation and stall detection
+      // Update stall service with child process reference
+      stallService.setChildProcess(lane.name, spawnResult.child);
+      
+      // Track stdout for activity detection - delegate to StallDetectionService
       if (spawnResult.child.stdout) {
         spawnResult.child.stdout.on('data', (data: Buffer) => {
-          const info = running.get(lane.name);
-          if (info) {
-            const output = data.toString();
-            const lines = output.split('\n').filter(l => l.trim());
-            
-            // Filter out heartbeats from activity tracking to avoid resetting stall detection
-            const realLines = lines.filter(line => !(line.includes('Heartbeat') && line.includes('bytes received')));
-            
-            if (realLines.length > 0) {
-              // Real activity detected - update lastActivity to reset stall timer
-              const actNow = Date.now();
-              info.lastActivity = actNow;
-              info.stallPhase = 0; // Reset stall phase on real activity
-              
-              const lastRealLine = realLines[realLines.length - 1]!;
-              info.lastOutput = lastRealLine;
-              info.bytesReceived += data.length;
-              
-              // Update auto-recovery manager with real activity
-              autoRecoveryManager.recordActivity(lane.name, data.length, info.lastOutput);
-            } else if (lines.length > 0) {
-              // Only heartbeats received - do NOT update lastActivity (keep stall timer running)
-              autoRecoveryManager.recordActivity(lane.name, 0, info.lastOutput);
-            }
+          const output = data.toString();
+          const lines = output.split('\n').filter(l => l.trim());
+          
+          // Filter out heartbeats from activity tracking
+          const realLines = lines.filter(line => !(line.includes('Heartbeat') && line.includes('bytes received')));
+          
+          if (realLines.length > 0) {
+            // Real activity - record with bytes
+            const lastRealLine = realLines[realLines.length - 1]!;
+            stallService.recordActivity(lane.name, data.length, lastRealLine);
+          } else if (lines.length > 0) {
+            // Heartbeat only - record with 0 bytes (won't reset timer)
+            stallService.recordActivity(lane.name, 0);
           }
         });
       }
-      
-      // Register lane with auto-recovery manager
-      autoRecoveryManager.registerLane(lane.name);
       
       // Update lane tracking
       lane.taskStartTime = now;
@@ -847,234 +926,47 @@ export async function orchestrate(tasksDir: string, options: {
       if (result.name === '__poll__' || (now - lastStallCheck >= 10000)) {
         lastStallCheck = now;
         
-        // Periodic stall check with multi-layer detection and escalating recovery
+        // Periodic stall check using unified StallDetectionService
         for (const [laneName, info] of running.entries()) {
-          const idleTime = now - info.lastActivity;
           const lane = lanes.find(l => l.name === laneName)!;
           
-          if (process.env['DEBUG_STALL']) {
-            logger.debug(`[${laneName}] Stall check: idle=${Math.round(idleTime/1000)}s, bytesDelta=${info.bytesReceived - info.lastBytesCheck}, phase=${info.stallPhase}`);
-          }
-
           // Check state file for progress updates
-          let progressTime = 0;
           try {
             const stateStat = fs.statSync(info.statePath);
-            const stateUpdateTime = stateStat.mtimeMs;
-            if (stateUpdateTime > info.lastStateUpdate) {
-              info.lastStateUpdate = stateUpdateTime;
+            const stallState = stallService.getState(laneName);
+            if (stallState && stateStat.mtimeMs > stallState.lastStateUpdateTime) {
+              stallService.recordStateUpdate(laneName);
             }
-            progressTime = now - info.lastStateUpdate;
           } catch {
             // State file might not exist yet
           }
           
-          // Calculate bytes received since last check
-          const bytesDelta = info.bytesReceived - info.lastBytesCheck;
-          info.lastBytesCheck = info.bytesReceived;
+          // Debug logging
+          if (process.env['DEBUG_STALL']) {
+            logger.debug(`[${laneName}] ${stallService.dumpState(laneName)}`);
+          }
           
-          // Use multi-layer stall analysis with enhanced context
-          const analysis = analyzeStall({
-            stallPhase: info.stallPhase,
-            idleTimeMs: idleTime,
-            progressTimeMs: progressTime,
-            lastOutput: info.lastOutput,
-            restartCount: lane.restartCount || 0,
-            taskStartTimeMs: info.taskStartTime,
-            bytesReceived: bytesDelta, // Bytes since last check
-            continueSignalsSent: info.continueSignalsSent,
-          }, stallConfig);
+          // Run stall analysis and recovery (all logic is in StallDetectionService)
+          const analysis = stallService.checkAndRecover(laneName);
           
-          // Only act if action is not NONE
+          // Log to lane log manager if there was an action
           if (analysis.action !== RecoveryAction.NONE) {
-            logFailure(laneName, analysis);
             info.logManager?.log('error', analysis.message);
-
-            if (analysis.action === RecoveryAction.CONTINUE_SIGNAL) {
-              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
-              try {
-                fs.writeFileSync(interventionPath, 'continue');
-                info.stallPhase = 1;
-                info.lastActivity = now;
-                info.continueSignalsSent++;
-                logger.info(`[${laneName}] Sent continue signal (#${info.continueSignalsSent})`);
-                
-                events.emit('recovery.continue_signal', {
-                  laneName,
-                  idleSeconds: Math.round(idleTime / 1000),
-                  signalCount: info.continueSignalsSent,
-                });
-              } catch (e) {
-                logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
-              }
-            } else if (analysis.action === RecoveryAction.STRONGER_PROMPT) {
-              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
-              const strongerPrompt = `[SYSTEM INTERVENTION] You seem to be stuck. Please continue with your current task immediately. If you're waiting for something, explain what you need and proceed with what you can do now. If you've completed the task, summarize your work and finish.`;
-              try {
-                fs.writeFileSync(interventionPath, strongerPrompt);
-                info.stallPhase = 2;
-                info.lastActivity = now;
-                logger.warn(`[${laneName}] Sent stronger prompt after continue signal failed`);
-                
-                events.emit('recovery.stronger_prompt', { laneName });
-              } catch (e) {
-                logger.error(`Failed to write intervention file for ${laneName}: ${e}`);
-              }
-            } else if (analysis.action === RecoveryAction.KILL_AND_RESTART ||
-                       analysis.action === RecoveryAction.RESTART_LANE || 
-                       analysis.action === RecoveryAction.RESTART_LANE_FROM_CHECKPOINT) {
-              lane.restartCount = (lane.restartCount || 0) + 1;
-              info.stallPhase = 3;
-              
-              // Try to get checkpoint info
-              const checkpoint = getLatestCheckpoint(laneRunDirs[laneName]!);
-              if (checkpoint) {
-                logger.info(`[${laneName}] Checkpoint available: ${checkpoint.id} (task ${checkpoint.taskIndex})`);
-              }
-              
-              // Kill the process
-              try {
-                info.child.kill('SIGKILL');
-              } catch {
-                // Process might already be dead
-              }
-              
-              logger.warn(`[${laneName}] Killing and restarting lane (restart #${lane.restartCount})`);
-              
-              events.emit('recovery.restart', {
-                laneName,
-                restartCount: lane.restartCount,
-                maxRestarts: stallConfig.maxRestarts,
-              });
-            } else if (analysis.action === RecoveryAction.RUN_DOCTOR) {
-              info.stallPhase = 4;
-              
-              // Run diagnostics
-              logger.error(`[${laneName}] Running diagnostics due to persistent failures...`);
-              
-              // Import health check dynamically to avoid circular dependency
-              const { checkAgentHealth, checkAuthHealth } = await import('../utils/health');
-              
-              const [agentHealth, authHealth] = await Promise.all([
-                checkAgentHealth(),
-                checkAuthHealth(),
-              ]);
-              
-              const issues: string[] = [];
-              if (!agentHealth.ok) issues.push(`Agent: ${agentHealth.message}`);
-              if (!authHealth.ok) issues.push(`Auth: ${authHealth.message}`);
-              
-              if (issues.length > 0) {
-                logger.error(`[${laneName}] Diagnostic issues found:\n  ${issues.join('\n  ')}`);
-              } else {
-                logger.warn(`[${laneName}] No obvious issues found. The problem may be with the AI model or network.`);
-              }
-              
-              // Save diagnostic to file
-              const diagnosticPath = safeJoin(laneRunDirs[laneName]!, 'diagnostic.json');
-              fs.writeFileSync(diagnosticPath, JSON.stringify({
-                timestamp: Date.now(),
-                agentHealthy: agentHealth.ok,
-                authHealthy: authHealth.ok,
-                issues,
-                analysis,
-              }, null, 2));
-              
-              // Kill the process
-              try {
-                info.child.kill('SIGKILL');
-              } catch {
-                // Process might already be dead
-              }
-              
-              logger.error(`[${laneName}] Aborting lane after diagnostic. Check ${diagnosticPath} for details.`);
-              
-              // Save POF for failed recovery
-              const recoveryState = autoRecoveryManager.getState(laneName);
-              if (recoveryState) {
-                try {
-                  const laneStatePath = safeJoin(laneRunDirs[laneName]!, 'state.json');
-                  const laneState = loadState<LaneState>(laneStatePath);
-                  const pofDir = safeJoin(runRoot, '..', '..', 'pof');
-                  const diagnosticInfo = {
-                    timestamp: Date.now(),
-                    agentHealthy: agentHealth.ok,
-                    authHealthy: authHealth.ok,
-                    systemHealthy: true,
-                    suggestedAction: issues.length > 0 ? 'Fix the issues above and retry' : 'Try with a different model',
-                    details: issues.join('\n') || 'No obvious issues found',
-                  };
-                  const pofEntry = createPOFFromRecoveryState(
-                    runId,
-                    runRoot,
-                    laneName,
-                    recoveryState,
-                    laneState,
-                    diagnosticInfo
-                  );
-                  savePOF(runId, pofDir, pofEntry);
-                } catch (pofError: any) {
-                  logger.warn(`[${laneName}] Failed to save POF: ${pofError.message}`);
-                }
-              }
-              
-              events.emit('recovery.diagnosed', {
-                laneName,
-                diagnostic: { agentHealthy: agentHealth.ok, authHealthy: authHealth.ok, issues },
-              });
-            } else if (analysis.action === RecoveryAction.ABORT_LANE) {
-              info.stallPhase = 5;
-              
-              try {
-                info.child.kill('SIGKILL');
-              } catch {
-                // Process might already be dead
-              }
-              
-              logger.error(`[${laneName}] Aborting lane due to repeated stalls`);
-              
-              // Save POF for failed recovery
-              const recoveryState = autoRecoveryManager.getState(laneName);
-              if (recoveryState) {
-                try {
-                  const laneStatePath = safeJoin(laneRunDirs[laneName]!, 'state.json');
-                  const laneState = loadState<LaneState>(laneStatePath);
-                  const pofDir = safeJoin(runRoot, '..', '..', 'pof');
-                  const pofEntry = createPOFFromRecoveryState(
-                    runId,
-                    runRoot,
-                    laneName,
-                    recoveryState,
-                    laneState,
-                    recoveryState.diagnosticInfo
-                  );
-                  savePOF(runId, pofDir, pofEntry);
-                } catch (pofError: any) {
-                  logger.warn(`[${laneName}] Failed to save POF: ${pofError.message}`);
-                }
-              }
-            } else if (analysis.action === RecoveryAction.SEND_GIT_GUIDANCE) {
-              // Send guidance message to agent for git issues
-              const interventionPath = safeJoin(laneRunDirs[laneName]!, 'intervention.txt');
-              
-              // Determine which guidance to send based on the failure type
-              let guidance: string;
-              if (analysis.type === FailureType.GIT_PUSH_REJECTED) {
-                guidance = getGitPushFailureGuidance();
-              } else if (analysis.type === FailureType.MERGE_CONFLICT) {
-                guidance = getMergeConflictGuidance();
-              } else {
-                guidance = getGitErrorGuidance(analysis.message);
-              }
-              
-              try {
-                fs.writeFileSync(interventionPath, guidance);
-                info.lastActivity = now;
-                logger.info(`[${laneName}] Sent git issue guidance to agent`);
-              } catch (e: any) {
-                logger.error(`[${laneName}] Failed to send guidance: ${e.message}`);
-              }
+            
+            // Handle special case: RUN_DOCTOR needs async operations
+            if (analysis.action === RecoveryAction.RUN_DOCTOR) {
+              await handleDoctorDiagnostics(
+                laneName, 
+                laneRunDirs[laneName]!, 
+                runId, 
+                runRoot, 
+                stallService, 
+                info.child
+              );
             }
+            
+            // Sync restartCount back to lane info (for restart logic in process exit handler)
+            lane.restartCount = stallService.getRestartCount(laneName);
           }
         }
         continue;
@@ -1084,8 +976,11 @@ export async function orchestrate(tasksDir: string, options: {
         running.delete(finished.name);
         exitCodes[finished.name] = finished.code;
         
-        // Unregister from auto-recovery manager
-        autoRecoveryManager.unregisterLane(finished.name);
+        // Get stall state before unregistering
+        const stallPhase = stallService.getPhase(finished.name);
+        
+        // Unregister from stall detection service
+        stallService.unregisterLane(finished.name);
         
         if (finished.code === 0) {
           completedLanes.add(finished.name);
@@ -1115,8 +1010,8 @@ export async function orchestrate(tasksDir: string, options: {
             logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
           }
         } else {
-          // Check if it was a restart request
-          if (info.stallPhase === 2) {
+          // Check if it was a restart request (RESTART_REQUESTED phase)
+          if (stallPhase === StallPhase.RESTART_REQUESTED) {
             logger.info(`🔄 Lane ${finished.name} is being restarted due to stall...`);
             
             // Update startIndex from current state to resume from the same task
@@ -1137,7 +1032,7 @@ export async function orchestrate(tasksDir: string, options: {
           failedLanes.add(finished.name);
           
           let errorMsg = 'Process exited with non-zero code';
-          if (info.stallPhase === 3) {
+          if (stallPhase >= StallPhase.DIAGNOSED) {
             errorMsg = 'Stopped due to repeated stall';
           } else if (info.logManager) {
             const lastError = info.logManager.getLastError();

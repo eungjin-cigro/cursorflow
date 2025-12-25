@@ -124,13 +124,10 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Get short time format (HH:MM)
+   * Get short time format (HH:MM:SS)
    */
   private getShortTime(): string {
-    const now = new Date();
-    const h = now.getHours().toString().padStart(2, '0');
-    const m = now.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
+    return new Date().toLocaleTimeString('en-US', { hour12: false });
   }
 
   /**
@@ -313,11 +310,21 @@ export class EnhancedLogManager {
       }
       
       // Non-JSON line - write as-is with short timestamp and lane-task label
-      const ts = this.getShortTime();
-      const label = this.getLaneTaskLabel();
       const cleanLine = stripAnsi(trimmed);
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        this.writeToReadableLog(`[${ts}] [${label}] ${cleanLine}\n`);
+        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
+        const label = this.getLaneTaskLabel();
+        
+        if (hasTimestamp) {
+          // If already has timestamp, just ensure label is present
+          const formatted = cleanLine.includes(`[${label}]`) 
+            ? cleanLine 
+            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
+          this.writeToReadableLog(`${formatted}\n`);
+        } else {
+          const ts = this.getShortTime();
+          this.writeToReadableLog(`[${ts}] [${label}] ${cleanLine}\n`);
+        }
       }
     }
   }
@@ -433,9 +440,18 @@ export class EnhancedLogManager {
     for (const line of lines) {
       const cleanLine = stripAnsi(line).trim();
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const ts = this.getShortTime();
+        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
         const label = this.getLaneTaskLabel();
-        this.writeToReadableLog(`[${ts}] [${label}] ❌ ERR ${cleanLine}\n`);
+        
+        if (hasTimestamp) {
+          const formatted = cleanLine.includes(`[${label}]`) 
+            ? cleanLine 
+            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}] ❌ ERR`);
+          this.writeToReadableLog(`${formatted}\n`);
+        } else {
+          const ts = this.getShortTime();
+          this.writeToReadableLog(`[${ts}] [${label}] ❌ ERR ${cleanLine}\n`);
+        }
       }
     }
   }
