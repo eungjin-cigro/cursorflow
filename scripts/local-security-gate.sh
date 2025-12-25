@@ -12,6 +12,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# 에러 발생 시 처리
+error_handler() {
+    local exit_code=$?
+    local line_number=$1
+    echo -e "\n${RED}❌ Error: Security gate failed at line ${line_number} with exit code ${exit_code}.${NC}"
+    exit $exit_code
+}
+
+trap 'error_handler $LINENO' ERR
+
 echo -e "${BLUE}🔍 Starting Local Security Gate...${NC}"
 
 # 1. 의존성 취약점 검사 (pnpm or npm audit)

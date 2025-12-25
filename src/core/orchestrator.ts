@@ -87,6 +87,26 @@ interface RunningLaneInfo {
 }
 
 /**
+ * Log the tail of a file
+ */
+function logFileTail(filePath: string, lines: number = 10): void {
+  if (!fs.existsSync(filePath)) return;
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const allLines = content.split('\n');
+    const tail = allLines.slice(-lines).filter(l => l.trim());
+    if (tail.length > 0) {
+      logger.error(`  Last ${tail.length} lines of log:`);
+      for (const line of tail) {
+        logger.error(`    ${line}`);
+      }
+    }
+  } catch (e) {
+    // Ignore log reading errors
+  }
+}
+
+/**
  * Spawn a lane process
  */
 export function spawnLane({ 
@@ -651,9 +671,28 @@ export async function orchestrate(tasksDir: string, options: {
     printLaneStatus(lanes, laneRunDirs);
   }, options.pollInterval || 60000);
   
+  // Handle process interruption
+  const sigIntHandler = () => {
+    logger.warn('\n⚠️  Orchestration interrupted! Stopping all lanes...');
+    for (const [name, info] of running.entries()) {
+      logger.info(`Stopping lane: ${name}`);
+      try {
+        info.child.kill('SIGTERM');
+      } catch {
+        // Ignore kill errors
+      }
+    }
+    printLaneStatus(lanes, laneRunDirs);
+    process.exit(130);
+  };
+  
+  process.on('SIGINT', sigIntHandler);
+  process.on('SIGTERM', sigIntHandler);
+  
   let lastStallCheck = Date.now();
   
-  while (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length || (blockedLanes.size > 0 && running.size === 0)) {
+  try {
+    while (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length || (blockedLanes.size > 0 && running.size === 0)) {
     // 1. Identify lanes ready to start
     const readyToStart = lanes.filter(lane => {
       // Not already running or completed or failed or blocked
@@ -1028,72 +1067,90 @@ export async function orchestrate(tasksDir: string, options: {
           }
         }
         continue;
-      }
-
-      const finished = result;
-      const info = running.get(finished.name)!;
-      running.delete(finished.name);
-      exitCodes[finished.name] = finished.code;
-      
-      // Unregister from auto-recovery manager
-      autoRecoveryManager.unregisterLane(finished.name);
-      
-      if (finished.code === 0) {
-        completedLanes.add(finished.name);
-        events.emit('lane.completed', {
-          laneName: finished.name,
-          exitCode: finished.code,
-        });
-      } else if (finished.code === 2) {
-        // Blocked by dependency
-        const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
-        const state = loadState<LaneState>(statePath);
-        
-        if (state && state.dependencyRequest) {
-          blockedLanes.set(finished.name, state.dependencyRequest);
-          const lane = lanes.find(l => l.name === finished.name);
-          if (lane) {
-            lane.startIndex = Math.max(0, state.currentTaskIndex - 1); // Task was blocked, retry it
-          }
-          
-          events.emit('lane.blocked', {
-            laneName: finished.name,
-            dependencyRequest: state.dependencyRequest,
-          });
-          logger.warn(`Lane ${finished.name} is blocked on dependency change request`);
-        } else {
-          failedLanes.add(finished.name);
-          logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
-        }
       } else {
-        // Check if it was a restart request
-        if (info.stallPhase === 2) {
-          logger.info(`🔄 Lane ${finished.name} is being restarted due to stall...`);
-          
-          // Update startIndex from current state to resume from the same task
+        const finished = result;
+        const info = running.get(finished.name)!;
+        running.delete(finished.name);
+        exitCodes[finished.name] = finished.code;
+        
+        // Unregister from auto-recovery manager
+        autoRecoveryManager.unregisterLane(finished.name);
+        
+        if (finished.code === 0) {
+          completedLanes.add(finished.name);
+          events.emit('lane.completed', {
+            laneName: finished.name,
+            exitCode: finished.code,
+          });
+        } else if (finished.code === 2) {
+          // Blocked by dependency
           const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
           const state = loadState<LaneState>(statePath);
-          if (state) {
+          
+          if (state && state.dependencyRequest) {
+            blockedLanes.set(finished.name, state.dependencyRequest);
             const lane = lanes.find(l => l.name === finished.name);
             if (lane) {
-              lane.startIndex = state.currentTaskIndex;
+              lane.startIndex = Math.max(0, state.currentTaskIndex - 1); // Task was blocked, retry it
+            }
+            
+            events.emit('lane.blocked', {
+              laneName: finished.name,
+              dependencyRequest: state.dependencyRequest,
+            });
+            logger.warn(`Lane ${finished.name} is blocked on dependency change request`);
+          } else {
+            failedLanes.add(finished.name);
+            logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
+          }
+        } else {
+          // Check if it was a restart request
+          if (info.stallPhase === 2) {
+            logger.info(`🔄 Lane ${finished.name} is being restarted due to stall...`);
+            
+            // Update startIndex from current state to resume from the same task
+            const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
+            const state = loadState<LaneState>(statePath);
+            if (state) {
+              const lane = lanes.find(l => l.name === finished.name);
+              if (lane) {
+                lane.startIndex = state.currentTaskIndex;
+              }
+            }
+            
+            // Note: we don't add to failedLanes or completedLanes, 
+            // so it will be eligible to start again in the next iteration.
+            continue; 
+          }
+
+          failedLanes.add(finished.name);
+          
+          let errorMsg = 'Process exited with non-zero code';
+          if (info.stallPhase === 3) {
+            errorMsg = 'Stopped due to repeated stall';
+          } else if (info.logManager) {
+            const lastError = info.logManager.getLastError();
+            if (lastError) {
+              errorMsg = `Process failed: ${lastError}`;
             }
           }
-          
-          // Note: we don't add to failedLanes or completedLanes, 
-          // so it will be eligible to start again in the next iteration.
-          continue; 
-        }
 
-        failedLanes.add(finished.name);
-        events.emit('lane.failed', {
-          laneName: finished.name,
-          exitCode: finished.code,
-          error: info.stallPhase === 3 ? 'Stopped due to repeated stall' : 'Process exited with non-zero code',
-        });
+          logger.error(`[${finished.name}] Lane failed with exit code ${finished.code}: ${errorMsg}`);
+          
+          // Log log tail for visibility
+          if (info.logPath) {
+            logFileTail(info.logPath, 15);
+          }
+
+          events.emit('lane.failed', {
+            laneName: finished.name,
+            exitCode: finished.code,
+            error: errorMsg,
+          });
+        }
+        
+        printLaneStatus(lanes, laneRunDirs);
       }
-      
-      printLaneStatus(lanes, laneRunDirs);
     } else {
       // Nothing running. Are we blocked?
       
@@ -1130,10 +1187,14 @@ export async function orchestrate(tasksDir: string, options: {
         // All finished
         break;
       }
+      }
     }
+  } finally {
+    clearInterval(monitorInterval);
+    process.removeListener('SIGINT', sigIntHandler);
+    process.removeListener('SIGTERM', sigIntHandler);
   }
   
-  clearInterval(monitorInterval);
   printLaneStatus(lanes, laneRunDirs);
   
   // Check for failures

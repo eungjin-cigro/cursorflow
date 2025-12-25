@@ -28,13 +28,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Run linter (if available)
-        run: pnpm run lint || echo "No linter configured"
-        continue-on-error: true
+      - name: Build project
+        run: pnpm run build
 
-      - name: Run tests (if available)
-        run: pnpm test || echo "No tests configured"
-        continue-on-error: true
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Run comprehensive CLI tests
+        run: pnpm run test:quick
 
       - name: Check package validity
         run: pnpm pack

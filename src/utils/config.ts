@@ -6,6 +6,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as git from './git';
 import { CursorFlowConfig } from './types';
 import { safeJoin } from './path';
 export { CursorFlowConfig };
@@ -167,6 +168,7 @@ export function validateConfig(config: CursorFlowConfig): boolean {
  */
 export function createDefaultConfig(projectRoot: string, force = false): string {
   const configPath = safeJoin(projectRoot, 'cursorflow.config.js');
+  const currentBranch = git.getCurrentBranch() || 'main';
   
   const template = `module.exports = {
   // Directory configuration
@@ -175,7 +177,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   pofDir: '_cursorflow/pof',
   
   // Git configuration
-  baseBranch: git.getCurrentBranch() || 'main',
+  baseBranch: '${currentBranch}',
   branchPrefix: 'feature/',
   
   // Execution configuration

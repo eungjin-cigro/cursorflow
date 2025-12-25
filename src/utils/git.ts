@@ -132,6 +132,10 @@ function filterGitStderr(stderr: string): string {
 export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
   
+  if (process.env['DEBUG_GIT']) {
+    console.log(`[DEBUG_GIT] Running: git ${args.join(' ')} (cwd: ${cwd || process.cwd()})`);
+  }
+  
   try {
     const stdioMode = silent ? 'pipe' : ['inherit', 'inherit', 'pipe'];
 
@@ -141,6 +145,13 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
       stdio: stdioMode as any,
     });
     
+    if (result.error) {
+      if (!silent) {
+        console.error(`[ERROR_GIT] Failed to execute git command: ${result.error.message}`);
+      }
+      throw result.error;
+    }
+
     if (!silent && result.stderr) {
       const filteredStderr = filterGitStderr(result.stderr);
       if (filteredStderr) {
@@ -149,12 +160,16 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
     }
     
     if (result.status !== 0 && !silent) {
-      throw new Error(`Git command failed: git ${args.join(' ')}\n${result.stderr || ''}`);
+      const errorMsg = `Git command failed (exit code ${result.status}): git ${args.join(' ')}\n${result.stderr || ''}`;
+      throw new Error(errorMsg);
     }
     
     return result.stdout ? result.stdout.trim() : '';
   } catch (error) {
     if (silent) {
+      if (process.env['DEBUG_GIT']) {
+        console.error(`[DEBUG_GIT] Command failed (silent mode): ${error instanceof Error ? error.message : String(error)}`);
+      }
       return '';
     }
     throw error;
@@ -167,18 +182,28 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
 export function runGitResult(args: string[], options: GitRunOptions = {}): GitResult {
   const { cwd } = options;
   
+  if (process.env['DEBUG_GIT']) {
+    console.log(`[DEBUG_GIT] Running: git ${args.join(' ')} (result mode, cwd: ${cwd || process.cwd()})`);
+  }
+
   const result = spawnSync('git', args, {
     cwd: cwd || process.cwd(),
     encoding: 'utf8',
     stdio: 'pipe',
   });
   
-  return {
+  const gitResult = {
     exitCode: result.status ?? 1,
     stdout: (result.stdout || '').toString().trim(),
     stderr: (result.stderr || '').toString().trim(),
     success: result.status === 0,
   };
+
+  if (process.env['DEBUG_GIT'] && !gitResult.success) {
+    console.error(`[DEBUG_GIT] Command failed: git ${args.join(' ')}\nstderr: ${gitResult.stderr}`);
+  }
+
+  return gitResult;
 }
 
 /**

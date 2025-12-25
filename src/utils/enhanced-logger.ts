@@ -1024,7 +1024,7 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Close all log files
+   * Close all log files and ensure all data is flushed to disk
    */
   public close(): void {
     // Flush transform stream
@@ -1051,43 +1051,84 @@ export class EnhancedLogManager {
 `;
     
     if (this.cleanLogFd !== null) {
-      fs.writeSync(this.cleanLogFd, endMarker);
-      fs.closeSync(this.cleanLogFd);
+      try {
+        fs.writeSync(this.cleanLogFd, endMarker);
+        fs.fsyncSync(this.cleanLogFd);
+        fs.closeSync(this.cleanLogFd);
+      } catch {}
       this.cleanLogFd = null;
     }
     
     if (this.rawLogFd !== null) {
-      fs.writeSync(this.rawLogFd, endMarker);
-      fs.closeSync(this.rawLogFd);
+      try {
+        fs.writeSync(this.rawLogFd, endMarker);
+        fs.fsyncSync(this.rawLogFd);
+        fs.closeSync(this.rawLogFd);
+      } catch {}
       this.rawLogFd = null;
     }
     
     if (this.absoluteRawLogFd !== null) {
-      fs.closeSync(this.absoluteRawLogFd);
+      try {
+        fs.fsyncSync(this.absoluteRawLogFd);
+        fs.closeSync(this.absoluteRawLogFd);
+      } catch {}
       this.absoluteRawLogFd = null;
     }
     
     if (this.jsonLogFd !== null) {
-      this.writeJsonEntry({
-        timestamp: new Date().toISOString(),
-        level: 'session',
-        source: 'system',
-        lane: this.session.laneName,
-        message: 'Session ended',
-        metadata: {
-          sessionId: this.session.id,
-          duration: Date.now() - this.session.startTime,
-        },
-      });
-      fs.closeSync(this.jsonLogFd);
+      try {
+        this.writeJsonEntry({
+          timestamp: new Date().toISOString(),
+          level: 'session',
+          source: 'system',
+          lane: this.session.laneName,
+          message: 'Session ended',
+          metadata: {
+            sessionId: this.session.id,
+            duration: Date.now() - this.session.startTime,
+          },
+        });
+        fs.fsyncSync(this.jsonLogFd);
+        fs.closeSync(this.jsonLogFd);
+      } catch {}
       this.jsonLogFd = null;
     }
     
     // Close readable log
     if (this.readableLogFd !== null) {
-      fs.writeSync(this.readableLogFd, endMarker);
-      fs.closeSync(this.readableLogFd);
+      try {
+        fs.writeSync(this.readableLogFd, endMarker);
+        fs.fsyncSync(this.readableLogFd);
+        fs.closeSync(this.readableLogFd);
+      } catch {}
       this.readableLogFd = null;
+    }
+  }
+
+  /**
+   * Extract the last error message from the clean log file
+   */
+  public getLastError(): string | null {
+    try {
+      if (!fs.existsSync(this.cleanLogPath)) return null;
+      const content = fs.readFileSync(this.cleanLogPath, 'utf8');
+      // Look for lines containing error markers
+      const lines = content.split('\n').filter(l => 
+        l.includes('[ERROR]') || 
+        l.includes('❌') || 
+        l.includes('error:') || 
+        l.includes('Fatal') ||
+        l.includes('fail')
+      );
+      if (lines.length === 0) {
+        // Fallback to last 5 lines if no specific error marker found
+        const allLines = content.split('\n').filter(l => l.trim());
+        return allLines.slice(-5).join('\n');
+      }
+      return lines[lines.length - 1]!.trim();
+    } catch {
+      return null;
     }
   }
 

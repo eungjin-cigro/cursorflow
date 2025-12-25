@@ -12,6 +12,21 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 에러 발생 시 처리
+error_handler() {
+    local exit_code=$?
+    local line_number=$1
+    echo -e "\n${RED}Error: Command failed at line ${line_number} with exit code ${exit_code}.${NC}"
+    
+    # Git 상태가 변경되었을 수 있으므로 안내
+    if [[ -n $(git status -s) ]]; then
+        echo -e "${YELLOW}Note: Your working directory has uncommitted changes.${NC}"
+    fi
+    exit $exit_code
+}
+
+trap 'error_handler $LINENO' ERR
+
 # 버전 타입 확인
 VERSION_TYPE=${1:-patch}
 

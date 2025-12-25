@@ -70,9 +70,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Run tests (if available)
-        run: pnpm test || echo "No tests configured"
-        continue-on-error: true
+      - name: Build project
+        run: pnpm run build
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Run comprehensive CLI tests
+        run: pnpm run test:quick
 
   publish:
     needs: [security-gate, test]  # 보안 검사와 테스트 모두 통과 필요

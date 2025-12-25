@@ -40,8 +40,16 @@
     "cf:logs": "node dist/cli/index.js logs",
     "cf:runs": "node dist/cli/index.js runs",
     "cf:models": "node dist/cli/index.js models",
-    "test:lifecycle": "tests/scripts/test-real-cursor-lifecycle.sh",
-    "test:comprehensive": "tests/scripts/test-comprehensive-lifecycle.sh",
+    "test:all": "tests/scripts/run-all-tests.sh",
+    "test:quick": "tests/scripts/run-all-tests.sh --quick",
+    "test:cli": "tests/scripts/run-all-tests.sh --module cli-doctor --module cli-commands",
+    "test:prepare": "tests/scripts/run-all-tests.sh --module prepare",
+    "test:validation": "tests/scripts/run-all-tests.sh --module validation",
+    "test:templates": "tests/scripts/run-all-tests.sh --module templates",
+    "test:git": "tests/scripts/run-all-tests.sh --module git",
+    "test:integration": "tests/scripts/run-all-tests.sh --module integration-lifecycle --module integration-logging --module integration-parallel",
+    "test:lifecycle": "tests/scripts/run-all-tests.sh --module integration-lifecycle",
+    "prerelease": "npm run build && npm run test && npm run test:quick && npm run security:check",
     "prepare": "husky"
   },
   "keywords": [
