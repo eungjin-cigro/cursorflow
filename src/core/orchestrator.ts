@@ -694,6 +694,23 @@ export async function orchestrate(tasksDir: string, options: {
       
       logger.info(`Lane started: ${lane.name}${lane.startIndex ? ` (resuming from ${lane.startIndex})` : ''}`);
       
+      const now = Date.now();
+      // Pre-register lane in running map so onActivity can find it immediately
+      running.set(lane.name, {
+        child: {} as any, // Placeholder, will be replaced below
+        logManager: undefined,
+        logPath: '',
+        lastActivity: now,
+        lastStateUpdate: now,
+        stallPhase: 0,
+        taskStartTime: now,
+        lastOutput: '',
+        statePath: laneStatePath,
+        bytesReceived: 0,
+        lastBytesCheck: 0,
+        continueSignalsSent: 0,
+      });
+
       let lastOutput = '';
       const spawnResult = spawnLane({
         laneName: lane.name,
@@ -708,15 +725,17 @@ export async function orchestrate(tasksDir: string, options: {
         onActivity: () => {
           const info = running.get(lane.name);
           if (info) {
-            const now = Date.now();
-            info.lastActivity = now;
-            // Also reset progress tracking when there's activity (THNK/TOOL events)
-            // This prevents STALL_NO_PROGRESS from firing when agent is actively working
-            info.lastStateUpdate = now;
-            info.stallPhase = 0; // Reset stall phase since agent is responding
+            const actNow = Date.now();
+            info.lastActivity = actNow;
+            info.lastStateUpdate = actNow;
+            info.stallPhase = 0;
           }
         }
       });
+      
+      // Update with actual spawn result
+      const existingInfo = running.get(lane.name)!;
+      Object.assign(existingInfo, spawnResult);
       
       // Track last output and bytes received for long operation and stall detection
       if (spawnResult.child.stdout) {
@@ -744,20 +763,6 @@ export async function orchestrate(tasksDir: string, options: {
           }
         });
       }
-      
-      const now = Date.now();
-      running.set(lane.name, {
-        ...spawnResult,
-        lastActivity: now,
-        lastStateUpdate: now,
-        stallPhase: 0,
-        taskStartTime: now,
-        lastOutput: '',
-        statePath: laneStatePath,
-        bytesReceived: 0,
-        lastBytesCheck: 0,
-        continueSignalsSent: 0,
-      });
       
       // Register lane with auto-recovery manager
       autoRecoveryManager.registerLane(lane.name);
@@ -797,6 +802,10 @@ export async function orchestrate(tasksDir: string, options: {
           const idleTime = now - info.lastActivity;
           const lane = lanes.find(l => l.name === laneName)!;
           
+          if (process.env['DEBUG_STALL']) {
+            logger.debug(`[${laneName}] Stall check: idle=${Math.round(idleTime/1000)}s, bytesDelta=${info.bytesReceived - info.lastBytesCheck}, phase=${info.stallPhase}`);
+          }
+
           // Check state file for progress updates
           let progressTime = 0;
           try {
@@ -1087,6 +1096,12 @@ export async function orchestrate(tasksDir: string, options: {
       printLaneStatus(lanes, laneRunDirs);
     } else {
       // Nothing running. Are we blocked?
+      
+      // Wait a bit to avoid busy-spin while waiting for dependencies or new slots
+      if (completedLanes.size + failedLanes.size + blockedLanes.size < lanes.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
       if (blockedLanes.size > 0 && autoResolve) {
         logger.section('🛠 Auto-Resolving Dependencies');
         

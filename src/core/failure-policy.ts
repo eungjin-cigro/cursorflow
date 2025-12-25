@@ -149,7 +149,14 @@ export function analyzeStall(context: StallContext, config: StallDetectionConfig
   
   // Check if this might be a long operation
   const isLongOperation = lastOutput && config.longOperationPatterns.some(p => p.test(lastOutput));
-  const effectiveIdleTimeout = isLongOperation ? config.longOperationGraceMs : config.idleTimeoutMs;
+  
+  // If it's a long operation but we've received 0 real bytes for a while, 
+  // reduce the grace period to avoid waiting forever for a hung process.
+  // We use 2x the normal idle timeout as a "sanity check" for silent long operations.
+  const silentLongOpCappedTimeout = config.idleTimeoutMs * 2;
+  const effectiveIdleTimeout = isLongOperation 
+    ? (bytesReceived === 0 ? Math.min(config.longOperationGraceMs, silentLongOpCappedTimeout) : config.longOperationGraceMs)
+    : config.idleTimeoutMs;
   
   // Check for task timeout
   if (taskStartTimeMs && (Date.now() - taskStartTimeMs) > config.taskTimeoutMs) {
