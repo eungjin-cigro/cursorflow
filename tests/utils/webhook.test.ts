@@ -30,7 +30,7 @@ describe('Webhook Utility', () => {
     ];
 
     registerWebhooks(webhooks);
-    events.emit('test.event', { data: 'hello' });
+    events.emit('test.event', { data: 'hello' }, 'test-run-id');
 
     // Wait for async webhook delivery
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -59,7 +59,7 @@ describe('Webhook Utility', () => {
     ];
 
     registerWebhooks(webhooks);
-    events.emit('test.event', { data: 'hello' });
+    events.emit('test.event', { data: 'hello' }, 'test-run-id');
 
     await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -87,7 +87,7 @@ describe('Webhook Utility', () => {
     ];
 
     registerWebhooks(webhooks);
-    events.emit('test.event', {});
+    events.emit('test.event', {}, 'test-run-id');
 
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(mockFetch).not.toHaveBeenCalled();
@@ -112,7 +112,7 @@ describe('Webhook Utility', () => {
     jest.useFakeTimers();
     
     // Trigger event
-    events.emit('retry.event', {});
+    events.emit('retry.event', {}, 'test-run-id');
     
     // First attempt happens in a promise microtask
     await Promise.resolve(); 

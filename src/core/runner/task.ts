@@ -59,7 +59,7 @@ export async function waitForTaskDependencies(
 /**
  * Merge branches from dependency lanes with safe merge and conflict pre-check
  */
-export async function mergeDependencyBranches(deps: string[], runDir: string, worktreeDir: string, pipelineBranch: string): Promise<void> {
+export async function mergeDependencyBranches(deps: string[], runDir: string, worktreeDir: string, pipelineBranch: string, runId: string): Promise<void> {
   if (!deps || deps.length === 0) return;
 
   const lanesRoot = path.dirname(runDir);
@@ -95,7 +95,8 @@ export async function mergeDependencyBranches(deps: string[], runDir: string, wo
           targetBranch: state.pipelineBranch,
           conflictingFiles: conflictCheck.conflictingFiles,
           preCheck: true,
-        });
+        }, runId);
+        
         
         throw new Error(`Pre-merge conflict check failed: ${conflictCheck.conflictingFiles.join(', ')}. Consider rebasing or resolving conflicts manually.`);
       }
@@ -137,6 +138,7 @@ export async function runTask({
   chatId,
   runDir,
   runRoot,
+  runId,
 }: {
   task: Task;
   config: RunnerConfig;
@@ -147,6 +149,7 @@ export async function runTask({
   chatId: string;
   runDir: string;
   runRoot?: string;
+  runId: string;
 }): Promise<TaskExecutionResult> {
   // Calculate runRoot if not provided (runDir is lanes/{laneName}/, runRoot is parent of lanes/)
   const calculatedRunRoot = runRoot || path.dirname(path.dirname(runDir));
@@ -162,7 +165,7 @@ export async function runTask({
     taskName: task.name,
     taskBranch,
     index,
-  });
+  }, runId);
 
   // Sync pipelineBranch with remote before starting
   logger.info(`🔄 Syncing ${pipelineBranch} with remote...`);
@@ -217,7 +220,7 @@ export async function runTask({
     taskName: task.name,
     model,
     promptLength: wrappedPrompt.length,
-  });
+  }, runId);
 
   const r1 = await cursorAgentSend({
     workspaceDir: worktreeDir,
@@ -238,7 +241,7 @@ export async function runTask({
     duration,
     responseLength: r1.resultText?.length || 0,
     error: r1.error,
-  });
+  }, runId);
 
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
     task: task.name,
@@ -250,7 +253,7 @@ export async function runTask({
       taskName: task.name,
       taskBranch,
       error: r1.error,
-    });
+    }, runId);
     return {
       taskName: task.name,
       taskBranch,
@@ -296,7 +299,7 @@ export async function runTask({
     taskName: task.name,
     taskBranch,
     status: 'FINISHED',
-  });
+  }, runId);
 
   return {
     taskName: task.name,

@@ -40,8 +40,9 @@ function validateTaskConfig(config: RunnerConfig): void {
 /**
  * Run all tasks in sequence
  */
-export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; skipPreflight?: boolean } = {}): Promise<TaskExecutionResult[]> {
+export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; skipPreflight?: boolean; runId?: string } = {}): Promise<TaskExecutionResult[]> {
   const startIndex = options.startIndex || 0;
+  const runId = options.runId || `run-${Date.now()}`;
   
   // Ensure paths are absolute before potentially changing directory
   runDir = path.resolve(runDir);
@@ -331,7 +332,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
           onTimeout: 'fail',
         });
         
-        await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch);
+        await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch, runId);
         
         state.status = 'running';
         state.waitingFor = [];
@@ -363,6 +364,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       taskBranch,
       chatId,
       runDir,
+      runId,
     });
     
     results.push(result);
@@ -385,7 +387,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         events.emit('lane.dependency_requested', {
           laneName: state.label,
           dependencyRequest: result.dependencyRequest,
-        });
+        }, runId);
       }
       
       logger.warn('Task blocked on dependency change');
@@ -420,7 +422,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         pipelineBranch,
         conflictingFiles: conflictCheck.conflictingFiles,
         preCheck: true,
-      });
+      }, runId);
     }
     
     // Use safeMerge instead of plain merge for better error handling
