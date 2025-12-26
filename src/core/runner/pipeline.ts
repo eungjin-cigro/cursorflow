@@ -175,8 +175,25 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.info(`Worktree: ${worktreeDir}`);
   logger.info(`Tasks: ${config.tasks.length}`);
   
-  // Create worktree only if starting fresh and worktree doesn't exist
-  if (!fs.existsSync(worktreeDir)) {
+  // Check if worktree needs to be created or repaired
+  const worktreeNeedsCreation = !fs.existsSync(worktreeDir);
+  const worktreeIsInvalid = !worktreeNeedsCreation && !git.isValidWorktree(worktreeDir);
+  
+  if (worktreeIsInvalid) {
+    // Directory exists but is NOT a valid worktree - this can cause branch leakage!
+    // Clean it up and recreate
+    logger.warn(`⚠️ Directory exists but is not a valid worktree: ${worktreeDir}`);
+    logger.info(`   Cleaning up invalid directory and recreating worktree...`);
+    try {
+      git.cleanupInvalidWorktreeDir(worktreeDir);
+    } catch (e: any) {
+      logger.error(`Failed to cleanup invalid worktree directory: ${e.message}`);
+      throw new Error(`Cannot proceed: worktree directory is invalid and cleanup failed`);
+    }
+  }
+  
+  // Create worktree if it doesn't exist or was just cleaned up
+  if (worktreeNeedsCreation || worktreeIsInvalid) {
     // Use a simple retry mechanism for Git worktree creation to handle potential race conditions
     let retries = 3;
     let lastError: Error | null = null;
@@ -210,13 +227,13 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       throw new Error(`Failed to create Git worktree after retries: ${lastError.message}`);
     }
   } else {
-    // If it exists, ensure it's actually a worktree and on the right branch
+    // Worktree exists and is valid - reuse it
     logger.info(`Reusing existing worktree: ${worktreeDir}`);
     try {
       git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
     } catch (e) {
-      // If checkout fails, maybe the worktree is in a weird state. 
-      // For now, just log it. In a more robust impl, we might want to repair it.
+      // If checkout fails in a valid worktree, log warning but continue
+      // The worktree might be on a different branch that will be handled later
       logger.warn(`Failed to checkout branch ${pipelineBranch} in existing worktree: ${e}`);
     }
   }
@@ -477,20 +494,19 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir });
       git.push(flowBranch, { cwd: worktreeDir, setUpstream: true });
       
-      // 3. Delete temporary pipeline branch
-      logger.info(`🗑️ Deleting temporary pipeline branch: ${pipelineBranch}`);
+      // 3. Delete temporary pipeline branch (LOCAL ONLY)
+      // Keep remote branch for dependency lanes that may need to merge it!
+      logger.info(`🗑️ Deleting local pipeline branch: ${pipelineBranch}`);
       // Must be on another branch to delete pipelineBranch
       git.runGit(['checkout', flowBranch], { cwd: worktreeDir });
       git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true });
       
-      try {
-        git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true, remote: true });
-        logger.info(`   Deleted remote branch: origin/${pipelineBranch}`);
-      } catch {
-        // May not exist on remote or delete failed
-      }
+      // NOTE: We intentionally keep the remote pipeline branch alive
+      // because other lanes with dependsOn may need to merge it.
+      // The pipeline branch on remote serves as the "official" completion branch
+      // that dependency-tracking code in task.ts uses (via state.pipelineBranch).
       
-      logger.success(`✓ Flow branch '${flowBranch}' is now the only remaining branch.`);
+      logger.success(`✓ Flow branch '${flowBranch}' created. Remote pipeline branch preserved for dependencies.`);
     } catch (e) {
       logger.error(`❌ Failed during final consolidation: ${e}`);
     }
