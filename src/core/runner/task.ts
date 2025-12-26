@@ -137,7 +137,6 @@ export async function runTask({
   chatId,
   runDir,
   runRoot,
-  noGit = false,
 }: {
   task: Task;
   config: RunnerConfig;
@@ -148,7 +147,6 @@ export async function runTask({
   chatId: string;
   runDir: string;
   runRoot?: string;
-  noGit?: boolean;
 }): Promise<TaskExecutionResult> {
   // Calculate runRoot if not provided (runDir is lanes/{laneName}/, runRoot is parent of lanes/)
   const calculatedRunRoot = runRoot || path.dirname(path.dirname(runDir));
@@ -158,11 +156,7 @@ export async function runTask({
   
   logger.section(`[${index + 1}/${config.tasks.length}] ${task.name}`);
   logger.info(`Model: ${model}`);
-  if (noGit) {
-    logger.info('🚫 noGit mode: skipping branch operations');
-  } else {
-    logger.info(`Branch: ${taskBranch}`);
-  }
+  logger.info(`Branch: ${taskBranch}`);
   
   events.emit('task.started', {
     taskName: task.name,
@@ -170,32 +164,28 @@ export async function runTask({
     index,
   });
 
-  // Sync pipelineBranch with remote before starting (skip in noGit mode)
-  if (!noGit) {
-    logger.info(`🔄 Syncing ${pipelineBranch} with remote...`);
-    
-    // Fetch latest from remote
-    try {
-      git.runGit(['fetch', 'origin', pipelineBranch], { cwd: worktreeDir, silent: true });
-    } catch {
-      // Branch might not exist on remote yet - that's OK
-      logger.info(`  Branch ${pipelineBranch} not yet on remote, skipping sync`);
-    }
-    
-    // Try to fast-forward if behind
-    const syncResult = git.syncBranchWithRemote(pipelineBranch, { cwd: worktreeDir, createIfMissing: true });
-    if (syncResult.updated) {
-      logger.info(`  ✓ Updated ${pipelineBranch} with ${syncResult.behind || 0} new commits from remote`);
-    } else if (syncResult.error) {
-      logger.warn(`  ⚠️ Could not sync: ${syncResult.error}`);
-    }
+  // Sync pipelineBranch with remote before starting
+  logger.info(`🔄 Syncing ${pipelineBranch} with remote...`);
+  
+  // Fetch latest from remote
+  try {
+    git.runGit(['fetch', 'origin', pipelineBranch], { cwd: worktreeDir, silent: true });
+  } catch {
+    // Branch might not exist on remote yet - that's OK
+    logger.info(`  Branch ${pipelineBranch} not yet on remote, skipping sync`);
+  }
+  
+  // Try to fast-forward if behind
+  const syncResult = git.syncBranchWithRemote(pipelineBranch, { cwd: worktreeDir, createIfMissing: true });
+  if (syncResult.updated) {
+    logger.info(`  ✓ Updated ${pipelineBranch} with ${syncResult.behind || 0} new commits from remote`);
+  } else if (syncResult.error) {
+    logger.warn(`  ⚠️ Could not sync: ${syncResult.error}`);
   }
 
-  // Checkout task branch from pipeline branch (skip in noGit mode)
-  if (!noGit) {
-    logger.info(`🌿 Forking task branch: ${taskBranch} from ${pipelineBranch}`);
-    git.runGit(['checkout', '-B', taskBranch, pipelineBranch], { cwd: worktreeDir });
-  }
+  // Checkout task branch from pipeline branch
+  logger.info(`🌿 Forking task branch: ${taskBranch} from ${pipelineBranch}`);
+  git.runGit(['checkout', '-B', taskBranch, pipelineBranch], { cwd: worktreeDir });
   
   // Apply dependency permissions
   applyDependencyFilePermissions(worktreeDir, config.dependencyPolicy);
@@ -208,8 +198,7 @@ export async function runTask({
 
   // Wrap prompt with context, dependency results, and completion instructions
   const wrappedPrompt = wrapPrompt(task.prompt, config, { 
-    noGit, 
-    isWorktree: !noGit,
+    isWorktree: true,
     dependencyResults,
     worktreePath: worktreeDir,
     taskBranch,
@@ -297,10 +286,8 @@ export async function runTask({
     }
   }
   
-  // Push task branch (skip in noGit mode)
-  if (!noGit) {
-    git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
-  }
+  // Push task branch
+  git.push(taskBranch, { cwd: worktreeDir, setUpstream: true });
   
   // Save task result for dependency handoff
   saveTaskResult(runDir, index, task.name, r1.resultText || '');

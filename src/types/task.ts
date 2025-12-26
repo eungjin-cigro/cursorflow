@@ -17,6 +17,7 @@ export interface Task {
 
 export interface RunnerConfig {
   tasks: Task[];
+  dependsOn?: string[];
   pipelineBranch?: string;
   worktreeDir?: string;
   branchPrefix?: string;
@@ -25,7 +26,7 @@ export interface RunnerConfig {
   model?: string;
   dependencyPolicy: DependencyPolicy;
   /** Output format for cursor-agent (default: 'json') */
-  agentOutputFormat?: 'json' | 'plain';
+  agentOutputFormat?: 'json' | 'plain' | 'stream-json';
   /** Task execution timeout in milliseconds. Default: 600000 (10 minutes) */
   timeout?: number;
   /** 
@@ -34,12 +35,6 @@ export interface RunnerConfig {
    * Default: false
    */
   enableIntervention?: boolean;
-  /**
-   * Disable Git operations (worktree, branch, push, commit).
-   * Useful for testing or environments without Git remote.
-   * Default: false
-   */
-  noGit?: boolean;
   /**
    * Enable verbose Git logging.
    * Default: false

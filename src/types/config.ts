@@ -69,7 +69,7 @@ export interface CursorFlowConfig {
   maxConcurrentLanes: number;
   projectRoot: string;
   /** Output format for cursor-agent (default: 'json') */
-  agentOutputFormat: 'json' | 'plain';
+  agentOutputFormat: 'json' | 'plain' | 'stream-json';
   webhooks?: WebhookConfig[];
   /** Enhanced logging configuration */
   enhancedLogging?: Partial<EnhancedLogConfig>;

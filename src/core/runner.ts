@@ -36,7 +36,6 @@ if (require.main === module) {
   const startIdxIdx = args.indexOf('--start-index');
   const pipelineBranchIdx = args.indexOf('--pipeline-branch');
   const worktreeDirIdx = args.indexOf('--worktree-dir');
-  const noGit = args.includes('--no-git');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
   const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
@@ -102,7 +101,7 @@ if (require.main === module) {
   process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
   // Run tasks
-  runTasks(tasksFile, config, runDir, { startIndex, noGit })
+  runTasks(tasksFile, config, runDir, { startIndex })
     .then(() => {
       process.exit(0);
     })

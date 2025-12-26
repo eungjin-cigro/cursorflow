@@ -618,7 +618,7 @@ function validateBranchNames(
 /**
  * Status file to track when doctor was last run successfully.
  */
-const DOCTOR_STATUS_FILE = '.cursorflow/doctor-status.json';
+const DOCTOR_STATUS_FILE = '_cursorflow/doctor-status.json';
 
 export function saveDoctorStatus(repoRoot: string, report: DoctorReport): void {
   const statusPath = safeJoin(repoRoot, DOCTOR_STATUS_FILE);
@@ -720,6 +720,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
     }
   }
 
+  const repoRoot = resolveRepoRoot(cwd) || undefined;
+  context.repoRoot = repoRoot;
+  const gitCwd = repoRoot || cwd;
+
   // 1) Git repository checks
   if (!isInsideGitWorktree(cwd)) {
     addIssue(issues, {
@@ -735,10 +739,6 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 
     return { ok: false, issues, context };
   }
-
-  const repoRoot = resolveRepoRoot(cwd) || undefined;
-  context.repoRoot = repoRoot;
-  const gitCwd = repoRoot || cwd;
 
   if (!hasAtLeastOneCommit(gitCwd)) {
     addIssue(issues, {

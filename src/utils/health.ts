@@ -455,14 +455,6 @@ export async function preflightCheck(options: {
     blockers.push(`Git: ${gitHealth.message}`);
   }
 
-  // Check authentication
-  if (options.requireAuth !== false) {
-    const authHealth = await checkAuthHealth();
-    if (!authHealth.ok) {
-      blockers.push(`Authentication: ${authHealth.message}`);
-    }
-  }
-
   // Check Git remote (warning only unless required)
   const remoteHealth = await checkGitRemoteHealth(options.cwd);
   if (!remoteHealth.ok) {
@@ -470,6 +462,21 @@ export async function preflightCheck(options: {
       blockers.push(`Git remote: ${remoteHealth.message}`);
     } else {
       warnings.push(`Git remote: ${remoteHealth.message}`);
+    }
+  }
+
+  // Check worktrees
+  const worktreeHealth = await checkWorktrees(options.cwd);
+  if (!worktreeHealth.ok) {
+    warnings.push(`Worktrees: ${worktreeHealth.message}`);
+    recommendations.push('Run `cursorflow clean worktrees` to clean up orphaned worktrees');
+  }
+
+  // Check authentication
+  if (options.requireAuth !== false) {
+    const authHealth = await checkAuthHealth();
+    if (!authHealth.ok) {
+      blockers.push(`Authentication: ${authHealth.message}`);
     }
   }
 
@@ -484,13 +491,6 @@ export async function preflightCheck(options: {
   if (!lockHealth.ok) {
     warnings.push(`Locks: ${lockHealth.message}`);
     recommendations.push('Run `cursorflow clean locks` to remove stale locks');
-  }
-
-  // Check worktrees
-  const worktreeHealth = await checkWorktrees(options.cwd);
-  if (!worktreeHealth.ok) {
-    warnings.push(`Worktrees: ${worktreeHealth.message}`);
-    recommendations.push('Run `cursorflow clean worktrees` to clean up orphaned worktrees');
   }
 
   // Check system resources

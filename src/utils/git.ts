@@ -156,6 +156,7 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
       cwd: cwd || process.cwd(),
       encoding: 'utf8',
       stdio: stdioMode as any,
+      timeout: 30000, // 30 second timeout for all git operations
     });
     
     if (result.error) {
@@ -206,6 +207,7 @@ export function runGitResult(args: string[], options: GitRunOptions = {}): GitRe
     cwd: cwd || process.cwd(),
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: 30000, // 30 second timeout
   });
   
   const gitResult = {

@@ -32,7 +32,6 @@ export function wrapPrompt(
   prompt: string, 
   config: RunnerConfig, 
   options: { 
-    noGit?: boolean; 
     isWorktree?: boolean;
     dependencyResults?: DependencyResult[];
     worktreePath?: string;
@@ -40,18 +39,18 @@ export function wrapPrompt(
     pipelineBranch?: string;
   } = {}
 ): string {
-  const { noGit = false, isWorktree = true, dependencyResults = [], worktreePath, taskBranch, pipelineBranch } = options;
+  const { isWorktree = true, dependencyResults = [], worktreePath, taskBranch, pipelineBranch } = options;
   
   // 1. PREFIX: Environment & Worktree context
   let wrapped = `### 🛠 Environment & Context\n`;
   wrapped += `- **Workspace**: 당신은 독립된 **Git 워크트리** (프로젝트 루트)에서 작업 중입니다.\n`;
   wrapped += `- **CWD**: 현재 터미널과 작업 경로는 이미 워크트리 루트(\`${worktreePath || 'current'}\`)로 설정되어 있습니다.\n`;
   
-  if (taskBranch && !noGit) {
+  if (taskBranch) {
     wrapped += `- **Current Branch**: \`${taskBranch}\` (현재 작업 중인 브랜치)\n`;
     wrapped += `- **Branch Check**: 만약 브랜치가 다르다면 \`git checkout ${taskBranch}\`를 실행하세요.\n`;
   }
-  if (pipelineBranch && !noGit) {
+  if (pipelineBranch) {
     wrapped += `- **Base Branch**: \`${pipelineBranch}\` (이 작업의 기준이 되는 상위 브랜치)\n`;
   }
 
@@ -97,10 +96,6 @@ export function wrapPrompt(
   wrapped += `\n### 📦 Dependency Policy\n`;
   wrapped += `- allowDependencyChange: ${policy.allowDependencyChange}\n`;
   wrapped += `- lockfileReadOnly: ${policy.lockfileReadOnly}\n`;
-  
-  if (noGit) {
-    wrapped += `- NO_GIT_MODE: Git 명령어를 사용하지 마세요. 파일 수정만 가능합니다.\n`;
-  }
 
   wrapped += `\n**📦 Dependency Change Rules:**\n`;
   wrapped += `1. 코드를 수정하기 전, 의존성 변경이 필요한지 **먼저** 판단하세요.\n`;
@@ -124,16 +119,14 @@ export function wrapPrompt(
   wrapped += `\n### 📝 Task Completion Requirements\n`;
   wrapped += `**반드시 다음 순서로 작업을 마무리하세요 (매우 중요):**\n\n`;
   
-  if (!noGit) {
-    wrapped += `1. **변경 사항 확인**: \`git status\`와 \`git diff\`로 수정된 내용을 최종 확인하세요.\n`;
-    wrapped += `2. **Git Commit & Push** (필수!):\n`;
-    wrapped += `   \`\`\`bash\n`;
-    wrapped += `   git add -A\n`;
-    wrapped += `   git commit -m "feat: <작업 내용 요약>"\n`;
-    wrapped += `   git push origin HEAD\n`;
-    wrapped += `   \`\`\`\n`;
-    wrapped += `   ⚠️ **주의**: 커밋과 푸시를 생략하면 오케스트레이터가 변경 사항을 인식하지 못하며 작업이 손실됩니다.\n\n`;
-  }
+  wrapped += `1. **변경 사항 확인**: \`git status\`와 \`git diff\`로 수정된 내용을 최종 확인하세요.\n`;
+  wrapped += `2. **Git Commit & Push** (필수!):\n`;
+  wrapped += `   \`\`\`bash\n`;
+  wrapped += `   git add -A\n`;
+  wrapped += `   git commit -m "feat: <작업 내용 요약>"\n`;
+  wrapped += `   git push origin HEAD\n`;
+  wrapped += `   \`\`\`\n`;
+  wrapped += `   ⚠️ **주의**: 커밋과 푸시를 생략하면 오케스트레이터가 변경 사항을 인식하지 못하며 작업이 손실됩니다.\n\n`;
   
   wrapped += `3. **최종 요약**: 작업 완료 후 아래 형식을 포함하여 요약해 주세요:\n`;
   wrapped += `   - **수정된 파일**: [파일명1, 파일명2, ...]\n`;
