@@ -254,6 +254,7 @@ export class StallDetectionService {
   
   /**
    * 싱글톤 인스턴스 획득
+   * @deprecated Use createStallDetectionService() for multi-flow scenarios
    */
   static getInstance(config?: Partial<StallDetectionConfig>): StallDetectionService {
     if (!StallDetectionService.instance) {
@@ -266,6 +267,7 @@ export class StallDetectionService {
   
   /**
    * 인스턴스 리셋 (테스트용)
+   * @deprecated Singleton pattern is being phased out
    */
   static resetInstance(): void {
     StallDetectionService.instance = null;
@@ -1038,6 +1040,7 @@ If you encountered a git error, resolve it and continue.`;
 
 /**
  * 싱글톤 인스턴스 획득 (간편 접근)
+ * @deprecated Use createStallDetectionService() for multi-flow scenarios
  */
 export function getStallService(config?: Partial<StallDetectionConfig>): StallDetectionService {
   return StallDetectionService.getInstance(config);
@@ -1045,6 +1048,7 @@ export function getStallService(config?: Partial<StallDetectionConfig>): StallDe
 
 /**
  * 인스턴스 리셋 (테스트용)
+ * @deprecated Singleton pattern is being phased out
  */
 export function resetStallService(): void {
   StallDetectionService.resetInstance();
