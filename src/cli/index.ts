@@ -28,6 +28,7 @@ const COMMANDS: Record<string, CommandFn> = {
   logs: require('./logs'),
   tasks: require('./tasks'),
   stop: require('./stop'),
+  api: require('./api'),
   setup: require('./setup-commands').main,
   'setup-commands': require('./setup-commands').main,
 };
@@ -61,6 +62,7 @@ function printHelp(): void {
   \x1b[33mclean\x1b[0m <type> [options]       Clean branches/worktrees/logs/tasks
   \x1b[33msignal\x1b[0m <lane> <msg>          Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]             List available AI models
+  \x1b[33mapi\x1b[0m [options]                Start backend API server
 
 \x1b[1mLEGACY\x1b[0m
   \x1b[33mprepare\x1b[0m <feature> [opts]     (deprecated) Use 'new' + 'add' instead
