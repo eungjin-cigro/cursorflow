@@ -17,17 +17,26 @@ describe('CLI stop command', () => {
   const mockedLoadConfig = config.loadConfig as jest.Mock;
   const mockedGetLogsDir = config.getLogsDir as jest.Mock;
   const mockedReadline = readline as jest.Mocked<typeof readline>;
+  
+  const originalCwd = process.cwd();
+  let chdirSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockedLoadConfig.mockReturnValue({ projectRoot: '/mock' });
-    mockedGetLogsDir.mockReturnValue('/mock/logs');
+    // Mock process.chdir to avoid ENOENT error
+    chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => {});
+    mockedLoadConfig.mockReturnValue({ projectRoot: originalCwd });
+    mockedGetLogsDir.mockReturnValue(`${originalCwd}/_cursorflow/logs`);
     
     // Default confirmation to yes
     mockedReadline.createInterface.mockReturnValue({
       question: jest.fn().mockImplementation((_query, cb) => cb('y')),
       close: jest.fn(),
     } as any);
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
   });
 
   test('stops all runs when no args provided', async () => {

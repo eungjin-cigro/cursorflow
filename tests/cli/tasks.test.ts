@@ -47,7 +47,7 @@ describe('CLI tasks command', () => {
 
   test('prints message when no tasks found', async () => {
     await tasks([]);
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('No tasks found'));
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('No flows or tasks found'));
   });
 
   test('lists tasks correctly', async () => {
@@ -143,7 +143,7 @@ describe('CLI tasks command', () => {
 
     await expect(tasks(['non-existent'])).rejects.toThrow('process.exit called');
 
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Task not found'));
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Flow or task not found'));
     expect(processExitSpy).toHaveBeenCalledWith(1);
     processExitSpy.mockRestore();
   });
