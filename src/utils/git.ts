@@ -265,13 +265,71 @@ export function isGitRepo(cwd?: string): boolean {
 }
 
 /**
- * Check if worktree exists
+ * Check if worktree exists in Git's worktree list
  */
 export function worktreeExists(worktreePath: string, cwd?: string): boolean {
   const result = runGitResult(['worktree', 'list'], { cwd });
   if (!result.success) return false;
   
   return result.stdout.includes(worktreePath);
+}
+
+/**
+ * Check if a directory is a valid Git worktree (not just a regular directory)
+ * This prevents accidental checkout in the main repository when the worktree
+ * directory exists but is not properly registered as a worktree.
+ */
+export function isValidWorktree(dirPath: string): boolean {
+  // 1. Directory must exist
+  if (!fs.existsSync(dirPath)) {
+    return false;
+  }
+  
+  // 2. Check if Git recognizes this as a worktree by checking .git file
+  // In a worktree, .git is a file (not a directory) pointing to the main repo's .git/worktrees/
+  const dotGitPath = path.join(dirPath, '.git');
+  if (!fs.existsSync(dotGitPath)) {
+    return false;
+  }
+  
+  try {
+    const stat = fs.statSync(dotGitPath);
+    
+    // In worktrees, .git is a FILE containing "gitdir: /path/to/.git/worktrees/..."
+    // In the main repo, .git is a DIRECTORY
+    if (stat.isDirectory()) {
+      // This is the main repository, not a worktree
+      return false;
+    }
+    
+    // Read the .git file to verify it points to a valid worktree
+    const content = fs.readFileSync(dotGitPath, 'utf8').trim();
+    if (!content.startsWith('gitdir:')) {
+      return false;
+    }
+    
+    // Verify the gitdir path exists
+    const gitdirPath = content.replace('gitdir:', '').trim();
+    return fs.existsSync(gitdirPath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove a directory that was supposed to be a worktree but isn't valid
+ * Used to clean up orphaned/corrupted worktree directories before recreation
+ */
+export function cleanupInvalidWorktreeDir(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) return;
+  
+  // Only remove if it's NOT a valid worktree (safety check)
+  if (isValidWorktree(dirPath)) {
+    throw new Error(`Cannot cleanup: ${dirPath} is a valid worktree`);
+  }
+  
+  // Remove the directory recursively
+  fs.rmSync(dirPath, { recursive: true, force: true });
 }
 
 /**

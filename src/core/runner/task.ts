@@ -79,11 +79,15 @@ export async function mergeDependencyBranches(deps: string[], runDir: string, wo
       
       logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
       
-      // Ensure we have the latest
+      // Ensure we have the latest from remote
       git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
       
+      // Use the remote ref for merging (origin/<branch>) since dependency branches
+      // are pushed to remote by other lanes and may not exist as local branches
+      const remoteBranchRef = `origin/${state.pipelineBranch}`;
+      
       // Pre-check for conflicts before attempting merge
-      const conflictCheck = git.checkMergeConflict(state.pipelineBranch, { cwd: worktreeDir });
+      const conflictCheck = git.checkMergeConflict(remoteBranchRef, { cwd: worktreeDir });
       
       if (conflictCheck.willConflict) {
         logger.warn(`⚠️ Pre-check: Merge conflict detected with ${laneName}`);
@@ -100,8 +104,8 @@ export async function mergeDependencyBranches(deps: string[], runDir: string, wo
         throw new Error(`Pre-merge conflict check failed: ${conflictCheck.conflictingFiles.join(', ')}. Consider rebasing or resolving conflicts manually.`);
       }
       
-      // Use safe merge with conflict detection
-      const mergeResult = git.safeMerge(state.pipelineBranch, {
+      // Use safe merge with conflict detection - merge from remote ref
+      const mergeResult = git.safeMerge(remoteBranchRef, {
         cwd: worktreeDir,
         noFf: true,
         message: `chore: merge task dependency from ${laneName}`,
