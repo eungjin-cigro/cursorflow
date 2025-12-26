@@ -178,6 +178,7 @@ async function handleDoctorDiagnostics(
         continueSignalsSent: stallState.continueSignalCount,
         lastStageChangeTime: stallState.lastPhaseChangeTime,
         isLongOperation: stallState.isLongOperation,
+        runId: stallState.runId,
         failureHistory: stallState.failureHistory.map(f => ({
           timestamp: f.timestamp,
           stage: f.phase as unknown as number,  // Both enums use 0-5

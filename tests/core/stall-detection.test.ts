@@ -24,7 +24,7 @@ describe('StallDetectionService (Unified)', () => {
       maxRestarts: 2,
       verbose: false,
     });
-    service.registerLane(laneName, { laneRunDir: '/tmp/test-lane' });
+    service.registerLane(laneName, { laneRunDir: '/tmp/test-lane', runId: 'test-run-id' });
   });
 
   afterEach(() => {
@@ -203,7 +203,7 @@ describe('Legacy Stall Detection (Backward Compatibility)', () => {
       manager = new AutoRecoveryManager({
         idleTimeoutMs: 1000, // 1 second for testing
       });
-      manager.registerLane(laneName);
+      manager.registerLane(laneName, 'test-run-id');
     });
 
     test('should update lastActivityTime when real activity (bytes > 0) is recorded', async () => {

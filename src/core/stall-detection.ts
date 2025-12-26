@@ -228,7 +228,7 @@ interface AnalysisContext {
  * 사용법:
  * ```typescript
  * const stallService = StallDetectionService.getInstance();
- * stallService.registerLane('lane-1', { laneRunDir: '/path/to/lane' });
+ * stallService.registerLane('lane-1', { laneRunDir: '/path/to/lane', runId: 'run-123' });
  * 
  * // 활동 기록
  * stallService.recordActivity('lane-1', bytesReceived, outputLine);

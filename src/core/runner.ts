@@ -47,6 +47,8 @@ if (require.main === module) {
   const runsIdx = parts.lastIndexOf('runs');
   const runId = runsIdx >= 0 && parts[runsIdx + 1] ? parts[runsIdx + 1]! : `run-${Date.now()}`;
   
+  const config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
+  
   // Run tasks
   runTasks(tasksFile, config, runDir, { startIndex, runId })
     .then(() => {
