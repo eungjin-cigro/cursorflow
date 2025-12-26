@@ -839,8 +839,10 @@ export async function orchestrate(tasksDir: string, options: {
       const now = Date.now();
       
       // Register lane with unified stall detection service FIRST
+      // Pass intervention capability so stall service knows if continue signals will work
       stallService.registerLane(lane.name, {
         laneRunDir: laneRunDirs[lane.name]!,
+        interventionEnabled: config.enableIntervention ?? true,
       });
       
       const laneIdx = lanes.findIndex(l => l.name === lane.name);
