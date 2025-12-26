@@ -27,8 +27,9 @@ export interface GreetingResponse {
  * @returns A GreetingResponse object
  */
 export function handleGreeting(name: string = 'Guest'): GreetingResponse {
+  const sanitizedName = name.trim() || 'Guest';
   return {
-    message: `Hello, ${name}!`,
+    message: `Hello, ${sanitizedName}!`,
     timestamp: new Date().toISOString(),
   };
 }

@@ -14,6 +14,14 @@ describe('Greeting API', () => {
     expect(response.timestamp).toBeDefined();
   });
 
+  it('should use "Guest" when an empty or blank name is provided', () => {
+    const response1 = handleGreeting('');
+    expect(response1.message).toBe('Hello, Guest!');
+
+    const response2 = handleGreeting('   ');
+    expect(response2.message).toBe('Hello, Guest!');
+  });
+
   it('should return a valid ISO 8601 timestamp', () => {
     const response = handleGreeting();
     const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/;
