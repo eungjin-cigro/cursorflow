@@ -11,6 +11,7 @@ import { LogSession, JsonLogEntry, ParsedMessage } from '../../types/logging';
 import { EnhancedLogConfig } from '../../types/config';
 import { StreamingMessageParser } from './parser';
 import { stripAnsi, formatTimestampISO } from './formatter';
+import { getLaneLogPath } from './paths';
 
 export const DEFAULT_LOG_CONFIG: EnhancedLogConfig = {
   enabled: true,
@@ -112,10 +113,10 @@ export class EnhancedLogManager {
 
     fs.mkdirSync(logDir, { recursive: true });
 
-    this.cleanLogPath = path.join(logDir, 'terminal.log');
-    this.rawLogPath = path.join(logDir, 'terminal-raw.log');
-    this.jsonLogPath = path.join(logDir, 'terminal.jsonl');
-    this.readableLogPath = path.join(logDir, 'terminal-readable.log');
+    this.cleanLogPath = getLaneLogPath(logDir, 'clean');
+    this.rawLogPath = getLaneLogPath(logDir, 'raw');
+    this.jsonLogPath = getLaneLogPath(logDir, 'jsonl');
+    this.readableLogPath = getLaneLogPath(logDir, 'readable');
 
     this.initLogFiles();
   }
@@ -523,4 +524,3 @@ export function createLogManager(
   };
   return new EnhancedLogManager(laneRunDir, session, config, onParsedMessage);
 }
-

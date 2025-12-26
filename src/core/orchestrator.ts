@@ -21,6 +21,7 @@ import { loadConfig, getLogsDir } from '../utils/config';
 import * as git from '../utils/git';
 import { execSync } from 'child_process';
 import { safeJoin } from '../utils/path';
+import { getLaneLogPath } from '../services/logging/paths';
 import { 
   EnhancedLogManager, 
   createLogManager, 
@@ -422,7 +423,7 @@ export function spawnLane({
     return { child, logPath, logManager, info };
   } else {
     // Fallback to simple file logging
-    logPath = safeJoin(laneRunDir, 'terminal-readable.log');
+    logPath = getLaneLogPath(laneRunDir, 'raw');
     const logFd = fs.openSync(logPath, 'a');
     
     child = spawn('node', args, {

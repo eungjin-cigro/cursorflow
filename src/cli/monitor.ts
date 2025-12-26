@@ -4,7 +4,7 @@
  * Features:
  * - Lane dashboard with accurate process status
  * - Unified log view for all lanes
- * - Readable log format support
+ * - Clean/raw log format support
  * - Multiple flows dashboard
  * - Consistent layout across all views
  */
@@ -18,8 +18,9 @@ import { loadConfig, getLogsDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
 import { getLaneProcessStatus, getFlowSummary, LaneProcessStatus } from '../services/process';
 import { LogBufferService, BufferedLogEntry } from '../services/logging/buffer';
-import { formatReadableEntry, formatMessageForConsole, stripAnsi } from '../services/logging/formatter';
+import { stripAnsi } from '../services/logging/formatter';
 import { MessageType } from '../types/logging';
+import { getLaneLogPath } from '../services/logging/paths';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // UI Constants
@@ -129,7 +130,7 @@ class InteractiveMonitor {
   private logsDir: string = '';
   
   // NEW: UX improvements
-  private readableFormat: boolean = true; // Toggle readable log format
+  private readableFormat: boolean = true; // Toggle clean/raw log display
   private laneFilter: string | null = null; // Filter by lane name
   private confirmAction: { type: 'delete-flow' | 'kill-lane'; target: string; time: number } | null = null;
   
@@ -1098,12 +1099,12 @@ class InteractiveMonitor {
 
     // Live terminal preview
     this.renderSectionTitle('Live Terminal', 'last 10 lines');
-    const logPath = safeJoin(lane.path, 'terminal-readable.log');
+    const logPath = getLaneLogPath(lane.path, 'raw');
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, 'utf8');
       const lines = content.split('\n').slice(-10);
       for (const line of lines) {
-        const formatted = this.formatTerminalLine(line);
+        const formatted = this.formatTerminalLine(stripAnsi(line));
         process.stdout.write(` ${UI.COLORS.dim}${formatted.substring(0, this.screenWidth - 4)}${UI.COLORS.reset}\n`);
       }
     } else {
@@ -1305,22 +1306,16 @@ class InteractiveMonitor {
 
     this.renderHeader('Live Terminal', [path.basename(this.runDir), lane.name, 'Terminal']);
 
-    // Get logs based on format mode
     let logLines: string[] = [];
     let totalLines = 0;
+    const logPath = getLaneLogPath(lane.path, 'raw');
     
-    if (this.readableFormat) {
-      // Use JSONL for readable format
-      const jsonlPath = safeJoin(lane.path, 'terminal.jsonl');
-      logLines = this.getReadableLogLines(jsonlPath, lane.name);
+    if (fs.existsSync(logPath)) {
+      const content = fs.readFileSync(logPath, 'utf8');
+      logLines = content.split('\n');
       totalLines = logLines.length;
-    } else {
-      // Use readable log
-      const logPath = safeJoin(lane.path, 'terminal-readable.log');
-      if (fs.existsSync(logPath)) {
-        const content = fs.readFileSync(logPath, 'utf8');
-        logLines = content.split('\n');
-        totalLines = logLines.length;
+      if (this.readableFormat) {
+        logLines = logLines.map(line => stripAnsi(line));
       }
     }
 
@@ -1345,7 +1340,7 @@ class InteractiveMonitor {
 
     // Mode and status indicators
     const formatMode = this.readableFormat 
-      ? `${UI.COLORS.green}[R] Readable ✓${UI.COLORS.reset}` 
+      ? `${UI.COLORS.green}[R] Clean ✓${UI.COLORS.reset}` 
       : `${UI.COLORS.dim}[R] Raw${UI.COLORS.reset}`;
     const followStatus = this.followMode 
       ? `${UI.COLORS.green}[F] Follow ✓${UI.COLORS.reset}` 
@@ -1359,7 +1354,7 @@ class InteractiveMonitor {
     const visibleLines = logLines.slice(start, end);
 
     for (const line of visibleLines) {
-      const formatted = this.readableFormat ? line : this.formatTerminalLine(line);
+      const formatted = this.readableFormat ? this.formatTerminalLine(line) : line;
       // Truncate to screen width
       const displayLine = formatted.length > this.screenWidth - 2 
         ? formatted.substring(0, this.screenWidth - 5) + '...' 
@@ -1372,7 +1367,7 @@ class InteractiveMonitor {
     }
 
     this.renderFooter([
-      '[↑↓] Scroll', '[F] Follow', '[R] Toggle Readable', '[I] Intervene', '[←/Esc] Back'
+      '[↑↓] Scroll', '[F] Follow', '[R] Toggle Clean', '[I] Intervene', '[←/Esc] Back'
     ]);
   }
   
@@ -1397,44 +1392,6 @@ class InteractiveMonitor {
       return `${UI.COLORS.green}${line}${UI.COLORS.reset}`;
     }
     return line;
-  }
-  
-  /**
-   * Get readable log lines from JSONL file
-   */
-  private getReadableLogLines(jsonlPath: string, laneName: string): string[] {
-    if (!fs.existsSync(jsonlPath)) {
-      // Fallback: try to read raw log
-      const rawPath = jsonlPath.replace('.jsonl', '.log');
-      if (fs.existsSync(rawPath)) {
-        return fs.readFileSync(rawPath, 'utf8').split('\n').map(l => this.formatTerminalLine(l));
-      }
-      return [];
-    }
-    
-    try {
-      const content = fs.readFileSync(jsonlPath, 'utf8');
-      const lines = content.split('\n').filter(l => l.trim());
-      
-      return lines.map(line => {
-        try {
-          const entry = JSON.parse(line);
-          const ts = new Date(entry.timestamp || Date.now()).toLocaleTimeString('en-US', { hour12: false });
-          const type = (entry.type || 'info').toLowerCase();
-          const content = entry.content || entry.message || '';
-          
-          // Format based on type
-          const typeInfo = this.getLogTypeInfo(type);
-          const preview = content.replace(/\n/g, ' ').substring(0, 100);
-          
-          return `${UI.COLORS.dim}[${ts}]${UI.COLORS.reset} ${typeInfo.color}[${typeInfo.label}]${UI.COLORS.reset} ${preview}`;
-        } catch {
-          return this.formatTerminalLine(line);
-        }
-      });
-    } catch {
-      return [];
-    }
   }
   
   /**
@@ -1521,7 +1478,7 @@ class InteractiveMonitor {
     
     // Status bar
     const formatMode = this.readableFormat 
-      ? `${UI.COLORS.green}[R] Readable ✓${UI.COLORS.reset}` 
+      ? `${UI.COLORS.green}[R] Detailed ✓${UI.COLORS.reset}` 
       : `${UI.COLORS.dim}[R] Compact${UI.COLORS.reset}`;
     const followStatus = this.unifiedLogFollowMode
       ? `${UI.COLORS.green}[F] Follow ✓${UI.COLORS.reset}`
@@ -1567,7 +1524,7 @@ class InteractiveMonitor {
     }
 
     this.renderFooter([
-      '[↑↓/PgUp/PgDn] Scroll', '[F] Follow', '[R] Readable', '[L] Filter Lane', '[U/Esc] Back'
+      '[↑↓/PgUp/PgDn] Scroll', '[F] Follow', '[R] Detailed', '[L] Filter Lane', '[U/Esc] Back'
     ]);
   }
   
@@ -1580,7 +1537,7 @@ class InteractiveMonitor {
     const typeInfo = this.getLogTypeInfo(entry.type || 'info');
     
     if (this.readableFormat) {
-      // Readable format: show more context
+      // Detailed format: show more context
       const content = entry.message.replace(/\n/g, ' ');
       return `${UI.COLORS.dim}[${ts}]${UI.COLORS.reset} ${entry.laneColor}[${lane}]${UI.COLORS.reset} ${typeInfo.color}[${typeInfo.label}]${UI.COLORS.reset} ${content}`;
     } else {
@@ -1807,4 +1764,3 @@ async function monitor(args: string[]): Promise<void> {
 }
 
 export = monitor;
-

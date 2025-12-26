@@ -11,6 +11,7 @@ import * as path from 'path';
 import { EnhancedLogConfig, ParsedMessage, LogSession } from '../types';
 import { formatMessageForConsole } from './log-formatter';
 import { safeJoin } from './path';
+import { getLaneLogPath } from '../services/logging/paths';
 
 export { EnhancedLogConfig, ParsedMessage, LogSession };
 
@@ -116,8 +117,8 @@ export class EnhancedLogManager {
     fs.mkdirSync(logDir, { recursive: true });
     
     // Set up log file paths (simplified)
-    this.rawLogPath = safeJoin(logDir, 'terminal-raw.log');
-    this.readableLogPath = safeJoin(logDir, 'terminal-readable.log');
+    this.rawLogPath = getLaneLogPath(logDir, 'raw');
+    this.readableLogPath = getLaneLogPath(logDir, 'readable');
     
     // Initialize log files
     this.initLogFiles();
@@ -644,12 +645,12 @@ export function exportLogs(
   format: 'text' | 'json' | 'markdown' | 'html',
   outputPath?: string
 ): string {
-  const readableLogPath = safeJoin(laneRunDir, 'terminal-readable.log');
+  const logPath = getLaneLogPath(laneRunDir, 'raw');
   
   let output = '';
   
-  if (fs.existsSync(readableLogPath)) {
-    output = fs.readFileSync(readableLogPath, 'utf8');
+  if (fs.existsSync(logPath)) {
+    output = fs.readFileSync(logPath, 'utf8');
   }
   
   if (outputPath) {

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogManager } from './enhanced-logger';
+import { getLaneLogPath } from '../services/logging/paths';
 
 async function testThinkingLogs() {
   const testDir = path.join(process.cwd(), '_test_thinking_logs');
@@ -32,23 +33,9 @@ async function testThinkingLogs() {
 
   manager.close();
 
-  console.log('\n--- Verifying terminal-readable.log ---');
-  const readableLog = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
-  console.log(readableLog);
-
-  console.log('\n--- Verifying terminal.jsonl (last 3 entries) ---');
-  const jsonlLog = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
-  const lines = jsonlLog.trim().split('\n');
-  for (const line of lines.slice(-3)) {
-    const parsed = JSON.parse(line);
-    console.log(JSON.stringify({
-      level: parsed.level,
-      message: parsed.message.substring(0, 50) + '...',
-      hasMetadata: !!parsed.metadata,
-      metadataType: parsed.metadata?.type
-    }, null, 2));
-  }
+  console.log('\n--- Verifying terminal-raw.log ---');
+  const rawLog = fs.readFileSync(getLaneLogPath(testDir, 'raw'), 'utf8');
+  console.log(rawLog);
 }
 
 testThinkingLogs().catch(console.error);
-
