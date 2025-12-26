@@ -1,7 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import { runDoctor } from '../../utils/doctor';
 import { loadConfig } from '../../utils/config';
-import { listAvailableModels } from '../../utils/cursor-agent';
+import { getAvailableModels } from '../../utils/cursor-agent';
 
 export class SystemController {
   /**
@@ -18,7 +18,7 @@ export class SystemController {
    */
   async getModels(req: IncomingMessage, res: ServerResponse) {
     try {
-      const models = await listAvailableModels();
+      const models = getAvailableModels();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ models }));
     } catch (error: any) {

@@ -23,6 +23,7 @@ export type MessageType =
   | 'info'
   | 'warn'
   | 'error'
+  | 'debug'
   | 'stdout'
   | 'stderr';
 
