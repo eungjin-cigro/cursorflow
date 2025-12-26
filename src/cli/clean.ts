@@ -341,9 +341,9 @@ async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptio
 /**
  * Get the commit timestamp of a branch
  */
-function getBranchCommitTime(branch: string, repoRoot: string): number {
+function getBranchCommitTime(branch: string, repoRoot: string, verbose = false): number {
   try {
-    const result = git.runGitResult(['log', '-1', '--format=%ct', branch], { cwd: repoRoot });
+    const result = git.runGitResult(['log', '-1', '--format=%ct', branch], { cwd: repoRoot, verbose });
     if (result.success && result.stdout.trim()) {
       return parseInt(result.stdout.trim(), 10) * 1000; // Convert to milliseconds
     }
@@ -355,9 +355,10 @@ function getBranchCommitTime(branch: string, repoRoot: string): number {
 
 async function cleanBranches(config: any, repoRoot: string, options: CleanOptions) {
   logger.info('\nChecking branches...');
+  const verbose = config.verboseGit || false;
   
   // List all local branches
-  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot });
+  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot, verbose });
   if (!result.success) return;
 
   const branches = result.stdout
@@ -376,7 +377,7 @@ async function cleanBranches(config: any, repoRoot: string, options: CleanOption
   // If keepLatest is set, keep the most recent branch
   if (options.keepLatest && toDelete.length > 1) {
     // Sort by commit time (newest first)
-    toDelete.sort((a, b) => getBranchCommitTime(b, repoRoot) - getBranchCommitTime(a, repoRoot));
+    toDelete.sort((a, b) => getBranchCommitTime(b, repoRoot, verbose) - getBranchCommitTime(a, repoRoot, verbose));
     const kept = toDelete[0];
     toDelete = toDelete.slice(1);
     logger.info(`  Keeping latest branch: ${kept}`);
@@ -635,7 +636,8 @@ async function cleanOrphanedResources(runService: RunService, config: any, repoR
 
   // Clean orphaned branches
   logger.info('\nChecking for orphaned branches...');
-  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot });
+  const verbose = config.verboseGit || false;
+  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot, verbose });
   if (result.success) {
     const branches = result.stdout
       .split('\n')
