@@ -22,8 +22,10 @@ export type MessageType =
   | 'success'
   | 'info'
   | 'warn'
-  | 'error'
-  | 'stdout'
+  | 'error' 
+  | 'debug'
+  | 'progress'
+  | 'stdout' 
   | 'stderr';
 
 export interface ParsedMessage {

@@ -231,6 +231,8 @@ function getTypeInfo(type: MessageType): { label: string; color: string } {
     info: { label: 'INFO  ', color: COLORS.cyan },
     warn: { label: 'WARN  ', color: COLORS.yellow },
     error: { label: 'ERROR ', color: COLORS.red },
+    debug: { label: 'DEBUG ', color: COLORS.gray },
+    progress: { label: 'PROG  ', color: COLORS.blue || COLORS.cyan },
     stdout: { label: 'STDOUT', color: COLORS.white },
     stderr: { label: 'STDERR', color: COLORS.red },
   };

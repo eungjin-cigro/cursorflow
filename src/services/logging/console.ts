@@ -140,11 +140,23 @@ export function withContext(context: string) {
 
 /**
  * Lane-specific output
+ * @param laneName - Lane name
+ * @param message - Message to output
+ * @param isError - Whether this is an error message
+ * @param laneIndex - Optional lane index
+ * @param taskIndex - Optional task index
+ * @param taskName - Optional task name
  */
-export function laneOutput(laneName: string, message: string, isError = false): void {
+export function laneOutput(laneName: string, message: string, isError = false, laneIndex?: number, taskIndex?: number, taskName?: string): void {
   const timestamp = `${COLORS.gray}[${formatTimestamp()}]${COLORS.reset}`;
-  const shortName = laneName.substring(0, 10).padEnd(10);
-  const laneLabel = `${COLORS.magenta}${shortName}${COLORS.reset}`;
+  // Format: [laneIdx-taskIdx-laneName-taskName] padded to 18 chars inside brackets
+  const lIdx = laneIndex ?? 1;
+  const tIdx = taskIndex ?? 1;
+  const combined = taskName 
+    ? `${lIdx}-${tIdx}-${laneName}-${taskName}`
+    : `${lIdx}-${tIdx}-${laneName}`;
+  const label = combined.substring(0, 18).padEnd(18);
+  const laneLabel = `${COLORS.magenta}[${label}]${COLORS.reset}`;
   const output = isError ? `${COLORS.red}${message}${COLORS.reset}` : message;
   
   if (isError) {

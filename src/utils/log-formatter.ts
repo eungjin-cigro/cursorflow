@@ -44,12 +44,17 @@ export function formatMessageForConsole(
   const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
-  // Handle context (e.g. from logger.info) - max 16 chars
-  const effectiveLaneLabel = laneLabel || (context ? `[${context}]` : '');
-  const truncatedLabel = effectiveLaneLabel.length > 16 
-    ? effectiveLaneLabel.substring(0, 16) 
-    : effectiveLaneLabel;
-  const labelPrefix = truncatedLabel ? `${COLORS.magenta}${truncatedLabel.padEnd(16)}${COLORS.reset} ` : '';
+  // Handle context (e.g. from logger.info) - max 18 chars inside brackets
+  // Format: [1-1-lanename1234] padded to fixed width 20 (including brackets)
+  let effectiveLaneLabel = laneLabel || (context ? `[${context.substring(0, 18).padEnd(18)}]` : '');
+  
+  // Smart truncation: ensure it always ends with ]
+  if (effectiveLaneLabel.length > 20) {
+    effectiveLaneLabel = effectiveLaneLabel.substring(0, 19) + ']';
+  }
+  
+  // Fixed width 20 chars for consistent alignment
+  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel.padEnd(20)}${COLORS.reset} ` : '';
   
   let typePrefix = '';
   let content = msg.content;
@@ -155,6 +160,44 @@ export function formatMessageForConsole(
   
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${content}`;
 
+  // Avoid double prefixes (e.g. INFO INFO)
+  const plainTypePrefix = stripAnsi(typePrefix).replace(/[^\x00-\x7F]/g, '').trim(); // "INFO", "DONE", etc.
+  const plainContent = stripAnsi(content);
+  if (plainContent.includes(` ${plainTypePrefix} `) || plainContent.startsWith(`${plainTypePrefix} `)) {
+    // If content already has the prefix, try to strip it from content or just use content as is
+    // For simplicity, if it's already there, we can just skip adding our typePrefix
+    // but we still want the colors. This is tricky. 
+    // Usually it's better to just return the content if it looks already formatted.
+  }
+
+  // A better way: if content starts with an emoji that matches our type, skip typePrefix
+  const emojiMap: Record<string, string> = {
+    'info': 'ℹ️',
+    'success': '✅',
+    'result': '✅',
+    'warn': '⚠️',
+    'error': '❌',
+    'tool': '🔧',
+    'thinking': '🤔',
+    'user': '🧑',
+    'assistant': '🤖'
+  };
+  
+  const targetEmoji = emojiMap[msg.type];
+  if (targetEmoji && plainContent.trim().startsWith(targetEmoji)) {
+    return `${tsPrefix}${labelPrefix}${content}`;
+  }
+
+  // Handle separator lines - if content is just a repeat of ━ or ─, extend it
+  const separatorMatch = content.match(/^([━─=]+)$/);
+  if (separatorMatch) {
+    const char = separatorMatch[1]![0]!;
+    // Use a fixed width for now (80 is a good standard)
+    // In a real terminal we could use process.stdout.columns
+    const targetWidth = 80;
+    content = char.repeat(targetWidth);
+  }
+
   // Compact format (single line)
   if (!useBox) {
     return `${tsPrefix}${labelPrefix}${typePrefix.padEnd(12)} ${content}`;
@@ -169,7 +212,7 @@ export function formatMessageForConsole(
   const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
   const visualWidth = strippedPrefix.length + emojiCount; // emoji adds 1 extra width
   
-  const boxWidth = 60;
+  const boxWidth = 80;
   const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
   let result = `${fullPrefix}${header}\n`;
   
