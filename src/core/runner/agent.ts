@@ -126,8 +126,11 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   }
   
   if (outputFormat === 'json') {
-    args.push('--format', 'json');
+    args.push('--print', '--output-format', 'json');
   }
+
+  // Ensure non-interactive execution with automatic approvals
+  args.push('--force', '--approve-mcps');
 
   // Add worktree context if provided
   if (workspaceDir) {
