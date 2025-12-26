@@ -625,9 +625,6 @@ export async function orchestrate(tasksDir: string, options: {
   
   const config = loadConfig();
   
-  // Set verbose git logging from config
-  git.setVerboseGit(config.verboseGit || false);
-
   const logsDir = getLogsDir(config);
   const runId = `run-${Date.now()}`;
   // Use absolute path for runRoot to avoid issues with subfolders

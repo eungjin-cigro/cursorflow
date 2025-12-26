@@ -8,15 +8,6 @@ import * as path from 'path';
 import { safeJoin } from './path';
 import * as logger from './logger';
 
-let verboseGitEnabled = true;
-
-/**
- * Enable or disable verbose git logging
- */
-export function setVerboseGit(enabled: boolean): void {
-  verboseGitEnabled = enabled;
-}
-
 /**
  * Acquire a file-based lock for Git operations
  */
@@ -88,6 +79,7 @@ async function runGitWithLock<T>(
 export interface GitRunOptions {
   cwd?: string;
   silent?: boolean;
+  verbose?: boolean;
 }
 
 export interface GitResult {
@@ -141,8 +133,9 @@ function filterGitStderr(stderr: string): string {
  */
 export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
+  const verbose = options.verbose ?? (process.env['DEBUG_GIT'] === 'true' || process.env['DEBUG_GIT'] === undefined);
   
-  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+  if (verbose) {
     logger.debug(`Running: git ${args.join(' ')}`, { context: 'git', emoji: '🛠️' });
     if (cwd) {
       logger.debug(`  cwd: ${cwd}`, { context: 'git' });
@@ -195,8 +188,9 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
  */
 export function runGitResult(args: string[], options: GitRunOptions = {}): GitResult {
   const { cwd } = options;
+  const verbose = options.verbose ?? (process.env['DEBUG_GIT'] === 'true' || process.env['DEBUG_GIT'] === undefined);
   
-  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+  if (verbose) {
     logger.debug(`Running: git ${args.join(' ')} (result mode)`, { context: 'git', emoji: '🛠️' });
     if (cwd) {
       logger.debug(`  cwd: ${cwd}`, { context: 'git' });
