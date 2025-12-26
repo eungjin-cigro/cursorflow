@@ -316,9 +316,8 @@ export function spawnLane({
       currentTaskIndex: startIndex > 0 ? startIndex + 1 : 0
     };
 
-    // Buffers for partial lines
-    let stdoutBuffer = '';
-    let stderrBuffer = '';
+    // Buffer for non-JSON lines
+    let lineBuffer = '';
 
     // Pipe stdout and stderr through enhanced logger
     if (child.stdout) {
@@ -326,69 +325,96 @@ export function spawnLane({
         logManager!.writeStdout(data);
         
         // Filter out JSON lines from console output to keep it clean
-        stdoutBuffer += data.toString();
-        const lines = stdoutBuffer.split('\n');
-        stdoutBuffer = lines.pop() || '';
+        const str = data.toString();
+        lineBuffer += str;
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
         
         for (const line of lines) {
-          processStdoutLine(line);
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // Detect task start/progress to update label
+          // Example: [1/1] hello-task
+          const cleanLine = stripAnsi(trimmed);
+          const taskMatch = cleanLine.match(/^\s*\[(\d+)\/(\d+)\]\s+(.+)$/);
+          if (taskMatch) {
+            info.currentTaskIndex = parseInt(taskMatch[1]!);
+            // Update log manager's task index to keep it in sync for readable log
+            if (logManager) {
+              logManager.setTask(taskMatch[3]!.trim(), undefined, info.currentTaskIndex - 1);
+            }
+          }
+
+          // Show if it's a timestamped log line (starts with [YYYY-MM-DD... or [HH:MM:SS])
+          // or if it's NOT a noisy JSON line
+          const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
+          // Filter out heartbeats - they should NOT reset the idle timer
+          const isHeartbeat = trimmed.includes('Heartbeat') && trimmed.includes('bytes received');
+          
+          if (!isJson) {
+            // Only trigger activity for non-heartbeat lines
+            if (onActivity && !isHeartbeat) onActivity();
+
+            const currentLabel = getDynamicLabel();
+            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
+            
+            // Regex that matches timestamp even if it has ANSI color codes
+            // Matches: [24:39:14] or \x1b[90m[24:39:14]\x1b[0m
+            const timestampRegex = /^((?:\x1b\[[0-9;]*m)*)\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/;
+            const tsMatch = trimmed.match(timestampRegex);
+
+            if (tsMatch) {
+              // If line already has timestamp format, just add lane prefix
+              // Check if lane label is already present to avoid triple duplication
+              if (!trimmed.includes(currentLabel)) {
+                // Insert label after the timestamp part
+                const tsPart = tsMatch[0];
+                const formatted = trimmed.replace(tsPart, `${tsPart} ${coloredLabel}`);
+                process.stdout.write(formatted + '\n');
+              } else {
+                process.stdout.write(trimmed + '\n');
+              }
+            } else {
+              // Add full prefix: timestamp + lane
+              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${coloredLabel} ${line}\n`);
+            }
+          }
         }
       });
     }
-
-    // Helper to process a single line of stdout
-    const processStdoutLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-...
+    
     if (child.stderr) {
       child.stderr.on('data', (data: Buffer) => {
         logManager!.writeStderr(data);
-        
-        stderrBuffer += data.toString();
-        const lines = stderrBuffer.split('\n');
-        stderrBuffer = lines.pop() || '';
-        
+        const str = data.toString();
+        const lines = str.split('\n');
         for (const line of lines) {
-          processStderrLine(line);
+          const trimmed = line.trim();
+          if (trimmed) {
+            // Check if it's a real error or just git/status output on stderr
+            const isStatus = trimmed.startsWith('Preparing worktree') || 
+                             trimmed.startsWith('Switched to a new branch') ||
+                             trimmed.startsWith('HEAD is now at') ||
+                             trimmed.includes('actual output');
+            
+            const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const currentLabel = getDynamicLabel();
+            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
+
+            if (isStatus) {
+              process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${trimmed}\n`);
+            } else {
+              if (onActivity) onActivity();
+              process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
+            }
+          }
         }
       });
     }
-
-    // Helper to process a single line of stderr
-    const processStderrLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
-      // Check if it's a real error or just git/status output on stderr
-      const isStatus = trimmed.startsWith('Preparing worktree') || 
-                       trimmed.startsWith('Switched to a new branch') ||
-                       trimmed.startsWith('HEAD is now at') ||
-                       trimmed.includes('actual output');
-      
-      const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-      const currentLabel = getDynamicLabel();
-      const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
-
-      if (isStatus) {
-        process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${trimmed}\n`);
-      } else {
-        if (onActivity) onActivity();
-        process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
-      }
-    };
     
     // Close log manager when process exits
     child.on('exit', () => {
-      // Flush any remaining partial lines
-      if (stdoutBuffer.trim()) {
-        processStdoutLine(stdoutBuffer);
-        stdoutBuffer = '';
-      }
-      if (stderrBuffer.trim()) {
-        processStderrLine(stderrBuffer);
-        stderrBuffer = '';
-      }
       logManager?.close();
     });
 
@@ -898,7 +924,7 @@ export async function orchestrate(tasksDir: string, options: {
       if (pollTimeout) clearTimeout(pollTimeout);
       
       const now = Date.now();
-      if (result.name === '__poll__' || (now - lastStallCheck >= 5000)) {
+      if (result.name === '__poll__' || (now - lastStallCheck >= 10000)) {
         lastStallCheck = now;
         
         // Periodic stall check using unified StallDetectionService
@@ -927,14 +953,6 @@ export async function orchestrate(tasksDir: string, options: {
           // Log to lane log manager if there was an action
           if (analysis.action !== RecoveryAction.NONE) {
             info.logManager?.log('error', analysis.message);
-            
-            // Also log to main console for visibility
-            const currentLabel = `${logger.COLORS.magenta}[${laneName}]${logger.COLORS.reset}`;
-            logger.warn(`${currentLabel} ⚠️ Stall detected: ${analysis.message}`);
-            
-            if (analysis.action === RecoveryAction.SEND_CONTINUE || analysis.action === RecoveryAction.SEND_STRONGER_PROMPT) {
-              logger.info(`${currentLabel} ℹ️ Attempting intervention via intervention.txt...`);
-            }
             
             // Handle special case: RUN_DOCTOR needs async operations
             if (analysis.action === RecoveryAction.RUN_DOCTOR) {
