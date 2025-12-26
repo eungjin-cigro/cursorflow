@@ -9,6 +9,16 @@ export interface GreetingResponse {
 }
 
 /**
+ * Generates a greeting message
+ * 
+ * @param name The name to greet
+ * @returns A greeting string
+ */
+export function generateGreetingMessage(name: string): string {
+  return `Hello, ${name}!`;
+}
+
+/**
  * Handles the greeting logic
  * 
  * @param name The name to greet (defaults to 'Guest')
@@ -20,15 +30,15 @@ export function handleGreeting(name?: string): GreetingResponse {
   // Example validation
   if (finalName.length > 100) {
     return {
-      message: 'Greeting failed',
-      timestamp: new Date().toISOString(),
       status: 'error',
-      error: "The 'name' parameter exceeds the maximum allowed length."
+      error: 'Bad Request',
+      message: "The 'name' parameter exceeds the maximum allowed length.",
+      timestamp: new Date().toISOString()
     };
   }
 
   return {
-    message: `Hello, ${finalName}!`,
+    message: generateGreetingMessage(finalName),
     timestamp: new Date().toISOString(),
     status: 'success'
   };

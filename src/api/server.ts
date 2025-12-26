@@ -1,5 +1,4 @@
 import * as http from 'http';
-import { parse } from 'url';
 import { handleGreeting } from './greeting';
 
 const PORT = process.env.PORT || 3000;
@@ -8,15 +7,16 @@ const PORT = process.env.PORT || 3000;
  * Simple Node.js HTTP server to serve the greeting API
  */
 const server = http.createServer((req, res) => {
-  const parsedUrl = parse(req.url || '', true);
-  const { pathname, query } = parsedUrl;
+  const baseURL = `http://${req.headers.host || 'localhost'}`;
+  const url = new URL(req.url || '', baseURL);
+  const pathname = url.pathname;
 
   // Set default response headers
   res.setHeader('Content-Type', 'application/json');
 
   // Route: GET /api/greet
   if (req.method === 'GET' && pathname === '/api/greet') {
-    const name = query.name as string | undefined;
+    const name = url.searchParams.get('name') || undefined;
     const response = handleGreeting(name);
     
     res.statusCode = response.status === 'success' ? 200 : 400;
