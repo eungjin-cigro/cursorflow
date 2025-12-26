@@ -17,7 +17,6 @@ jest.mock('../../src/utils/git', () => ({
   remoteExists: jest.fn().mockReturnValue(true),
   hasUncommittedChanges: jest.fn().mockReturnValue(false),
   getCurrentBranch: jest.fn().mockReturnValue('main'),
-  setVerboseGit: jest.fn(),
 }));
 
 // Mock child_process
