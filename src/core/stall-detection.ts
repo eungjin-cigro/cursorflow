@@ -168,6 +168,8 @@ export interface LaneStallState {
   childProcess?: ChildProcess;
   /** Lane 실행 디렉토리 */
   laneRunDir?: string;
+  /** 현재 Run ID */
+  runId: string;
   /** 실패 이력 (POF용) */
   failureHistory: FailureRecord[];
 }
@@ -294,7 +296,8 @@ export class StallDetectionService {
       laneRunDir?: string;
       childProcess?: ChildProcess;
       startIndex?: number;
-    } = {}
+      runId: string;
+    }
   ): void {
     const now = Date.now();
     
@@ -314,6 +317,7 @@ export class StallDetectionService {
       isLongOperation: false,
       childProcess: options.childProcess,
       laneRunDir: options.laneRunDir,
+      runId: options.runId,
       failureHistory: [],
     });
     
@@ -754,7 +758,7 @@ export class StallDetectionService {
         laneName: state.laneName,
         idleSeconds: Math.round((Date.now() - state.lastRealActivityTime) / 1000),
         signalCount: state.continueSignalCount,
-      });
+      }, state.runId);
     } catch (error: any) {
       logger.error(`[StallService] [${state.laneName}] Failed to send continue signal: ${error.message}`);
     }
@@ -786,7 +790,7 @@ If you encountered a git error, resolve it and continue.`;
       
       events.emit('recovery.stronger_prompt', {
         laneName: state.laneName,
-      });
+      }, state.runId);
     } catch (error: any) {
       logger.error(`[StallService] [${state.laneName}] Failed to send stronger prompt: ${error.message}`);
     }
@@ -816,7 +820,7 @@ If you encountered a git error, resolve it and continue.`;
       laneName: state.laneName,
       restartCount: state.restartCount,
       maxRestarts: this.config.maxRestarts,
-    });
+    }, state.runId);
   }
   
   /**
@@ -831,7 +835,7 @@ If you encountered a git error, resolve it and continue.`;
     events.emit('recovery.diagnosed', {
       laneName: state.laneName,
       restartCount: state.restartCount,
-    });
+    }, state.runId);
   }
   
   /**
@@ -845,7 +849,7 @@ If you encountered a git error, resolve it and continue.`;
     
     events.emit('recovery.aborted', {
       laneName: state.laneName,
-    });
+    }, state.runId);
   }
   
   /**

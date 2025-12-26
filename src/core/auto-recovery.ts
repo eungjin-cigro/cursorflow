@@ -464,7 +464,7 @@ export class AutoRecoveryManager {
         laneName,
         idleSeconds,
         signalCount: state.continueSignalsSent,
-      });
+      }, 'unknown'); // Need to pass runId to AutoRecoveryManager if it was used
 
       return {
         success: true,
@@ -523,7 +523,7 @@ If you encountered a git error, resolve it and continue.`;
       events.emit('recovery.stronger_prompt', {
         laneName,
         prompt: strongerPrompt,
-      });
+      }, 'unknown');
 
       return {
         success: true,
@@ -583,7 +583,7 @@ If you encountered a git error, resolve it and continue.`;
       laneName,
       restartCount: state.restartCount,
       maxRestarts: this.config.maxRestarts,
-    });
+    }, 'unknown');
 
     return {
       success: true,
@@ -678,7 +678,7 @@ If you encountered a git error, resolve it and continue.`;
       events.emit('recovery.diagnosed', {
         laneName,
         diagnostic,
-      });
+      }, 'unknown');
 
       return {
         success: true,
