@@ -9,6 +9,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { LogImportance, JsonLogEntry, BufferedLogEntry as BufferedLogEntryType, MessageType } from '../../types/logging';
 import { COLORS } from './console';
+import { stripAnsi } from './formatter';
 
 // Re-export types for convenience
 export type { BufferedLogEntry } from '../../types/logging';
@@ -108,13 +109,13 @@ export class LogBufferService extends EventEmitter {
     const newEntries: BufferedLogEntryType[] = [];
 
     for (const laneName of this.lanes) {
-      const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
+      const readablePath = path.join(lanesDir, laneName, 'terminal-readable.log');
 
       let fd: number | null = null;
       try {
         // Read file content atomically to avoid TOCTOU race condition
-        const lastPos = this.filePositions.get(jsonlPath) || 0;
-        fd = fs.openSync(jsonlPath, 'r');
+        const lastPos = this.filePositions.get(readablePath) || 0;
+        fd = fs.openSync(readablePath, 'r');
         const stat = fs.fstatSync(fd); // Use fstat on open fd to avoid race
         
         if (stat.size > lastPos) {
@@ -125,14 +126,11 @@ export class LogBufferService extends EventEmitter {
           const lines = newContent.split('\n').filter(line => line.trim());
 
           for (const line of lines) {
-            try {
-              const entry = JSON.parse(line) as JsonLogEntry;
-              const processed = this.processEntry(entry, laneName);
-              if (processed) newEntries.push(processed);
-            } catch { /* Skip invalid JSON */ }
+            const processed = this.processReadableLine(line, laneName);
+            if (processed) newEntries.push(processed);
           }
 
-          this.filePositions.set(jsonlPath, stat.size);
+          this.filePositions.set(readablePath, stat.size);
         }
       } catch { /* File in use, skip */ }
       finally {
@@ -156,11 +154,11 @@ export class LogBufferService extends EventEmitter {
     }
   }
 
-  private processEntry(entry: JsonLogEntry, laneName: string): BufferedLogEntryType | null {
-    const timestamp = new Date(entry.timestamp || Date.now());
-    const type = (entry.type || 'unknown') as MessageType;
-    const level = entry.level || this.inferLevel(type);
-    const message = entry.content || entry.message || JSON.stringify(entry);
+  private processReadableLine(line: string, laneName: string): BufferedLogEntryType | null {
+    const cleaned = stripAnsi(line).trim();
+    if (!cleaned) return null;
+
+    const { timestamp, message, level, type } = this.parseReadableMessage(cleaned);
     const importance = this.inferImportance(type, level);
 
     return {
@@ -172,23 +170,63 @@ export class LogBufferService extends EventEmitter {
       message: this.truncateMessage(message),
       importance,
       laneColor: this.laneColorMap.get(laneName) || COLORS.white,
-      raw: entry,
+      raw: {
+        timestamp: timestamp.toISOString(),
+        level: level as JsonLogEntry['level'],
+        lane: laneName,
+        message,
+      },
     };
   }
 
-  private inferLevel(type: string): string {
-    switch (type.toLowerCase()) {
-      case 'error':
-      case 'stderr':
-        return 'error';
-      case 'warning':
-        return 'warn';
-      case 'debug':
-      case 'thinking':
-        return 'debug';
-      default:
-        return 'info';
+  private parseReadableMessage(line: string): {
+    timestamp: Date;
+    message: string;
+    level: string;
+    type: MessageType | string;
+  } {
+    let remaining = line;
+    let timestamp = new Date();
+
+    const isoMatch = remaining.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*/);
+    if (isoMatch) {
+      timestamp = new Date(isoMatch[1]!);
+      remaining = remaining.slice(isoMatch[0].length);
+    } else {
+      const timeMatch = remaining.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
+      if (timeMatch) {
+        const [hours, minutes, seconds] = timeMatch[1]!.split(':').map(Number);
+        const now = new Date();
+        now.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+        timestamp = now;
+        remaining = remaining.slice(timeMatch[0].length);
+      }
     }
+
+    const labelMatch = remaining.match(/^\[[^\]]+\]\s*/);
+    if (labelMatch) {
+      remaining = remaining.slice(labelMatch[0].length);
+    }
+
+    const upper = remaining.toUpperCase();
+    let level = 'info';
+    let type: MessageType | string = 'stdout';
+
+    if (remaining.includes('❌') || upper.includes('ERR') || upper.includes('ERROR')) {
+      level = 'error';
+      type = 'error';
+    } else if (remaining.includes('⚠️') || upper.includes('WARN')) {
+      level = 'warn';
+      type = 'warn';
+    } else if (remaining.includes('🔍') || upper.includes('DEBUG')) {
+      level = 'debug';
+      type = 'debug';
+    } else if (remaining.includes('ℹ️') || upper.includes('INFO')) {
+      level = 'info';
+      type = 'info';
+    }
+
+    return { timestamp, message: remaining, level, type };
   }
 
   private inferImportance(type: string, level: string): LogImportance {
@@ -323,4 +361,3 @@ export class LogBufferService extends EventEmitter {
 export function createLogBuffer(runDir: string, options?: LogBufferOptions): LogBufferService {
   return new LogBufferService(runDir, options);
 }
-

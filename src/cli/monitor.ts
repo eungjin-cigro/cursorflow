@@ -1309,14 +1309,12 @@ class InteractiveMonitor {
     let logLines: string[] = [];
     let totalLines = 0;
     
+    const logPath = safeJoin(lane.path, 'terminal-readable.log');
+
     if (this.readableFormat) {
-      // Use JSONL for readable format
-      const jsonlPath = safeJoin(lane.path, 'terminal.jsonl');
-      logLines = this.getReadableLogLines(jsonlPath, lane.name);
+      logLines = this.getReadableLogLines(logPath);
       totalLines = logLines.length;
     } else {
-      // Use readable log
-      const logPath = safeJoin(lane.path, 'terminal-readable.log');
       if (fs.existsSync(logPath)) {
         const content = fs.readFileSync(logPath, 'utf8');
         logLines = content.split('\n');
@@ -1402,36 +1400,14 @@ class InteractiveMonitor {
   /**
    * Get readable log lines from JSONL file
    */
-  private getReadableLogLines(jsonlPath: string, laneName: string): string[] {
-    if (!fs.existsSync(jsonlPath)) {
-      // Fallback: try to read raw log
-      const rawPath = jsonlPath.replace('.jsonl', '.log');
-      if (fs.existsSync(rawPath)) {
-        return fs.readFileSync(rawPath, 'utf8').split('\n').map(l => this.formatTerminalLine(l));
-      }
+  private getReadableLogLines(logPath: string): string[] {
+    if (!fs.existsSync(logPath)) {
       return [];
     }
-    
+
     try {
-      const content = fs.readFileSync(jsonlPath, 'utf8');
-      const lines = content.split('\n').filter(l => l.trim());
-      
-      return lines.map(line => {
-        try {
-          const entry = JSON.parse(line);
-          const ts = new Date(entry.timestamp || Date.now()).toLocaleTimeString('en-US', { hour12: false });
-          const type = (entry.type || 'info').toLowerCase();
-          const content = entry.content || entry.message || '';
-          
-          // Format based on type
-          const typeInfo = this.getLogTypeInfo(type);
-          const preview = content.replace(/\n/g, ' ').substring(0, 100);
-          
-          return `${UI.COLORS.dim}[${ts}]${UI.COLORS.reset} ${typeInfo.color}[${typeInfo.label}]${UI.COLORS.reset} ${preview}`;
-        } catch {
-          return this.formatTerminalLine(line);
-        }
-      });
+      const content = fs.readFileSync(logPath, 'utf8');
+      return content.split('\n');
     } catch {
       return [];
     }
@@ -1807,4 +1783,3 @@ async function monitor(args: string[]): Promise<void> {
 }
 
 export = monitor;
-

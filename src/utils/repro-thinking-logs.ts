@@ -11,7 +11,6 @@ async function testThinkingLogs() {
 
   console.log('--- Initializing Log Manager ---');
   const manager = createLogManager(testDir, 'test-lane-thinking', {
-    writeJsonLog: true,
     keepRawLogs: true
   });
 
@@ -35,20 +34,6 @@ async function testThinkingLogs() {
   console.log('\n--- Verifying terminal-readable.log ---');
   const readableLog = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
   console.log(readableLog);
-
-  console.log('\n--- Verifying terminal.jsonl (last 3 entries) ---');
-  const jsonlLog = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
-  const lines = jsonlLog.trim().split('\n');
-  for (const line of lines.slice(-3)) {
-    const parsed = JSON.parse(line);
-    console.log(JSON.stringify({
-      level: parsed.level,
-      message: parsed.message.substring(0, 50) + '...',
-      hasMetadata: !!parsed.metadata,
-      metadataType: parsed.metadata?.type
-    }, null, 2));
-  }
 }
 
 testThinkingLogs().catch(console.error);
-
