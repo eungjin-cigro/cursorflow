@@ -1,113 +1,151 @@
-# CursorFlow Run
+# cursorflow run
 
-## Overview
+Flow 실행 및 재개를 위한 통합 가이드입니다.
 
-Execute AI agent orchestration using Flow configurations. CursorFlow uses a DAG (Directed Acyclic Graph) scheduler to handle task dependencies and automatic branch merging.
-
-## Workflow
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ 1. Create Flow  │ ──▶ │ 2. Add Tasks    │ ──▶ │ 3. Validate     │ ──▶ │ 4. Run          │
-│ (new)           │     │ (add)           │     │ (doctor)        │     │ (run)           │
-└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
-```
-
-## Usage
+## 실행 (`run`)
 
 ```bash
 cursorflow run <flow-name> [options]
-cursorflow run <flow-path> [options]
 ```
 
-### Quick Start
+### 옵션
+
+| 옵션 | 설명 |
+|------|------|
+| `--max-concurrent <num>` | 동시 실행 레인 수 제한 |
+| `--dry-run` | 실행 계획만 표시 (실제 실행 안 함) |
+| `--skip-doctor` | 환경 검사 건너뛰기 |
+| `--no-git` | Git 작업 건너뛰기 |
+
+### 예시
 
 ```bash
-# Step 1: Create flow and lanes
-cursorflow new AddAPI --lanes "backend,frontend"
+# 기본 실행
+cursorflow run SearchFeature
 
-# Step 2: Add tasks to lanes
-cursorflow add AddAPI backend \
-  --task "name=implement|prompt=Create REST API for users"
+# 동시 실행 레인 수 제한
+cursorflow run SearchFeature --max-concurrent 2
 
-cursorflow add AddAPI frontend \
-  --task "name=ui|prompt=Create frontend UI" \
-  --after "backend:implement"
-
-# Step 3: Validate configuration
-cursorflow doctor AddAPI
-
-# Step 4: Run
-cursorflow run AddAPI
+# 실행 계획 미리보기
+cursorflow run SearchFeature --dry-run
 ```
 
-## How It Works
+---
 
-1. **Load**: Read all JSON files from the flow directory (excluding `flow.meta.json`)
-2. **Validate**: Check `tasks` array, required fields (`name`, `prompt`)
-3. **Resolve**: Build execution order from `dependsOn` dependencies
-4. **Execute**:
-   - Start lanes with no dependencies in parallel
-   - When a task completes, unlock dependent tasks
-   - **Dependent tasks auto-merge predecessor branches before starting**
-5. **Monitor**: Heartbeat logs every 30 seconds
+## 재개 (`resume`)
 
-## Options
-
-| Option | Description |
-|--------|-------------|
-| `<flow-name>` | Flow name (e.g., `AddAPI`) |
-| `<flow-path>` | Flow directory path (e.g., `_cursorflow/flows/001_AddAPI`) |
-| `--max-concurrent <num>` | Limit concurrent lane execution |
-| `--executor <type>` | `cursor-agent` (default) or `cloud` |
-| `--skip-doctor` | Skip environment checks (not recommended) |
-| `--no-git` | Skip Git operations (worktree, commits, push) |
-| `--dry-run` | Show execution plan without running |
-
-## Execution Flow
-
-### Single Lane
+중단되거나 실패한 레인을 재개합니다.
 
 ```bash
-cursorflow new SimpleFix --lanes "main"
-cursorflow add SimpleFix main --task "name=fix|prompt=Fix the bug"
-cursorflow run SimpleFix
+cursorflow resume [lane-name] [options]
 ```
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  main                                                   │
-│  ┌─────────┐                                            │
-│  │   fix   │ → AI executes → Complete                   │
-│  └─────────┘                                            │
-└─────────────────────────────────────────────────────────┘
-```
+### 옵션
 
-### Multiple Tasks in Lane
+| 옵션 | 설명 |
+|------|------|
+| `--status` | 모든 레인 상태 확인 (재개 없음) |
+| `--all` | 미완료된 모든 레인 재개 |
+| `--restart` | 첫 번째 태스크부터 다시 시작 |
+| `--run-dir <path>` | 특정 실행 디렉토리 지정 |
+| `--max-concurrent <n>` | 동시 재개 레인 수 (기본: 3) |
+
+### 예시
 
 ```bash
-cursorflow add Feature api \
-  --task "name=plan|prompt=Create plan" \
-  --task "name=implement|prompt=Build feature"
+# 레인 상태 확인
+cursorflow resume --status
+
+# 모든 미완료 레인 재개
+cursorflow resume --all
+
+# 특정 레인만 재개
+cursorflow resume 01-api
+
+# 처음부터 다시 시작
+cursorflow resume 01-api --restart
+```
+
+### 상태 확인 출력
+
+```
+📊 Lane Status (run-1703145600000)
+
+  Lane                     Status      Progress    Needs Resume
+  ------------------------------------------------------------
+  01-api                   completed   3/3         
+  02-web                   failed      1/3         ✓
+   └─ Error: cursor-agent timed out...
+  03-mobile                paused      2/3         ✓
+
+  Total: 3 | Completed: 1 | Needs Resume: 2
+
+  Tip: Run cursorflow resume --all to resume all incomplete lanes
+```
+
+---
+
+## 모니터링 (`monitor`)
+
+실행 중인 Flow를 실시간으로 모니터링합니다.
+
+```bash
+# 최근 실행 모니터링
+cursorflow monitor latest
+
+# 특정 실행 모니터링
+cursorflow monitor run-xxxxx
+
+# 모든 실행 목록 보기
+cursorflow monitor --list
+```
+
+### 대시보드 단축키
+
+| 키 | 기능 |
+|---|------|
+| `↑/↓` | 레인 간 이동 |
+| `→/Enter` | 상세 보기 |
+| `←/Esc` | 뒤로 가기 |
+| `F` | 의존성 Flow 보기 |
+| `T` | 터미널 스트리밍 |
+| `I` | 에이전트에 메시지 전송 |
+| `K` | 프로세스 종료 |
+| `Q` | 종료 |
+
+---
+
+## 실행 흐름 예시
+
+### 병렬 실행
+
+```bash
+cursorflow new FrontBack --lanes "frontend,backend"
+cursorflow add FrontBack frontend --task "name=ui|prompt=UI 구현"
+cursorflow add FrontBack backend --task "name=api|prompt=API 구현"
+cursorflow run FrontBack
 ```
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  api                                                    │
-│  ┌────┐     ┌─────────┐                                 │
-│  │plan│ ──▶ │implement│ → Complete                      │
-│  └────┘     └─────────┘                                 │
-└─────────────────────────────────────────────────────────┘
+┌───────────┐
+│ frontend  │  (ui)
+└───────────┘
+              ─── 병렬 실행
+┌───────────┐
+│  backend  │  (api)
+└───────────┘
 ```
 
-### Sequential Lanes (with dependencies)
+### 순차 실행 (의존성)
 
 ```bash
 cursorflow new FullStack --lanes "backend,api,frontend"
 
-cursorflow add FullStack backend --task "name=db|prompt=Setup database"
-cursorflow add FullStack api --task "name=impl|prompt=Create API" --after "backend"
-cursorflow add FullStack frontend --task "name=ui|prompt=Create UI" --after "api"
+cursorflow add FullStack backend --task "name=db|prompt=DB 설정"
+cursorflow add FullStack api --task "name=impl|prompt=API 구현" --after "backend"
+cursorflow add FullStack frontend --task "name=ui|prompt=UI 구현" --after "api"
+
+cursorflow run FullStack
 ```
 
 ```
@@ -116,87 +154,66 @@ cursorflow add FullStack frontend --task "name=ui|prompt=Create UI" --after "api
 │   (db)    │     │  (impl)   │     │   (ui)    │
 └───────────┘     └───────────┘     └───────────┘
                         │                 │
-                   merges            merges
-                   backend          backend,api
+                   backend           backend,api
+                   브랜치 머지        브랜치 머지
 ```
 
-### Parallel Lanes
+---
+
+## 로그 확인
 
 ```bash
-cursorflow new FrontBack --lanes "frontend,backend"
+# 최근 실행 로그 요약
+cursorflow logs
 
-cursorflow add FrontBack frontend --task "name=ui|prompt=Create UI"
-cursorflow add FrontBack backend --task "name=api|prompt=Create API"
+# 특정 레인 로그
+cursorflow logs --lane api
+
+# 모든 레인 통합 로그
+cursorflow logs --all
+
+# 실시간 로그 팔로우
+cursorflow logs --lane api --follow
 ```
 
-```
-┌───────────┐
-│ frontend  │  (UI)
-└───────────┘
-              ─── both run in parallel
-┌───────────┐
-│  backend  │  (API)
-└───────────┘
-```
+---
 
-## Log Format
+## 문제 해결
 
-Logs use the format `[L{n}-T{t}-{lanename}]`:
-- `L{n}`: Lane number (1-indexed)
-- `T{t}`: Task number (1-indexed)
-- `{lanename}`: First 10 characters of lane name
-
-Example: `[L1-T2-backend]` = Lane 1, Task 2, lane name "backend"
-
-## Monitoring During Execution
+### 레인이 멈춤
 
 ```bash
-# In another terminal
-cursorflow monitor latest
+# 에이전트에 메시지 전송
+cursorflow signal <lane-name> --message "continue"
 
-# Or specify the run directory
-cursorflow monitor _cursorflow/logs/runs/run-xxxxx
+# 또는 재개
+cursorflow resume --all
 ```
 
-The monitor shows:
-- Lane status (pending, running, completed, failed)
-- Current task within each lane
-- Dependency graph and progress
-- Real-time log streaming
+### 의존성 오류
 
-## Troubleshooting
+```bash
+# 설정 검증
+cursorflow doctor <flow-name>
 
-### Validation Errors
-
+# 순환 의존성 확인
+# ❌ Circular dependency: 01-a:task1 → 02-b:task2 → 01-a:task1
 ```
-Task N missing required "name" field
+
+### 브랜치 충돌
+
+```bash
+# 기존 브랜치 정리
+cursorflow clean branches --dry-run
+cursorflow clean branches
 ```
-→ Ensure every task has both `name` and `prompt` fields
 
-```
-Invalid task name: "my task"
-```
-→ Task names can only contain alphanumeric characters, `-`, and `_`
+---
 
-### Dependency Issues
+## 베스트 프랙티스
 
-```
-Circular dependency detected
-```
-→ Check your `dependsOn` fields for cycles (A→B, B→A)
-
-### Lane Stuck
-
-If a lane stops responding:
-
-1. Check the agent window in Cursor IDE
-2. Use `cursorflow signal <lane-name> --message "continue"` to nudge
-3. Or use `cursorflow resume --all` to resume
-
-## Best Practices
-
-1. **Always Validate First**: Run `cursorflow doctor <flow-name>` before `run`
-2. **Start Small**: Test with a single lane before scaling up
-3. **Use `--dry-run`**: Preview execution plan before committing
-4. **Monitor Actively**: Keep `cursorflow monitor` running in a separate terminal
-5. **Plan Dependencies**: Draw out the DAG before running complex workflows
+1. **실행 전 검증**: `cursorflow doctor <flow-name>` 먼저 실행
+2. **작게 시작**: 단일 레인으로 테스트 후 확장
+3. **`--dry-run` 활용**: 실행 계획 미리 확인
+4. **모니터링**: `cursorflow monitor` 항상 켜두기
+5. **의존성 계획**: 복잡한 워크플로우는 DAG 먼저 그리기

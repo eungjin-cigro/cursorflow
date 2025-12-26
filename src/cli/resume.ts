@@ -29,7 +29,6 @@ interface ResumeOptions {
   status: boolean;
   maxConcurrent: number;
   help: boolean;
-  noGit: boolean;
   executor: string | null;
 }
 
@@ -48,7 +47,6 @@ Options:
   --clean                Clean up existing worktree before resuming
   --restart              Restart from the first task (index 0)
   --skip-doctor          Skip environment/branch checks (not recommended)
-  --no-git               Disable Git operations (must match original run)
   --executor <type>      Override executor (default: cursor-agent)
   --help, -h             Show help
 
@@ -56,7 +54,7 @@ Examples:
   cursorflow resume --status                 # Check status of all lanes
   cursorflow resume --all                    # Resume all incomplete lanes
   cursorflow resume lane-1                   # Resume single lane
-  cursorflow resume _cursorflow/tasks/feat1  # Resume all lanes in directory
+  cursorflow resume _cursorflow/flows/MyFeature  # Resume all lanes in flow
   cursorflow resume --all --restart          # Restart all incomplete lanes from task 0
   `);
 }
@@ -76,7 +74,6 @@ function parseArgs(args: string[]): ResumeOptions {
     status: args.includes('--status'),
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '3') : 3,
     help: args.includes('--help') || args.includes('-h'),
-    noGit: args.includes('--no-git'),
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
   };
 }
@@ -397,10 +394,10 @@ function spawnLaneResume(
   state: LaneState,
   options: { 
     restart: boolean;
-    noGit?: boolean;
     pipelineBranch?: string;
     executor?: string | null;
     enhancedLogConfig?: any;
+    laneIndex?: number;
   }
 ): { child: ChildProcess; logManager: EnhancedLogManager } {
   const runnerPath = require.resolve('../core/runner');
@@ -417,10 +414,6 @@ function spawnLaneResume(
     runnerArgs.push('--worktree-dir', state.worktreeDir);
   }
 
-  if (options.noGit) {
-    runnerArgs.push('--no-git');
-  }
-
   // Explicitly pass pipeline branch if available (either from state or override)
   const branch = options.pipelineBranch || state.pipelineBranch;
   if (branch) {
@@ -432,16 +425,28 @@ function spawnLaneResume(
     runnerArgs.push('--executor', options.executor);
   }
 
-  const shortLaneName = laneName.substring(0, 10);
+  // Generate lane label: [laneIdx-taskIdx-laneName-taskName] format, padded to 18 chars
+  // Note: taskName will be updated dynamically via logManager.setTask()
+  let currentTaskName = '';
+  let currentTaskIdx = (state.currentTaskIndex ?? 0) + 1;
+  const getLaneLabel = () => {
+    const laneIdx = options.laneIndex ?? 1;
+    const combined = currentTaskName 
+      ? `${laneIdx}-${currentTaskIdx}-${laneName}-${currentTaskName}`
+      : `${laneIdx}-${currentTaskIdx}-${laneName}`;
+    const label = combined.substring(0, 18).padEnd(18);
+    return `[${label}]`;
+  };
+  
   const logManager = createLogManager(laneDir, laneName, options.enhancedLogConfig || {}, (msg) => {
     const formatted = formatMessageForConsole(msg, { 
-      laneLabel: `[${shortLaneName}]`,
+      laneLabel: getLaneLabel(),
       includeTimestamp: true 
     });
     process.stdout.write(formatted + '\n');
-  });
+  }, options.laneIndex);
   
-  const child = spawn('node', runnerArgs, {
+  const child = spawn(process.execPath, runnerArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: process.env,
   });
@@ -489,7 +494,6 @@ async function resumeLanes(
     restart: boolean; 
     maxConcurrent: number; 
     skipDoctor: boolean; 
-    noGit: boolean;
     executor: string | null;
     enhancedLogConfig?: any;
   }
@@ -547,6 +551,8 @@ async function resumeLanes(
   const pending = new Set<string>(resolvableLanes.map(l => l.name));
   const active: Map<string, ChildProcess> = new Map();
   const laneMap = new Map<string, LaneInfo>(resolvableLanes.map(l => [l.name, l]));
+  // Track lane indices for consistent logging
+  const laneIndexMap = new Map<string, number>(allLanes.map((l, i) => [l.name, i + 1]));
   
   const findReadyLane = (): LaneInfo | null => {
     for (const laneName of pending) {
@@ -558,7 +564,7 @@ async function resumeLanes(
     return null;
   };
   
-  const processNext = (): void => {
+  const processNext = async (): Promise<void> => {
     while (active.size < options.maxConcurrent) {
       const lane = findReadyLane();
       if (!lane) {
@@ -572,13 +578,19 @@ async function resumeLanes(
       }
       
       pending.delete(lane.name);
+      
+      // Add a small delay between starting lanes to reduce initial resource contention
+      if (active.size > 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
       logger.info(`Starting: ${lane.name} (task ${lane.state!.currentTaskIndex}/${lane.state!.totalTasks})`);
       
       const { child } = spawnLaneResume(lane.name, lane.dir, lane.state!, {
         restart: options.restart,
-        noGit: options.noGit,
         executor: options.executor,
         enhancedLogConfig: options.enhancedLogConfig,
+        laneIndex: laneIndexMap.get(lane.name) ?? 1,
       });
       
       active.set(lane.name, child);
@@ -606,12 +618,12 @@ async function resumeLanes(
     }
   };
   
-  processNext();
+  await processNext();
   
   while (active.size > 0 || pending.size > 0) {
     await new Promise(resolve => setTimeout(resolve, 1000));
     if (active.size < options.maxConcurrent && pending.size > 0) {
-      processNext();
+      await processNext();
     }
   }
   
@@ -725,7 +737,6 @@ async function resume(args: string[]): Promise<void> {
     restart: options.restart,
     maxConcurrent: options.maxConcurrent,
     skipDoctor: options.skipDoctor,
-    noGit: options.noGit,
     executor: options.executor,
     enhancedLogConfig: config.enhancedLogging,
   });

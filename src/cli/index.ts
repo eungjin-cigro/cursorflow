@@ -2,6 +2,9 @@
  * CursorFlow CLI - Main entry point
  */
 
+// Suppress MaxListenersExceededWarning for child processes
+process.setMaxListeners(0);
+
 import * as logger from '../utils/logger';
 
 // Command functions signature

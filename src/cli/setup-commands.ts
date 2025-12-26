@@ -202,7 +202,7 @@ export function areCommandsInstalled(): boolean {
   return sourceFiles.every(f => targetFiles.includes(f));
 }
 
-async function main(args: string[]): Promise<any> {
+export async function main(args: string[]): Promise<any> {
   const options = parseArgs(args);
   
   try {

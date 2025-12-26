@@ -15,6 +15,9 @@ module.exports = {
   allowDependencyChange: false,
   lockfileReadOnly: true,
   
+  // Intervention - allows sending messages to running agents
+  enableIntervention: true,
+  
   // Review configuration
   enableReview: false,
   reviewModel: 'sonnet-4.5-thinking',

@@ -179,13 +179,19 @@ function findFlowDir(flowsDir: string, flowName: string): string | null {
 
 /**
  * Find lane file in flow directory
+ * Supports both formats: "backend.json" (new) and "01-backend.json" (legacy)
  */
 function findLaneFile(flowDir: string, laneName: string): string | null {
   const files = fs.readdirSync(flowDir)
     .filter(name => name.endsWith('.json') && name !== 'flow.meta.json');
 
   for (const file of files) {
-    // Match by lane name in filename (e.g., "01-backend.json" -> "backend")
+    // New format: "backend.json"
+    if (file === `${laneName}.json`) {
+      return safeJoin(flowDir, file);
+    }
+    
+    // Legacy format: "01-backend.json"
     const match = file.match(/^\d+-([^.]+)\.json$/);
     if (match && match[1] === laneName) {
       return safeJoin(flowDir, file);
@@ -222,10 +228,9 @@ function resolveAfterDependencies(
       
       const lastTask = laneConfig.tasks[laneConfig.tasks.length - 1];
       
-      // Get lane name from file
+      // Get lane name from file (supports both "backend.json" and "01-backend.json")
       const fileName = path.basename(laneFile);
-      const match = fileName.match(/^(\d+-[^.]+)\.json$/);
-      const laneId = match ? match[1] : dep;
+      const laneId = fileName.replace(/\.json$/, '');
       
       dependsOn.push(`${laneId}:${lastTask.name}`);
     }

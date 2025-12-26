@@ -200,9 +200,8 @@ async function newFlow(args: string[]): Promise<void> {
   fs.writeFileSync(metaPath, JSON.stringify(flowMeta, null, 2));
 
   // Create lane files
-  options.lanes.forEach((laneName, index) => {
-    const laneNumber = String(index + 1).padStart(2, '0');
-    const laneFileName = `${laneNumber}-${laneName}.json`;
+  options.lanes.forEach((laneName) => {
+    const laneFileName = `${laneName}.json`;
     const lanePath = safeJoin(flowDir, laneFileName);
     
     const laneConfig = createEmptyLaneConfig(laneName);
@@ -215,10 +214,9 @@ async function newFlow(args: string[]): Promise<void> {
   console.log(`  📁 ${flowDir}`);
   console.log(`     ├── flow.meta.json`);
   options.lanes.forEach((laneName, index) => {
-    const laneNumber = String(index + 1).padStart(2, '0');
     const isLast = index === options.lanes.length - 1;
     const prefix = isLast ? '└──' : '├──';
-    console.log(`     ${prefix} ${laneNumber}-${laneName}.json  (빈 상태)`);
+    console.log(`     ${prefix} ${laneName}.json  (빈 상태)`);
   });
   
   console.log('');
