@@ -10,7 +10,6 @@ import * as path from 'path';
 import * as logger from '../utils/logger';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
-import { events } from '../utils/events';
 import { RunnerConfig } from '../types';
 
 // Re-export everything from modular components
