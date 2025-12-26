@@ -21,36 +21,30 @@ import {
 } from './types';
 
 class CursorFlowEvents extends EventEmitter {
-  private runId: string = '';
-
-  setRunId(id: string) {
-    this.runId = id;
-  }
-
   // Specific event overloads for emit
-  emit(type: 'orchestration.started', payload: OrchestrationStartedPayload): boolean;
-  emit(type: 'orchestration.completed', payload: OrchestrationCompletedPayload): boolean;
-  emit(type: 'orchestration.failed', payload: OrchestrationFailedPayload): boolean;
-  emit(type: 'lane.started', payload: LaneStartedPayload): boolean;
-  emit(type: 'lane.completed', payload: LaneCompletedPayload): boolean;
-  emit(type: 'lane.failed', payload: LaneFailedPayload): boolean;
-  emit(type: 'lane.dependency_requested', payload: LaneDependencyRequestedPayload): boolean;
-  emit(type: 'task.started', payload: TaskStartedPayload): boolean;
-  emit(type: 'task.completed', payload: TaskCompletedPayload): boolean;
-  emit(type: 'task.failed', payload: TaskFailedPayload): boolean;
-  emit(type: 'agent.prompt_sent', payload: AgentPromptSentPayload): boolean;
-  emit(type: 'agent.response_received', payload: AgentResponseReceivedPayload): boolean;
-  emit(type: 'review.started', payload: ReviewStartedPayload): boolean;
-  emit(type: 'review.completed', payload: ReviewCompletedPayload): boolean;
-  emit(type: 'review.approved', payload: ReviewApprovedPayload): boolean;
-  emit(type: 'review.rejected', payload: ReviewRejectedPayload): boolean;
-  emit(type: string, payload: any): boolean;
-  emit(type: string, payload: any): boolean {
+  emit(type: 'orchestration.started', payload: OrchestrationStartedPayload, runId: string): boolean;
+  emit(type: 'orchestration.completed', payload: OrchestrationCompletedPayload, runId: string): boolean;
+  emit(type: 'orchestration.failed', payload: OrchestrationFailedPayload, runId: string): boolean;
+  emit(type: 'lane.started', payload: LaneStartedPayload, runId: string): boolean;
+  emit(type: 'lane.completed', payload: LaneCompletedPayload, runId: string): boolean;
+  emit(type: 'lane.failed', payload: LaneFailedPayload, runId: string): boolean;
+  emit(type: 'lane.dependency_requested', payload: LaneDependencyRequestedPayload, runId: string): boolean;
+  emit(type: 'task.started', payload: TaskStartedPayload, runId: string): boolean;
+  emit(type: 'task.completed', payload: TaskCompletedPayload, runId: string): boolean;
+  emit(type: 'task.failed', payload: TaskFailedPayload, runId: string): boolean;
+  emit(type: 'agent.prompt_sent', payload: AgentPromptSentPayload, runId: string): boolean;
+  emit(type: 'agent.response_received', payload: AgentResponseReceivedPayload, runId: string): boolean;
+  emit(type: 'review.started', payload: ReviewStartedPayload, runId: string): boolean;
+  emit(type: 'review.completed', payload: ReviewCompletedPayload, runId: string): boolean;
+  emit(type: 'review.approved', payload: ReviewApprovedPayload, runId: string): boolean;
+  emit(type: 'review.rejected', payload: ReviewRejectedPayload, runId: string): boolean;
+  emit(type: string, payload: any, runId: string): boolean;
+  emit(type: string, payload: any, runId: string): boolean {
     const event: CursorFlowEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       type,
       timestamp: new Date().toISOString(),
-      runId: this.runId,
+      runId,
       payload,
     };
 
