@@ -355,7 +355,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
           onTimeout: 'fail',
         });
         
-        await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch);
+        await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch, runId);
         
         state.status = 'running';
         state.waitingFor = [];
@@ -387,6 +387,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       taskBranch,
       chatId,
       runDir,
+      runId,
     });
     
     results.push(result);
