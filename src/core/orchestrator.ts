@@ -549,12 +549,12 @@ async function resolveAllDependencies(
 
   if (!fs.existsSync(worktreeDir)) {
     logger.info(`🏗️ Creating resolution worktree at ${worktreeDir}`);
-    git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: git.getCurrentBranch() });
+    git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: git.getCurrentBranch(undefined, { verbose: false }), verbose: false });
   }
 
   // 3. Resolve on pipeline branch
   logger.info(`🔄 Resolving dependencies on branch ${pipelineBranch}`);
-  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: false });
   
   for (const cmd of uniqueCommands) {
     logger.info(`Running: ${cmd}`);
@@ -566,16 +566,16 @@ async function resolveAllDependencies(
   }
   
   try {
-    git.runGit(['add', '.'], { cwd: worktreeDir });
-    git.runGit(['commit', '-m', `chore: auto-resolve dependencies\n\n${uniqueChanges.join('\n')}`], { cwd: worktreeDir });
+    git.runGit(['add', '.'], { cwd: worktreeDir, verbose: false });
+    git.runGit(['commit', '-m', `chore: auto-resolve dependencies\n\n${uniqueChanges.join('\n')}`], { cwd: worktreeDir, verbose: false });
 
     // Log changed files
-    const stats = git.getLastOperationStats(worktreeDir);
+    const stats = git.getLastOperationStats(worktreeDir, { verbose: false });
     if (stats) {
       logger.info('Changed files:\n' + stats);
     }
 
-    git.push(pipelineBranch, { cwd: worktreeDir });
+    git.push(pipelineBranch, { cwd: worktreeDir, verbose: false });
   } catch (e) { /* ignore if nothing to commit */ }
 
   // 4. Sync ALL active lanes (blocked + pending + running)
@@ -599,17 +599,17 @@ async function resolveAllDependencies(
       
       try {
         // If task branch doesn't exist yet, it will be created from pipelineBranch when the lane starts
-        if (git.branchExists(taskBranch, { cwd: worktreeDir })) {
-          git.runGit(['checkout', taskBranch], { cwd: worktreeDir });
-          git.runGit(['merge', pipelineBranch, '--no-edit'], { cwd: worktreeDir });
+        if (git.branchExists(taskBranch, { cwd: worktreeDir, verbose: false })) {
+          git.runGit(['checkout', taskBranch], { cwd: worktreeDir, verbose: false });
+          git.runGit(['merge', pipelineBranch, '--no-edit'], { cwd: worktreeDir, verbose: false });
           
           // Log changed files
-          const stats = git.getLastOperationStats(worktreeDir);
+          const stats = git.getLastOperationStats(worktreeDir, { verbose: false });
           if (stats) {
             logger.info(`Sync results for ${lane.name}:\n` + stats);
           }
 
-          git.push(taskBranch, { cwd: worktreeDir });
+          git.push(taskBranch, { cwd: worktreeDir, verbose: false });
         }
       } catch (e: any) {
         logger.warn(`Failed to sync branch ${taskBranch}: ${e.message}`);
@@ -617,7 +617,7 @@ async function resolveAllDependencies(
     }
   }
   
-  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: false });
 }
 
 /**
@@ -682,7 +682,7 @@ export async function orchestrate(tasksDir: string, options: {
   
   // Clean stale locks before starting
   try {
-    const lockDir = getLockDir(git.getRepoRoot());
+    const lockDir = getLockDir(git.getRepoRoot(undefined, { verbose: false }));
     const cleaned = cleanStaleLocks(lockDir);
     if (cleaned > 0) {
       logger.info(`Cleaned ${cleaned} stale lock(s)`);
