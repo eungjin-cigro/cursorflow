@@ -40,7 +40,7 @@ import {
 } from './auto-recovery';
 import {
   StallDetectionService,
-  getStallService,
+  createStallDetectionService,
   StallDetectionConfig,
   DEFAULT_STALL_CONFIG,
   RecoveryAction,
@@ -696,7 +696,7 @@ export async function orchestrate(tasksDir: string, options: {
   const pipelineBranch = `cursorflow/run-${Date.now().toString(36)}-${randomSuffix}`;
 
   // Initialize unified stall detection service (Single Source of Truth)
-  const stallService = getStallService({
+  const stallService = createStallDetectionService(runId, {
     ...DEFAULT_ORCHESTRATOR_STALL_CONFIG,
     ...options.stallConfig,
     verbose: process.env['DEBUG_STALL'] === 'true',
