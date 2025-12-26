@@ -47,8 +47,6 @@ if (require.main === module) {
   const runsIdx = parts.lastIndexOf('runs');
   const runId = runsIdx >= 0 && parts[runsIdx + 1] ? parts[runsIdx + 1]! : `run-${Date.now()}`;
   
-  events.setRunId(runId);
-
   // Load global config for defaults and webhooks
   let globalConfig;
   try {
@@ -105,7 +103,7 @@ if (require.main === module) {
   process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
   // Run tasks
-  runTasks(tasksFile, config, runDir, { startIndex })
+  runTasks(tasksFile, config, runDir, { startIndex, runId })
     .then(() => {
       process.exit(0);
     })

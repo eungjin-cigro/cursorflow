@@ -40,8 +40,15 @@ function validateTaskConfig(config: RunnerConfig): void {
 /**
  * Run all tasks in sequence
  */
-export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; skipPreflight?: boolean } = {}): Promise<TaskExecutionResult[]> {
+export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: string, options: { startIndex?: number; skipPreflight?: boolean; runId?: string } = {}): Promise<TaskExecutionResult[]> {
   const startIndex = options.startIndex || 0;
+  
+  // Extract runId from runDir or options
+  const runId = options.runId || (() => {
+    const parts = path.resolve(runDir).split(path.sep);
+    const runsIdx = parts.lastIndexOf('runs');
+    return (runsIdx >= 0 && parts[runsIdx + 1]) ? parts[runsIdx + 1]! : `run-${Date.now()}`;
+  })();
   
   // Ensure paths are absolute before potentially changing directory
   runDir = path.resolve(runDir);
@@ -402,7 +409,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         events.emit('lane.dependency_requested', {
           laneName: state.label,
           dependencyRequest: result.dependencyRequest,
-        });
+        }, runId);
       }
       
       logger.warn('Task blocked on dependency change');
@@ -437,7 +444,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         pipelineBranch,
         conflictingFiles: conflictCheck.conflictingFiles,
         preCheck: true,
-      });
+      }, runId);
     }
     
     // Use safeMerge instead of plain merge for better error handling
