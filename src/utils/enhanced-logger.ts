@@ -106,6 +106,9 @@ export class EnhancedLogManager {
   
   private onParsedMessage?: (msg: ParsedMessage) => void;
 
+  private stdoutBuffer: string = '';
+  private stderrBuffer: string = '';
+
   constructor(logDir: string, session: LogSession, config: Partial<EnhancedLogConfig> = {}, onParsedMessage?: (msg: ParsedMessage) => void) {
     this.config = { ...DEFAULT_LOG_CONFIG, ...config };
     this.session = session;
@@ -294,41 +297,80 @@ export class EnhancedLogManager {
     this.writeToRawLog(data);
     
     // Parse JSON output and write to readable log
-    const lines = text.split('\n');
+    this.stdoutBuffer += text;
+    const lines = this.stdoutBuffer.split('\n');
+    this.stdoutBuffer = lines.pop() || '';
+
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      
-      // Try to parse as JSON (cursor-agent output)
-      if (trimmed.startsWith('{')) {
-        try {
-          const json = JSON.parse(trimmed);
-          const msg = this.parseJsonToMessage(json);
-          if (msg) {
-            this.writeReadableMessage(msg);
-            continue;
-          }
-        } catch {
-          // Not valid JSON, fall through
+      this.processStdoutLine(line);
+    }
+  }
+
+  /**
+   * Process a single stdout line
+   */
+  private processStdoutLine(line: string): void {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    
+    // Try to parse as JSON (cursor-agent output)
+    if (trimmed.startsWith('{')) {
+      try {
+        const json = JSON.parse(trimmed);
+        const msg = this.parseJsonToMessage(json);
+        if (msg) {
+          this.writeReadableMessage(msg);
+          return;
         }
+      } catch {
+        // Not valid JSON, fall through
       }
+    }
+    
+    // Non-JSON line - write as-is with short timestamp and lane-task label
+    const cleanLine = stripAnsi(trimmed);
+    if (cleanLine && !this.isNoiseLog(cleanLine)) {
+      const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
+      const label = this.getLaneTaskLabel();
       
-      // Non-JSON line - write as-is with short timestamp and lane-task label
-      const cleanLine = stripAnsi(trimmed);
-      if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
-        const label = this.getLaneTaskLabel();
-        
-        if (hasTimestamp) {
-          // If already has timestamp, just ensure label is present
-          const formatted = cleanLine.includes(`[${label}]`) 
-            ? cleanLine 
-            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
-          this.writeToReadableLog(`${formatted}\n`);
-        } else {
-          const ts = this.getShortTime();
-          this.writeToReadableLog(`[${ts}] [${label}] ${cleanLine}\n`);
+      let formattedLine = '';
+      if (hasTimestamp) {
+        // If already has timestamp, just ensure label is present
+        formattedLine = cleanLine.includes(`[${label}]`) 
+          ? cleanLine 
+          : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
+        this.writeToReadableLog(`${formattedLine}\n`);
+      } else {
+        const ts = this.getShortTime();
+        formattedLine = `[${ts}] [${label}] ${cleanLine}`;
+        this.writeToReadableLog(`${formattedLine}\n`);
+      }
+
+      // Also call onParsedMessage for console display if it's not a JSON message
+      if (this.onParsedMessage) {
+        // Try to detect log level from the line content (e.g. "ℹ️ INFO", "❌ ERR")
+        let type: 'info' | 'warn' | 'error' | 'success' | 'debug' | 'progress' = 'info';
+        let content = cleanLine;
+
+        // Strip existing [HH:MM:SS] prefix if present to avoid double timestamp in console
+        content = content.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
+
+        if (content.includes('ERR') || content.includes('❌') || content.includes('ERROR')) {
+          type = 'error';
+        } else if (content.includes('WARN') || content.includes('⚠️')) {
+          type = 'warn';
+        } else if (content.includes('SUCCESS') || content.includes('✓')) {
+          type = 'success';
+        } else if (content.includes('DEBUG')) {
+          type = 'debug';
         }
+
+        this.onParsedMessage({
+          type,
+          role: 'system',
+          content,
+          timestamp: Date.now(),
+        });
       }
     }
   }
@@ -440,22 +482,44 @@ export class EnhancedLogManager {
     this.writeToRawLog(data);
     
     // Write to readable log with error prefix
-    const lines = text.split('\n');
+    this.stderrBuffer += text;
+    const lines = this.stderrBuffer.split('\n');
+    this.stderrBuffer = lines.pop() || '';
+
     for (const line of lines) {
-      const cleanLine = stripAnsi(line).trim();
-      if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
-        const label = this.getLaneTaskLabel();
-        
-        if (hasTimestamp) {
-          const formatted = cleanLine.includes(`[${label}]`) 
-            ? cleanLine 
-            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}] ❌ ERR`);
-          this.writeToReadableLog(`${formatted}\n`);
-        } else {
-          const ts = this.getShortTime();
-          this.writeToReadableLog(`[${ts}] [${label}] ❌ ERR ${cleanLine}\n`);
-        }
+      this.processStderrLine(line);
+    }
+  }
+
+  /**
+   * Process a single stderr line
+   */
+  private processStderrLine(line: string): void {
+    const cleanLine = stripAnsi(line).trim();
+    if (cleanLine && !this.isNoiseLog(cleanLine)) {
+      const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
+      const label = this.getLaneTaskLabel();
+      
+      let formattedLine = '';
+      if (hasTimestamp) {
+        formattedLine = cleanLine.includes(`[${label}]`) 
+          ? cleanLine 
+          : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}] ❌ ERR`);
+        this.writeToReadableLog(`${formattedLine}\n`);
+      } else {
+        const ts = this.getShortTime();
+        formattedLine = `[${ts}] [${label}] ❌ ERR ${cleanLine}`;
+        this.writeToReadableLog(`${formattedLine}\n`);
+      }
+
+      // Also call onParsedMessage for console display
+      if (this.onParsedMessage) {
+        this.onParsedMessage({
+          type: 'error',
+          role: 'system',
+          content: cleanLine.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, ''),
+          timestamp: Date.now(),
+        });
       }
     }
   }
@@ -539,6 +603,16 @@ export class EnhancedLogManager {
    * Close all log files
    */
   public close(): void {
+    // Flush remaining data in buffers
+    if (this.stdoutBuffer.trim()) {
+      this.processStdoutLine(this.stdoutBuffer);
+      this.stdoutBuffer = '';
+    }
+    if (this.stderrBuffer.trim()) {
+      this.processStderrLine(this.stderrBuffer);
+      this.stderrBuffer = '';
+    }
+
     // Write session end marker
     const endMarker = `
 ╔══════════════════════════════════════════════════════════════════════════════╗

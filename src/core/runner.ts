@@ -18,6 +18,7 @@ export * from './runner/index';
 
 // Import necessary parts for the CLI entry point
 import { runTasks } from './runner/pipeline';
+import { cleanupAgentChildren } from './runner/agent';
 
 /**
  * CLI entry point
@@ -89,6 +90,17 @@ if (require.main === module) {
   // Add agent output format default
   config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'json';
   
+  // Handle process interruption to ensure cleanup
+  const handleSignal = (signal: string) => {
+    logger.warn(`\n⚠️ Runner received ${signal}. Shutting down...`);
+    // Cleanup any active agent child processes
+    cleanupAgentChildren();
+    process.exit(1);
+  };
+
+  process.on('SIGINT', () => handleSignal('SIGINT'));
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
+
   // Run tasks
   runTasks(tasksFile, config, runDir, { startIndex, noGit })
     .then(() => {

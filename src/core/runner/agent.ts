@@ -1,10 +1,34 @@
-import { spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync, ChildProcess } from 'child_process';
 import * as logger from '../../utils/logger';
 import { AgentSendResult, DependencyRequestPlan } from '../../types';
 import { withRetry } from '../failure-policy';
 import * as path from 'path';
 import * as fs from 'fs';
 import { appendLog, createConversationEntry } from '../../utils/state';
+
+/**
+ * Track active child processes for cleanup
+ */
+const activeChildren = new Set<ChildProcess>();
+
+/**
+ * Cleanup all active children
+ */
+export function cleanupAgentChildren(): void {
+  if (activeChildren.size > 0) {
+    logger.warn(`Cleaning up ${activeChildren.size} active agent child processes...`);
+    for (const child of activeChildren) {
+      if (!child.killed) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    activeChildren.clear();
+  }
+}
 
 /**
  * Execute cursor-agent command with timeout and better error handling
@@ -145,6 +169,12 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
       stdio: enableIntervention ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     });
 
+    activeChildren.add(child);
+
+    if (!enableIntervention) {
+      logger.info('ℹ️ Intervention is disabled. Stall recovery using "continue" will not be available for this agent session.');
+    }
+
     let fullStdout = '';
     let fullStderr = '';
     let timeoutHandle: NodeJS.Timeout;
@@ -235,6 +265,7 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     }, timeoutMs);
 
     child.on('close', (code) => {
+      activeChildren.delete(child);
       clearTimeout(timeoutHandle);
       clearInterval(heartbeatInterval);
       if (signalWatcher) signalWatcher.close();
@@ -255,6 +286,7 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     });
 
     child.on('error', (err) => {
+      activeChildren.delete(child);
       clearTimeout(timeoutHandle);
       if (signalWatcher) signalWatcher.close();
       resolve({ ok: false, exitCode: -1, error: `Failed to start cursor-agent: ${err.message}` });
