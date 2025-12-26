@@ -165,7 +165,6 @@ async function clean(args: string[]): Promise<void> {
   }
 
   const config = loadConfig();
-  git.setVerboseGit(config.verboseGit || false);
   const repoRoot = git.getRepoRoot();
   const logsDir = getLogsDir(config);
   const runsDir = safeJoin(logsDir, 'runs');

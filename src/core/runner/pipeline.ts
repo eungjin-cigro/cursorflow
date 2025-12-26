@@ -85,9 +85,6 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.warn(`⚠️  config.baseBranch="${config.baseBranch}" will be ignored. Using current branch instead.`);
   }
 
-  // Set verbose git logging
-  git.setVerboseGit(config.verboseGit || false);
-  
   // Ensure cursor-agent is installed
   ensureCursorAgent();
   
