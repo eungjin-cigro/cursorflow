@@ -85,9 +85,6 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.warn(`⚠️  config.baseBranch="${config.baseBranch}" will be ignored. Using current branch instead.`);
   }
 
-  // Set verbose git logging
-  git.setVerboseGit(config.verboseGit || false);
-  
   // Ensure cursor-agent is installed
   ensureCursorAgent();
   
@@ -115,11 +112,11 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   logger.success('✓ Cursor authentication OK');
   
-  const repoRoot = git.getMainRepoRoot();
+  const repoRoot = git.getMainRepoRoot(undefined, { verbose: false });
   
   // ALWAYS use current branch as base - ignore config.baseBranch
   // This ensures dependency structure is maintained in the worktree
-  const currentBranch = git.getCurrentBranch(repoRoot);
+  const currentBranch = git.getCurrentBranch(repoRoot, { verbose: false });
   logger.info(`📍 Base branch: ${currentBranch} (current branch)`);
   
   // Load existing state if resuming
@@ -193,6 +190,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
         await git.createWorktreeAsync(worktreeDir, pipelineBranch, { 
           baseBranch: currentBranch,
           cwd: repoRoot,
+          verbose: false,
         });
         break; // Success
       } catch (e: any) {
@@ -213,7 +211,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     // If it exists, ensure it's actually a worktree and on the right branch
     logger.info(`Reusing existing worktree: ${worktreeDir}`);
     try {
-      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: false });
     } catch (e) {
       // If checkout fails, maybe the worktree is in a weird state. 
       // For now, just log it. In a more robust impl, we might want to repair it.
@@ -299,9 +297,9 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       logger.info(`🧹 Deleting previous task branch: ${previousTaskBranch}`);
       try {
         // Only delete if it's not the current branch
-        const current = git.getCurrentBranch(worktreeDir);
+        const current = git.getCurrentBranch(worktreeDir, { verbose: false });
         if (current !== previousTaskBranch) {
-          git.deleteBranch(previousTaskBranch, { cwd: worktreeDir, force: true });
+          git.deleteBranch(previousTaskBranch, { cwd: worktreeDir, force: true, verbose: false });
         }
       } catch (e) {
         logger.warn(`Failed to delete previous branch ${previousTaskBranch}: ${e}`);
@@ -405,7 +403,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     
     // Ensure we are on the pipeline branch before merging the task branch
     logger.info(`🔄 Switching to pipeline branch ${pipelineBranch} to integrate changes`);
-    git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+    git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: false });
     
     // Pre-check for conflicts (should be rare since task branch was created from pipeline)
     const conflictCheck = git.checkMergeConflict(taskBranch, { cwd: worktreeDir });
@@ -430,6 +428,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       noFf: true,
       message: `chore: merge task ${task.name} into pipeline`,
       abortOnConflict: true,
+      verbose: false,
     });
     
     if (!mergeResult.success) {
@@ -449,7 +448,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       logger.info('Changed files:\n' + stats);
     }
 
-    git.push(pipelineBranch, { cwd: worktreeDir });
+    git.push(pipelineBranch, { cwd: worktreeDir, verbose: false });
     
     // Set previousTaskBranch for cleanup in the next iteration
     previousTaskBranch = taskBranch;
@@ -463,7 +462,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   if (previousTaskBranch) {
     logger.info(`🧹 Deleting last task branch: ${previousTaskBranch}`);
     try {
-      git.deleteBranch(previousTaskBranch, { cwd: worktreeDir, force: true });
+      git.deleteBranch(previousTaskBranch, { cwd: worktreeDir, force: true, verbose: false });
     } catch (e) {
       logger.warn(`   Failed to delete last task branch: ${e}`);
     }
@@ -474,17 +473,17 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.info(`🌿 Creating final flow branch: ${flowBranch}`);
     try {
       // Create/Overwrite flow branch from pipeline branch
-      git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir });
-      git.push(flowBranch, { cwd: worktreeDir, setUpstream: true });
+      git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir, verbose: false });
+      git.push(flowBranch, { cwd: worktreeDir, setUpstream: true, verbose: false });
       
       // 3. Delete temporary pipeline branch
       logger.info(`🗑️ Deleting temporary pipeline branch: ${pipelineBranch}`);
       // Must be on another branch to delete pipelineBranch
-      git.runGit(['checkout', flowBranch], { cwd: worktreeDir });
-      git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true });
+      git.runGit(['checkout', flowBranch], { cwd: worktreeDir, verbose: false });
+      git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true, verbose: false });
       
       try {
-        git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true, remote: true });
+        git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true, remote: true, verbose: false });
         logger.info(`   Deleted remote branch: origin/${pipelineBranch}`);
       } catch {
         // May not exist on remote or delete failed
@@ -504,7 +503,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   // Log final file summary
   try {
     // Always use current branch for comparison (already captured at start)
-    const finalStats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { cwd: repoRoot, silent: true });
+    const finalStats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { cwd: repoRoot, silent: true, verbose: false });
     if (finalStats) {
       logger.info('Final Workspace Summary:\n' + finalStats);
     }

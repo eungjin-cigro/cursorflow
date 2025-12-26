@@ -8,15 +8,6 @@ import * as path from 'path';
 import { safeJoin } from './path';
 import * as logger from './logger';
 
-let verboseGitEnabled = true;
-
-/**
- * Enable or disable verbose git logging
- */
-export function setVerboseGit(enabled: boolean): void {
-  verboseGitEnabled = enabled;
-}
-
 /**
  * Acquire a file-based lock for Git operations
  */
@@ -88,6 +79,7 @@ async function runGitWithLock<T>(
 export interface GitRunOptions {
   cwd?: string;
   silent?: boolean;
+  verbose?: boolean;
 }
 
 export interface GitResult {
@@ -141,8 +133,9 @@ function filterGitStderr(stderr: string): string {
  */
 export function runGit(args: string[], options: GitRunOptions = {}): string {
   const { cwd, silent = false } = options;
+  const verbose = options.verbose ?? (process.env['DEBUG_GIT'] ? process.env['DEBUG_GIT'] === 'true' : true);
   
-  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+  if (verbose) {
     logger.debug(`Running: git ${args.join(' ')}`, { context: 'git', emoji: '🛠️' });
     if (cwd) {
       logger.debug(`  cwd: ${cwd}`, { context: 'git' });
@@ -195,8 +188,9 @@ export function runGit(args: string[], options: GitRunOptions = {}): string {
  */
 export function runGitResult(args: string[], options: GitRunOptions = {}): GitResult {
   const { cwd } = options;
+  const verbose = options.verbose ?? (process.env['DEBUG_GIT'] ? process.env['DEBUG_GIT'] === 'true' : true);
   
-  if (verboseGitEnabled || process.env['DEBUG_GIT']) {
+  if (verbose) {
     logger.debug(`Running: git ${args.join(' ')} (result mode)`, { context: 'git', emoji: '🛠️' });
     if (cwd) {
       logger.debug(`  cwd: ${cwd}`, { context: 'git' });
@@ -227,23 +221,23 @@ export function runGitResult(args: string[], options: GitRunOptions = {}): GitRe
 /**
  * Get current branch name
  */
-export function getCurrentBranch(cwd?: string): string {
-  return runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, silent: true });
+export function getCurrentBranch(cwd?: string, options: GitRunOptions = {}): string {
+  return runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, silent: true, ...options });
 }
 
 /**
  * Get repository root directory
  */
-export function getRepoRoot(cwd?: string): string {
-  return runGit(['rev-parse', '--show-toplevel'], { cwd, silent: true });
+export function getRepoRoot(cwd?: string, options: GitRunOptions = {}): string {
+  return runGit(['rev-parse', '--show-toplevel'], { cwd, silent: true, ...options });
 }
 
 /**
  * Get main repository root directory (for worktrees)
  */
-export function getMainRepoRoot(cwd?: string): string {
+export function getMainRepoRoot(cwd?: string, options: GitRunOptions = {}): string {
   try {
-    const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd });
+    const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd, ...options });
     if (result.success && result.stdout) {
       const firstLine = result.stdout.split('\n')[0];
       if (firstLine && firstLine.startsWith('worktree ')) {
@@ -253,22 +247,22 @@ export function getMainRepoRoot(cwd?: string): string {
   } catch {
     // Fallback to normal repo root
   }
-  return getRepoRoot(cwd);
+  return getRepoRoot(cwd, options);
 }
 
 /**
  * Check if directory is a git repository
  */
-export function isGitRepo(cwd?: string): boolean {
-  const result = runGitResult(['rev-parse', '--git-dir'], { cwd });
+export function isGitRepo(cwd?: string, options: GitRunOptions = {}): boolean {
+  const result = runGitResult(['rev-parse', '--git-dir'], { cwd, ...options });
   return result.success;
 }
 
 /**
  * Check if worktree exists
  */
-export function worktreeExists(worktreePath: string, cwd?: string): boolean {
-  const result = runGitResult(['worktree', 'list'], { cwd });
+export function worktreeExists(worktreePath: string, cwd?: string, options: GitRunOptions = {}): boolean {
+  const result = runGitResult(['worktree', 'list'], { cwd, ...options });
   if (!result.success) return false;
   
   return result.stdout.includes(worktreePath);
@@ -277,11 +271,11 @@ export function worktreeExists(worktreePath: string, cwd?: string): boolean {
 /**
  * Create worktree
  */
-export function createWorktree(worktreePath: string, branchName: string, options: { cwd?: string; baseBranch?: string } = {}): string {
-  let { cwd, baseBranch } = options;
+export function createWorktree(worktreePath: string, branchName: string, options: GitRunOptions & { baseBranch?: string } = {}): string {
+  let { cwd, baseBranch, ...runOptions } = options;
   
   if (!baseBranch) {
-    baseBranch = getCurrentBranch(cwd) || 'refs/heads/main';
+    baseBranch = getCurrentBranch(cwd, runOptions) || 'refs/heads/main';
   }
 
   // Ensure baseBranch is unambiguous (branch name rather than tag)
@@ -291,7 +285,8 @@ export function createWorktree(worktreePath: string, branchName: string, options
     : `refs/heads/${baseBranch}`;
 
   // Use a file-based lock to prevent race conditions during worktree creation
-  const lockDir = safeJoin(cwd || getRepoRoot(), '_cursorflow', 'locks');
+  const repoRoot = getRepoRoot(cwd, runOptions);
+  const lockDir = safeJoin(cwd || repoRoot, '_cursorflow', 'locks');
   if (!fs.existsSync(lockDir)) {
     fs.mkdirSync(lockDir, { recursive: true });
   }
@@ -319,14 +314,14 @@ export function createWorktree(worktreePath: string, branchName: string, options
   
   try {
     // Check if branch already exists
-    const branchExists = runGitResult(['rev-parse', '--verify', branchName], { cwd }).success;
+    const branchExists = runGitResult(['rev-parse', '--verify', branchName], { cwd, ...runOptions }).success;
     
     if (branchExists) {
       // Branch exists, checkout to worktree
-      runGit(['worktree', 'add', worktreePath, branchName], { cwd });
+      runGit(['worktree', 'add', worktreePath, branchName], { cwd, ...runOptions });
     } else {
       // Create new branch from base
-      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd });
+      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd, ...runOptions });
     }
     
     return worktreePath;
@@ -342,22 +337,22 @@ export function createWorktree(worktreePath: string, branchName: string, options
 /**
  * Remove worktree
  */
-export function removeWorktree(worktreePath: string, options: { cwd?: string; force?: boolean } = {}): void {
-  const { cwd, force = false } = options;
+export function removeWorktree(worktreePath: string, options: GitRunOptions & { force?: boolean } = {}): void {
+  const { cwd, force = false, ...runOptions } = options;
   
   const args = ['worktree', 'remove', worktreePath];
   if (force) {
     args.push('--force');
   }
   
-  runGit(args, { cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * List all worktrees
  */
-export function listWorktrees(cwd?: string): WorktreeInfo[] {
-  const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd });
+export function listWorktrees(cwd?: string, options: GitRunOptions = {}): WorktreeInfo[] {
+  const result = runGitResult(['worktree', 'list', '--porcelain'], { cwd, ...options });
   if (!result.success) return [];
   
   const worktrees: WorktreeInfo[] = [];
@@ -387,16 +382,16 @@ export function listWorktrees(cwd?: string): WorktreeInfo[] {
 /**
  * Check if there are uncommitted changes
  */
-export function hasUncommittedChanges(cwd?: string): boolean {
-  const result = runGitResult(['status', '--porcelain'], { cwd });
+export function hasUncommittedChanges(cwd?: string, options: GitRunOptions = {}): boolean {
+  const result = runGitResult(['status', '--porcelain'], { cwd, ...options });
   return result.success && result.stdout.length > 0;
 }
 
 /**
  * Get list of changed files
  */
-export function getChangedFiles(cwd?: string): ChangedFile[] {
-  const result = runGitResult(['status', '--porcelain'], { cwd });
+export function getChangedFiles(cwd?: string, options: GitRunOptions = {}): ChangedFile[] {
+  const result = runGitResult(['status', '--porcelain'], { cwd, ...options });
   if (!result.success) return [];
   
   return result.stdout
@@ -412,21 +407,21 @@ export function getChangedFiles(cwd?: string): ChangedFile[] {
 /**
  * Create commit
  */
-export function commit(message: string, options: { cwd?: string; addAll?: boolean } = {}): void {
-  const { cwd, addAll = true } = options;
+export function commit(message: string, options: GitRunOptions & { addAll?: boolean } = {}): void {
+  const { cwd, addAll = true, ...runOptions } = options;
   
   if (addAll) {
-    runGit(['add', '-A'], { cwd });
+    runGit(['add', '-A'], { cwd, ...runOptions });
   }
   
-  runGit(['commit', '-m', message], { cwd });
+  runGit(['commit', '-m', message], { cwd, ...runOptions });
 }
 
 /**
  * Check if a remote exists
  */
-export function remoteExists(remoteName = 'origin', options: { cwd?: string } = {}): boolean {
-  const result = runGitResult(['remote'], { cwd: options.cwd });
+export function remoteExists(remoteName = 'origin', options: GitRunOptions = {}): boolean {
+  const result = runGitResult(['remote'], { cwd: options.cwd, ...options });
   if (!result.success) return false;
   return result.stdout.split('\n').map(r => r.trim()).includes(remoteName);
 }
@@ -434,11 +429,11 @@ export function remoteExists(remoteName = 'origin', options: { cwd?: string } = 
 /**
  * Push to remote
  */
-export function push(branchName: string, options: { cwd?: string; force?: boolean; setUpstream?: boolean } = {}): void {
-  const { cwd, force = false, setUpstream = false } = options;
+export function push(branchName: string, options: GitRunOptions & { force?: boolean; setUpstream?: boolean } = {}): void {
+  const { cwd, force = false, setUpstream = false, ...runOptions } = options;
   
   // Check if origin exists before pushing
-  if (!remoteExists('origin', { cwd })) {
+  if (!remoteExists('origin', { cwd, ...runOptions })) {
     // If no origin, just skip pushing (useful for local tests)
     return;
   }
@@ -455,34 +450,34 @@ export function push(branchName: string, options: { cwd?: string; force?: boolea
     args.push('origin', branchName);
   }
   
-  runGit(args, { cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Fetch from remote
  */
-export function fetch(options: { cwd?: string; prune?: boolean } = {}): void {
-  const { cwd, prune = true } = options;
+export function fetch(options: GitRunOptions & { prune?: boolean } = {}): void {
+  const { cwd, prune = true, ...runOptions } = options;
   
   const args = ['fetch', 'origin'];
   if (prune) {
     args.push('--prune');
   }
   
-  runGit(args, { cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Check if branch exists (local or remote)
  */
-export function branchExists(branchName: string, options: { cwd?: string; remote?: boolean } = {}): boolean {
-  const { cwd, remote = false } = options;
+export function branchExists(branchName: string, options: GitRunOptions & { remote?: boolean } = {}): boolean {
+  const { cwd, remote = false, ...runOptions } = options;
   
   if (remote) {
-    const result = runGitResult(['ls-remote', '--heads', 'origin', branchName], { cwd });
+    const result = runGitResult(['ls-remote', '--heads', 'origin', branchName], { cwd, ...runOptions });
     return result.success && result.stdout.length > 0;
   } else {
-    const result = runGitResult(['rev-parse', '--verify', branchName], { cwd });
+    const result = runGitResult(['rev-parse', '--verify', branchName], { cwd, ...runOptions });
     return result.success;
   }
 }
@@ -490,22 +485,22 @@ export function branchExists(branchName: string, options: { cwd?: string; remote
 /**
  * Delete branch
  */
-export function deleteBranch(branchName: string, options: { cwd?: string; force?: boolean; remote?: boolean } = {}): void {
-  const { cwd, force = false, remote = false } = options;
+export function deleteBranch(branchName: string, options: GitRunOptions & { force?: boolean; remote?: boolean } = {}): void {
+  const { cwd, force = false, remote = false, ...runOptions } = options;
   
   if (remote) {
-    runGit(['push', 'origin', '--delete', branchName], { cwd });
+    runGit(['push', 'origin', '--delete', branchName], { cwd, ...runOptions });
   } else {
     const args = ['branch', force ? '-D' : '-d', branchName];
-    runGit(args, { cwd });
+    runGit(args, { cwd, ...runOptions });
   }
 }
 
 /**
  * Merge branch
  */
-export function merge(branchName: string, options: { cwd?: string; noFf?: boolean; message?: string | null } = {}): void {
-  const { cwd, noFf = false, message = null } = options;
+export function merge(branchName: string, options: GitRunOptions & { noFf?: boolean; message?: string | null } = {}): void {
+  const { cwd, noFf = false, message = null, ...runOptions } = options;
   
   const args = ['merge'];
   
@@ -519,17 +514,17 @@ export function merge(branchName: string, options: { cwd?: string; noFf?: boolea
   
   args.push(branchName);
   
-  runGit(args, { cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Get commit info
  */
-export function getCommitInfo(commitHash: string, options: { cwd?: string } = {}): CommitInfo | null {
-  const { cwd } = options;
+export function getCommitInfo(commitHash: string, options: GitRunOptions = {}): CommitInfo | null {
+  const { cwd, ...runOptions } = options;
   
   const format = '--format=%H%n%h%n%an%n%ae%n%at%n%s';
-  const result = runGitResult(['show', '-s', format, commitHash], { cwd });
+  const result = runGitResult(['show', '-s', format, commitHash], { cwd, ...runOptions });
   
   if (!result.success) return null;
   
@@ -548,22 +543,22 @@ export function getCommitInfo(commitHash: string, options: { cwd?: string } = {}
  * Get diff statistics for the last operation (commit or merge)
  * Comparing HEAD with its first parent
  */
-export function getLastOperationStats(cwd?: string): string {
+export function getLastOperationStats(cwd?: string, options: GitRunOptions = {}): string {
   try {
     // Check if there are any commits
-    const hasCommits = runGitResult(['rev-parse', 'HEAD'], { cwd }).success;
+    const hasCommits = runGitResult(['rev-parse', 'HEAD'], { cwd, ...options }).success;
     if (!hasCommits) return '';
 
     // Check if HEAD has a parent
-    const hasParent = runGitResult(['rev-parse', 'HEAD^1'], { cwd }).success;
+    const hasParent = runGitResult(['rev-parse', 'HEAD^1'], { cwd, ...options }).success;
     if (!hasParent) {
       // If no parent, show stats for the first commit
       // Using an empty tree hash as the base
       const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-      return runGit(['diff', '--stat', emptyTree, 'HEAD'], { cwd, silent: true });
+      return runGit(['diff', '--stat', emptyTree, 'HEAD'], { cwd, silent: true, ...options });
     }
 
-    return runGit(['diff', '--stat', 'HEAD^1', 'HEAD'], { cwd, silent: true });
+    return runGit(['diff', '--stat', 'HEAD^1', 'HEAD'], { cwd, silent: true, ...options });
   } catch (e) {
     return '';
   }
@@ -576,8 +571,8 @@ export function getLastOperationStats(cwd?: string): string {
 /**
  * Generate a unique branch name that doesn't conflict with existing branches
  */
-export function generateUniqueBranchName(baseName: string, options: { cwd?: string; maxAttempts?: number } = {}): string {
-  const { cwd, maxAttempts = 10 } = options;
+export function generateUniqueBranchName(baseName: string, options: GitRunOptions & { maxAttempts?: number } = {}): string {
+  const { cwd, maxAttempts = 10, ...runOptions } = options;
   const timestamp = Date.now().toString(36);
   const random = () => Math.random().toString(36).substring(2, 5);
   
@@ -585,7 +580,7 @@ export function generateUniqueBranchName(baseName: string, options: { cwd?: stri
   let candidate = `${baseName}-${timestamp}-${random()}`;
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (!branchExists(candidate, { cwd })) {
+    if (!branchExists(candidate, { cwd, ...runOptions })) {
       return candidate;
     }
     // Try with new random suffix
@@ -611,16 +606,16 @@ export interface SafeMergeResult {
  * Check if merging a branch would cause conflicts (dry-run)
  * This does NOT actually perform the merge - it only checks for potential conflicts
  */
-export function checkMergeConflict(branchName: string, options: { cwd?: string } = {}): {
+export function checkMergeConflict(branchName: string, options: GitRunOptions = {}): {
   willConflict: boolean;
   conflictingFiles: string[];
   error?: string;
 } {
-  const { cwd } = options;
+  const { cwd, ...runOptions } = options;
   
   // Use merge-tree to check for conflicts without actually merging
   // First, get the merge base
-  const mergeBaseResult = runGitResult(['merge-base', 'HEAD', branchName], { cwd });
+  const mergeBaseResult = runGitResult(['merge-base', 'HEAD', branchName], { cwd, ...runOptions });
   if (!mergeBaseResult.success) {
     return { willConflict: false, conflictingFiles: [], error: `Cannot find merge base: ${mergeBaseResult.stderr}` };
   }
@@ -628,7 +623,7 @@ export function checkMergeConflict(branchName: string, options: { cwd?: string }
   const mergeBase = mergeBaseResult.stdout.trim();
   
   // Use merge-tree to simulate the merge
-  const mergeTreeResult = runGitResult(['merge-tree', mergeBase, 'HEAD', branchName], { cwd });
+  const mergeTreeResult = runGitResult(['merge-tree', mergeBase, 'HEAD', branchName], { cwd, ...runOptions });
   
   // Check for conflict markers in the output
   const output = mergeTreeResult.stdout;
@@ -669,8 +664,7 @@ export function checkMergeConflict(branchName: string, options: { cwd?: string }
  * Sync local branch with remote before starting work
  * Fetches the latest from remote and fast-forwards if possible
  */
-export function syncBranchWithRemote(branchName: string, options: { 
-  cwd?: string;
+export function syncBranchWithRemote(branchName: string, options: GitRunOptions & { 
   createIfMissing?: boolean;
 } = {}): { 
   success: boolean; 
@@ -679,10 +673,10 @@ export function syncBranchWithRemote(branchName: string, options: {
   ahead?: number;
   behind?: number;
 } {
-  const { cwd, createIfMissing = false } = options;
+  const { cwd, createIfMissing = false, ...runOptions } = options;
   
   // Fetch the branch from origin
-  const fetchResult = runGitResult(['fetch', 'origin', branchName], { cwd });
+  const fetchResult = runGitResult(['fetch', 'origin', branchName], { cwd, ...runOptions });
   
   if (!fetchResult.success) {
     // Branch might not exist on remote yet
@@ -693,7 +687,7 @@ export function syncBranchWithRemote(branchName: string, options: {
   }
   
   // Check if we're ahead/behind
-  const statusResult = runGitResult(['rev-list', '--left-right', '--count', `${branchName}...origin/${branchName}`], { cwd });
+  const statusResult = runGitResult(['rev-list', '--left-right', '--count', `${branchName}...origin/${branchName}`], { cwd, ...runOptions });
   
   if (!statusResult.success) {
     // Remote tracking branch might not exist
@@ -721,7 +715,7 @@ export function syncBranchWithRemote(branchName: string, options: {
   }
   
   // Can fast-forward
-  const mergeResult = runGitResult(['merge', '--ff-only', `origin/${branchName}`], { cwd });
+  const mergeResult = runGitResult(['merge', '--ff-only', `origin/${branchName}`], { cwd, ...runOptions });
   
   if (mergeResult.success) {
     return { success: true, updated: true, ahead: 0, behind: 0 };
@@ -733,14 +727,13 @@ export function syncBranchWithRemote(branchName: string, options: {
 /**
  * Safely merge a branch with conflict detection and auto-abort
  */
-export function safeMerge(branchName: string, options: { 
-  cwd?: string; 
+export function safeMerge(branchName: string, options: GitRunOptions & { 
   noFf?: boolean; 
   message?: string | null;
   abortOnConflict?: boolean;
   strategy?: 'ours' | 'theirs' | null;
 } = {}): SafeMergeResult {
-  const { cwd, noFf = false, message = null, abortOnConflict = true, strategy = null } = options;
+  const { cwd, noFf = false, message = null, abortOnConflict = true, strategy = null, ...runOptions } = options;
   
   const args = ['merge'];
   
@@ -758,7 +751,7 @@ export function safeMerge(branchName: string, options: {
   
   args.push(branchName);
   
-  const result = runGitResult(args, { cwd });
+  const result = runGitResult(args, { cwd, ...runOptions });
   
   if (result.success) {
     return {
@@ -775,11 +768,11 @@ export function safeMerge(branchName: string, options: {
   
   if (isConflict) {
     // Get conflicting files
-    const conflictingFiles = getConflictingFiles(cwd);
+    const conflictingFiles = getConflictingFiles(cwd, runOptions);
     
     if (abortOnConflict) {
       // Abort the merge
-      runGitResult(['merge', '--abort'], { cwd });
+      runGitResult(['merge', '--abort'], { cwd, ...runOptions });
       
       return {
         success: false,
@@ -811,8 +804,8 @@ export function safeMerge(branchName: string, options: {
 /**
  * Get list of conflicting files
  */
-export function getConflictingFiles(cwd?: string): string[] {
-  const result = runGitResult(['diff', '--name-only', '--diff-filter=U'], { cwd });
+export function getConflictingFiles(cwd?: string, options: GitRunOptions = {}): string[] {
+  const result = runGitResult(['diff', '--name-only', '--diff-filter=U'], { cwd, ...options });
   if (!result.success) return [];
   
   return result.stdout.split('\n').filter(f => f.trim());
@@ -821,94 +814,100 @@ export function getConflictingFiles(cwd?: string): string[] {
 /**
  * Check if merge is in progress
  */
-export function isMergeInProgress(cwd?: string): boolean {
-  const repoRoot = getRepoRoot(cwd);
+export function isMergeInProgress(cwd?: string, options: GitRunOptions = {}): boolean {
+  const repoRoot = getRepoRoot(cwd, options);
   return fs.existsSync(path.join(repoRoot, '.git', 'MERGE_HEAD'));
 }
 
 /**
  * Abort ongoing merge
  */
-export function abortMerge(cwd?: string): boolean {
-  const result = runGitResult(['merge', '--abort'], { cwd });
+export function abortMerge(cwd?: string, options: GitRunOptions = {}): boolean {
+  const result = runGitResult(['merge', '--abort'], { cwd, ...options });
   return result.success;
 }
 
 /**
  * Get HEAD commit hash
  */
-export function getHead(cwd?: string): string {
-  return runGit(['rev-parse', 'HEAD'], { cwd, silent: true });
+export function getHead(cwd?: string, options: GitRunOptions = {}): string {
+  return runGit(['rev-parse', 'HEAD'], { cwd, silent: true, ...options });
 }
 
 /**
  * Get short HEAD commit hash
  */
-export function getHeadShort(cwd?: string): string {
-  return runGit(['rev-parse', '--short', 'HEAD'], { cwd, silent: true });
+export function getHeadShort(cwd?: string, options: GitRunOptions = {}): string {
+  return runGit(['rev-parse', '--short', 'HEAD'], { cwd, silent: true, ...options });
 }
 
 /**
  * Stash changes with optional message
  */
-export function stash(message?: string, options: { cwd?: string } = {}): boolean {
+export function stash(message?: string, options: GitRunOptions = {}): boolean {
+  const { cwd, ...runOptions } = options;
   const args = ['stash', 'push'];
   if (message) {
     args.push('-m', message);
   }
   
-  const result = runGitResult(args, { cwd: options.cwd });
+  const result = runGitResult(args, { cwd, ...runOptions });
   return result.success;
 }
 
 /**
  * Pop stashed changes
  */
-export function stashPop(options: { cwd?: string } = {}): boolean {
-  const result = runGitResult(['stash', 'pop'], { cwd: options.cwd });
+export function stashPop(options: GitRunOptions = {}): boolean {
+  const { cwd, ...runOptions } = options;
+  const result = runGitResult(['stash', 'pop'], { cwd, ...runOptions });
   return result.success;
 }
 
 /**
  * Clean worktree (remove untracked files)
  */
-export function cleanWorktree(options: { cwd?: string; force?: boolean; directories?: boolean } = {}): void {
+export function cleanWorktree(options: GitRunOptions & { force?: boolean; directories?: boolean } = {}): void {
+  const { cwd, force, directories, ...runOptions } = options;
   const args = ['clean'];
-  if (options.force) args.push('-f');
-  if (options.directories) args.push('-d');
+  if (force) args.push('-f');
+  if (directories) args.push('-d');
   
-  runGit(args, { cwd: options.cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Reset worktree to specific commit/branch
  */
-export function reset(target: string, options: { cwd?: string; mode?: 'soft' | 'mixed' | 'hard' } = {}): void {
+export function reset(target: string, options: GitRunOptions & { mode?: 'soft' | 'mixed' | 'hard' } = {}): void {
+  const { cwd, mode, ...runOptions } = options;
   const args = ['reset'];
-  if (options.mode) args.push(`--${options.mode}`);
+  if (mode) args.push(`--${mode}`);
   args.push(target);
   
-  runGit(args, { cwd: options.cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Checkout specific commit or branch
  */
-export function checkout(target: string, options: { cwd?: string; force?: boolean; createBranch?: boolean } = {}): void {
+export function checkout(target: string, options: GitRunOptions & { force?: boolean; createBranch?: boolean } = {}): void {
+  const { cwd, force, createBranch, ...runOptions } = options;
   const args = ['checkout'];
-  if (options.force) args.push('-f');
-  if (options.createBranch) args.push('-b');
+  if (force) args.push('-f');
+  if (createBranch) args.push('-b');
   args.push(target);
   
-  runGit(args, { cwd: options.cwd });
+  runGit(args, { cwd, ...runOptions });
 }
 
 /**
  * Get commits between two refs
  */
-export function getCommitsBetween(fromRef: string, toRef: string, options: { cwd?: string } = {}): CommitInfo[] {
+export function getCommitsBetween(fromRef: string, toRef: string, options: GitRunOptions = {}): CommitInfo[] {
+  const { cwd, ...runOptions } = options;
   const format = '%H|%h|%an|%ae|%at|%s';
-  const result = runGitResult(['log', '--format=' + format, `${fromRef}..${toRef}`], { cwd: options.cwd });
+  const result = runGitResult(['log', '--format=' + format, `${fromRef}..${toRef}`], { cwd, ...runOptions });
   
   if (!result.success) return [];
   
@@ -933,12 +932,12 @@ export function getCommitsBetween(fromRef: string, toRef: string, options: { cwd
 export async function createWorktreeAsync(
   worktreePath: string, 
   branchName: string, 
-  options: { cwd?: string; baseBranch?: string; timeout?: number } = {}
+  options: GitRunOptions & { baseBranch?: string; timeout?: number } = {}
 ): Promise<string> {
-  let { cwd, baseBranch, timeout = 30000 } = options;
+  let { cwd, baseBranch, timeout = 30000, ...runOptions } = options;
   
   if (!baseBranch) {
-    baseBranch = getCurrentBranch(cwd) || 'refs/heads/main';
+    baseBranch = getCurrentBranch(cwd, runOptions) || 'refs/heads/main';
   }
 
   // Ensure baseBranch is unambiguous
@@ -947,7 +946,8 @@ export async function createWorktreeAsync(
     : `refs/heads/${baseBranch}`;
 
   const { acquireLock, releaseLock } = await import('./lock');
-  const lockDir = safeJoin(cwd || getRepoRoot(), '_cursorflow', 'locks');
+  const repoRoot = getRepoRoot(cwd, runOptions);
+  const lockDir = safeJoin(cwd || repoRoot, '_cursorflow', 'locks');
   if (!fs.existsSync(lockDir)) {
     fs.mkdirSync(lockDir, { recursive: true });
   }
@@ -964,12 +964,12 @@ export async function createWorktreeAsync(
   
   try {
     // Check if branch already exists
-    const branchExistsLocal = runGitResult(['rev-parse', '--verify', branchName], { cwd }).success;
+    const branchExistsLocal = runGitResult(['rev-parse', '--verify', branchName], { cwd, ...runOptions }).success;
     
     if (branchExistsLocal) {
-      runGit(['worktree', 'add', worktreePath, branchName], { cwd });
+      runGit(['worktree', 'add', worktreePath, branchName], { cwd, ...runOptions });
     } else {
-      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd });
+      runGit(['worktree', 'add', '-b', branchName, worktreePath, unambiguousBase], { cwd, ...runOptions });
     }
     
     return worktreePath;
@@ -981,15 +981,15 @@ export async function createWorktreeAsync(
 /**
  * Prune orphaned worktrees
  */
-export function pruneWorktrees(options: { cwd?: string } = {}): void {
-  runGit(['worktree', 'prune'], { cwd: options.cwd });
+export function pruneWorktrees(options: GitRunOptions = {}): void {
+  runGit(['worktree', 'prune'], { cwd: options.cwd, ...options });
 }
 
 /**
  * Get worktree for a specific path
  */
-export function getWorktreeForPath(targetPath: string, cwd?: string): WorktreeInfo | null {
-  const worktrees = listWorktrees(cwd);
+export function getWorktreeForPath(targetPath: string, cwd?: string, options: GitRunOptions = {}): WorktreeInfo | null {
+  const worktrees = listWorktrees(cwd, options);
   return worktrees.find(wt => wt.path === targetPath) || null;
 }
 
@@ -1000,11 +1000,11 @@ export function getWorktreeForPath(targetPath: string, cwd?: string): WorktreeIn
  * Push branch to remote, creating it if it doesn't exist
  * Returns success status and any error message
  */
-export function pushBranchSafe(branchName: string, options: { cwd?: string; force?: boolean } = {}): { success: boolean; error?: string } {
-  const { cwd, force = false } = options;
+export function pushBranchSafe(branchName: string, options: GitRunOptions & { force?: boolean } = {}): { success: boolean; error?: string } {
+  const { cwd, force = false, ...runOptions } = options;
   
   // Check if origin exists
-  if (!remoteExists('origin', { cwd })) {
+  if (!remoteExists('origin', { cwd, ...runOptions })) {
     return { success: false, error: 'No remote "origin" configured' };
   }
   
@@ -1014,7 +1014,7 @@ export function pushBranchSafe(branchName: string, options: { cwd?: string; forc
   }
   args.push('-u', 'origin', branchName);
   
-  const result = runGitResult(args, { cwd });
+  const result = runGitResult(args, { cwd, ...runOptions });
   
   if (result.success) {
     return { success: true };
@@ -1027,12 +1027,11 @@ export function pushBranchSafe(branchName: string, options: { cwd?: string; forc
  * Auto-commit any uncommitted changes and push to remote
  * Used for checkpoint before destructive operations
  */
-export function checkpointAndPush(options: { 
-  cwd?: string; 
+export function checkpointAndPush(options: GitRunOptions & { 
   message?: string;
   branchName?: string;
 } = {}): { success: boolean; committed: boolean; pushed: boolean; error?: string } {
-  const { cwd, message = '[cursorflow] checkpoint before clean' } = options;
+  const { cwd, message = '[cursorflow] checkpoint before clean', ...runOptions } = options;
   
   let committed = false;
   let pushed = false;
@@ -1041,22 +1040,22 @@ export function checkpointAndPush(options: {
   let branchName = options.branchName;
   if (!branchName) {
     try {
-      branchName = getCurrentBranch(cwd);
+      branchName = getCurrentBranch(cwd, runOptions);
     } catch {
       return { success: false, committed: false, pushed: false, error: 'Failed to get current branch' };
     }
   }
   
   // Check for uncommitted changes
-  if (hasUncommittedChanges(cwd)) {
+  if (hasUncommittedChanges(cwd, runOptions)) {
     // Stage all changes
-    const addResult = runGitResult(['add', '-A'], { cwd });
+    const addResult = runGitResult(['add', '-A'], { cwd, ...runOptions });
     if (!addResult.success) {
       return { success: false, committed: false, pushed: false, error: `Failed to stage changes: ${addResult.stderr}` };
     }
     
     // Commit
-    const commitResult = runGitResult(['commit', '-m', message], { cwd });
+    const commitResult = runGitResult(['commit', '-m', message], { cwd, ...runOptions });
     if (!commitResult.success) {
       return { success: false, committed: false, pushed: false, error: `Failed to commit: ${commitResult.stderr}` };
     }
@@ -1064,7 +1063,7 @@ export function checkpointAndPush(options: {
   }
   
   // Push to remote
-  const pushResult = pushBranchSafe(branchName, { cwd });
+  const pushResult = pushBranchSafe(branchName, { cwd, ...runOptions });
   if (pushResult.success) {
     pushed = true;
   } else {
@@ -1073,7 +1072,7 @@ export function checkpointAndPush(options: {
       return { success: true, committed: true, pushed: false, error: `Commit succeeded but push failed: ${pushResult.error}` };
     }
     // Nothing to commit and push failed - check if there's anything to push
-    const localCommits = runGitResult(['rev-list', `origin/${branchName}..HEAD`], { cwd });
+    const localCommits = runGitResult(['rev-list', `origin/${branchName}..HEAD`], { cwd, ...runOptions });
     if (localCommits.success && localCommits.stdout.trim()) {
       return { success: false, committed: false, pushed: false, error: `Push failed: ${pushResult.error}` };
     }
@@ -1084,15 +1083,14 @@ export function checkpointAndPush(options: {
   return { success: true, committed, pushed };
 }
 
-export function syncWithRemote(branch: string, options: { 
-  cwd?: string; 
+export function syncWithRemote(branch: string, options: GitRunOptions & { 
   strategy?: 'merge' | 'rebase';
   createIfMissing?: boolean;
 } = {}): { success: boolean; error?: string } {
-  const { cwd, strategy = 'merge', createIfMissing = false } = options;
+  const { cwd, strategy = 'merge', createIfMissing = false, ...runOptions } = options;
   
   // Fetch the branch
-  const fetchResult = runGitResult(['fetch', 'origin', branch], { cwd });
+  const fetchResult = runGitResult(['fetch', 'origin', branch], { cwd, ...runOptions });
   
   if (!fetchResult.success) {
     if (createIfMissing && fetchResult.stderr.includes('not found')) {
@@ -1104,10 +1102,10 @@ export function syncWithRemote(branch: string, options: {
   
   // Merge or rebase
   if (strategy === 'rebase') {
-    const result = runGitResult(['rebase', `origin/${branch}`], { cwd });
+    const result = runGitResult(['rebase', `origin/${branch}`], { cwd, ...runOptions });
     if (!result.success) {
       // Abort rebase on failure
-      runGitResult(['rebase', '--abort'], { cwd });
+      runGitResult(['rebase', '--abort'], { cwd, ...runOptions });
       return { success: false, error: result.stderr };
     }
   } else {
@@ -1115,6 +1113,7 @@ export function syncWithRemote(branch: string, options: {
       cwd, 
       message: `chore: sync with origin/${branch}`,
       abortOnConflict: true,
+      ...runOptions
     });
     
     if (!mergeResult.success) {

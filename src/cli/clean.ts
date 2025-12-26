@@ -165,8 +165,7 @@ async function clean(args: string[]): Promise<void> {
   }
 
   const config = loadConfig();
-  git.setVerboseGit(config.verboseGit || false);
-  const repoRoot = git.getRepoRoot();
+  const repoRoot = git.getRepoRoot(undefined, { verbose: false });
   const logsDir = getLogsDir(config);
   const runsDir = safeJoin(logsDir, 'runs');
   const runService = new RunService(runsDir);
@@ -259,6 +258,7 @@ function pushWorktreeToRemote(wt: git.WorktreeInfo, options: CleanOptions): { su
     cwd: wt.path,
     message: '[cursorflow] checkpoint before clean',
     branchName,
+    verbose: false,
   });
   
   if (result.success) {
@@ -273,7 +273,7 @@ function pushWorktreeToRemote(wt: git.WorktreeInfo, options: CleanOptions): { su
 
 async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptions) {
   logger.info('\nChecking worktrees...');
-  const worktrees = git.listWorktrees(repoRoot);
+  const worktrees = git.listWorktrees(repoRoot, { verbose: false });
   
   const worktreeRoot = safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees');
   let toRemove = worktrees.filter(wt => {
@@ -321,7 +321,7 @@ async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptio
     } else {
       try {
         logger.info(`  Removing worktree: ${wt.path}...`);
-        git.removeWorktree(wt.path, { cwd: repoRoot, force: options.force });
+        git.removeWorktree(wt.path, { cwd: repoRoot, force: options.force, verbose: false });
         
         // Git worktree remove might leave the directory if it has untracked files
         if (fs.existsSync(wt.path)) {
@@ -344,7 +344,7 @@ async function cleanWorktrees(config: any, repoRoot: string, options: CleanOptio
  */
 function getBranchCommitTime(branch: string, repoRoot: string): number {
   try {
-    const result = git.runGitResult(['log', '-1', '--format=%ct', branch], { cwd: repoRoot });
+    const result = git.runGitResult(['log', '-1', '--format=%ct', branch], { cwd: repoRoot, verbose: false });
     if (result.success && result.stdout.trim()) {
       return parseInt(result.stdout.trim(), 10) * 1000; // Convert to milliseconds
     }
@@ -358,7 +358,7 @@ async function cleanBranches(config: any, repoRoot: string, options: CleanOption
   logger.info('\nChecking branches...');
   
   // List all local branches
-  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot });
+  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot, verbose: false });
   if (!result.success) return;
 
   const branches = result.stdout
@@ -389,7 +389,7 @@ async function cleanBranches(config: any, repoRoot: string, options: CleanOption
     } else {
       try {
         logger.info(`  Deleting branch: ${branch}...`);
-        git.deleteBranch(branch, { cwd: repoRoot, force: options.force || options.all });
+        git.deleteBranch(branch, { cwd: repoRoot, force: options.force || options.all, verbose: false });
       } catch (e: any) {
         logger.warn(`  Could not delete branch ${branch}: ${e.message}. Use --force if it's not merged.`);
       }
@@ -539,7 +539,7 @@ async function cleanRunResources(runService: RunService, runId: string, repoRoot
         logger.info(`    [DRY RUN] Would delete branch: ${branch}`);
       } else {
         try {
-          git.deleteBranch(branch, { cwd: repoRoot, force: true });
+          git.deleteBranch(branch, { cwd: repoRoot, force: true, verbose: false });
           logger.info(`    Deleted branch: ${branch}`);
         } catch (e: any) {
           logger.warn(`    Could not delete branch ${branch}: ${e.message}`);
@@ -556,7 +556,7 @@ async function cleanRunResources(runService: RunService, runId: string, repoRoot
         logger.info(`    [DRY RUN] Would remove worktree: ${wtPath}`);
       } else {
         try {
-          git.removeWorktree(wtPath, { cwd: repoRoot, force: true });
+          git.removeWorktree(wtPath, { cwd: repoRoot, force: true, verbose: false });
           if (fs.existsSync(wtPath)) {
             fs.rmSync(wtPath, { recursive: true, force: true });
           }
@@ -604,7 +604,7 @@ async function cleanOrphanedResources(runService: RunService, config: any, repoR
 
   // Clean orphaned worktrees
   logger.info('\nChecking for orphaned worktrees...');
-  const worktrees = git.listWorktrees(repoRoot);
+  const worktrees = git.listWorktrees(repoRoot, { verbose: false });
   const worktreeRoot = safeJoin(repoRoot, config.worktreeRoot || '_cursorflow/worktrees');
   
   const orphanedWorktrees = worktrees.filter(wt => {
@@ -622,7 +622,7 @@ async function cleanOrphanedResources(runService: RunService, config: any, repoR
         logger.info(`  [DRY RUN] Would remove orphaned worktree: ${wt.path}`);
       } else {
         try {
-          git.removeWorktree(wt.path, { cwd: repoRoot, force: true });
+          git.removeWorktree(wt.path, { cwd: repoRoot, force: true, verbose: false });
           if (fs.existsSync(wt.path)) {
             fs.rmSync(wt.path, { recursive: true, force: true });
           }
@@ -636,7 +636,7 @@ async function cleanOrphanedResources(runService: RunService, config: any, repoR
 
   // Clean orphaned branches
   logger.info('\nChecking for orphaned branches...');
-  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot });
+  const result = git.runGitResult(['branch', '--list'], { cwd: repoRoot, verbose: false });
   if (result.success) {
     const branches = result.stdout
       .split('\n')
@@ -654,7 +654,7 @@ async function cleanOrphanedResources(runService: RunService, config: any, repoR
           logger.info(`  [DRY RUN] Would delete orphaned branch: ${branch}`);
         } else {
           try {
-            git.deleteBranch(branch, { cwd: repoRoot, force: true });
+            git.deleteBranch(branch, { cwd: repoRoot, force: true, verbose: false });
             logger.info(`  Deleted orphaned branch: ${branch}`);
           } catch (e: any) {
             logger.warn(`  Could not delete orphaned branch ${branch}: ${e.message}`);
