@@ -227,7 +227,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     // Worktree exists and is valid - reuse it
     logger.info(`Reusing existing worktree: ${worktreeDir}`);
     try {
-      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: config.verboseGit || false });
     } catch (e) {
       // If checkout fails in a valid worktree, log warning but continue
       // The worktree might be on a different branch that will be handled later
@@ -419,7 +419,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     
     // Ensure we are on the pipeline branch before merging the task branch
     logger.info(`🔄 Switching to pipeline branch ${pipelineBranch} to integrate changes`);
-    git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+    git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose: config.verboseGit || false });
     
     // Pre-check for conflicts (should be rare since task branch was created from pipeline)
     const conflictCheck = git.checkMergeConflict(taskBranch, { cwd: worktreeDir });
@@ -488,14 +488,14 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.info(`🌿 Creating final flow branch: ${flowBranch}`);
     try {
       // Create/Overwrite flow branch from pipeline branch
-      git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir });
+      git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir, verbose: config.verboseGit || false });
       git.push(flowBranch, { cwd: worktreeDir, setUpstream: true });
       
       // 3. Delete temporary pipeline branch (LOCAL ONLY)
       // Keep remote branch for dependency lanes that may need to merge it!
       logger.info(`🗑️ Deleting local pipeline branch: ${pipelineBranch}`);
       // Must be on another branch to delete pipelineBranch
-      git.runGit(['checkout', flowBranch], { cwd: worktreeDir });
+      git.runGit(['checkout', flowBranch], { cwd: worktreeDir, verbose: config.verboseGit || false });
       git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true });
       
       // NOTE: We intentionally keep the remote pipeline branch alive
@@ -517,7 +517,11 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   // Log final file summary
   try {
     // Always use current branch for comparison (already captured at start)
-    const finalStats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { cwd: repoRoot, silent: true });
+    const finalStats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { 
+      cwd: repoRoot, 
+      silent: true,
+      verbose: config.verboseGit || false
+    });
     if (finalStats) {
       logger.info('Final Workspace Summary:\n' + finalStats);
     }

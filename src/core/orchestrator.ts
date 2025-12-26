@@ -479,8 +479,10 @@ async function resolveAllDependencies(
   allLanes: LaneInfo[], 
   laneRunDirs: Record<string, string>,
   pipelineBranch: string,
-  runRoot: string
+  runRoot: string,
+  options: { verboseGit?: boolean } = {}
 ) {
+  const verbose = options.verboseGit ?? false;
   // 1. Collect all unique changes and commands from blocked lanes
   const allChanges: string[] = [];
   const allCommands: string[] = [];
@@ -508,7 +510,7 @@ async function resolveAllDependencies(
 
   // 3. Resolve on pipeline branch
   logger.info(`🔄 Resolving dependencies on branch ${pipelineBranch}`);
-  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose });
   
   for (const cmd of uniqueCommands) {
     logger.info(`Running: ${cmd}`);
@@ -520,8 +522,8 @@ async function resolveAllDependencies(
   }
   
   try {
-    git.runGit(['add', '.'], { cwd: worktreeDir });
-    git.runGit(['commit', '-m', `chore: auto-resolve dependencies\n\n${uniqueChanges.join('\n')}`], { cwd: worktreeDir });
+    git.runGit(['add', '.'], { cwd: worktreeDir, verbose });
+    git.runGit(['commit', '-m', `chore: auto-resolve dependencies\n\n${uniqueChanges.join('\n')}`], { cwd: worktreeDir, verbose });
 
     // Log changed files
     const stats = git.getLastOperationStats(worktreeDir);
@@ -554,8 +556,8 @@ async function resolveAllDependencies(
       try {
         // If task branch doesn't exist yet, it will be created from pipelineBranch when the lane starts
         if (git.branchExists(taskBranch, { cwd: worktreeDir })) {
-          git.runGit(['checkout', taskBranch], { cwd: worktreeDir });
-          git.runGit(['merge', pipelineBranch, '--no-edit'], { cwd: worktreeDir });
+          git.runGit(['checkout', taskBranch], { cwd: worktreeDir, verbose });
+          git.runGit(['merge', pipelineBranch, '--no-edit'], { cwd: worktreeDir, verbose });
           
           // Log changed files
           const stats = git.getLastOperationStats(worktreeDir);
@@ -571,7 +573,7 @@ async function resolveAllDependencies(
     }
   }
   
-  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
+  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir, verbose });
 }
 
 /**
@@ -1029,7 +1031,9 @@ export async function orchestrate(tasksDir: string, options: {
         logger.section('🛠 Auto-Resolving Dependencies');
         
         try {
-          await resolveAllDependencies(blockedLanes, lanes, laneRunDirs, pipelineBranch, runRoot);
+          await resolveAllDependencies(blockedLanes, lanes, laneRunDirs, pipelineBranch, runRoot, {
+            verboseGit: config.verboseGit || false
+          });
           
           // Clear blocked status
           blockedLanes.clear();
