@@ -6,6 +6,7 @@
 
 import * as readline from 'readline';
 import * as logger from '../utils/logger';
+import { GreetingResponse } from '../api/greeting';
 
 /**
  * 상태 아이콘 유틸리티
@@ -136,6 +137,17 @@ export function renderHeader(title: string, subtitle?: string): string[] {
   lines.push(`${logger.COLORS.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${logger.COLORS.reset}`);
   
   return lines;
+}
+
+/**
+ * 인사말 컴포넌트
+ */
+export function renderGreeting(response: GreetingResponse): string[] {
+  return [
+    `${logger.COLORS.green}✨ Greeting from API:${logger.COLORS.reset}`,
+    `  ${logger.COLORS.bold}${response.message}${logger.COLORS.reset}`,
+    `${logger.COLORS.gray}  (Generated at: ${new Date(response.timestamp).toLocaleString()})${logger.COLORS.reset}`
+  ];
 }
 
 /**

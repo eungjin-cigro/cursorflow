@@ -3,9 +3,11 @@ import {
   CheckboxList, 
   ScrollableBuffer, 
   renderProgressBar,
+  renderGreeting,
   stripAnsi,
   pad
 } from '../../src/ui/components';
+import { GreetingResponse } from '../../src/api/greeting';
 
 describe('UI Components', () => {
   describe('SelectableList', () => {
@@ -154,6 +156,31 @@ describe('UI Components', () => {
       expect(pad('Test', 10)).toBe('Test      ');
       expect(pad('Test', 10, 'right')).toBe('      Test');
       expect(pad('Test', 10, 'center')).toBe('   Test   ');
+    });
+  });
+
+  describe('renderGreeting', () => {
+    it('should render greeting message correctly', () => {
+      const response: GreetingResponse = {
+        message: 'Hello, Alice!',
+        timestamp: '2023-10-27T10:00:00.000Z'
+      };
+      
+      const output = renderGreeting(response);
+      expect(output).toHaveLength(3);
+      expect(stripAnsi(output[0])).toContain('Greeting from API');
+      expect(stripAnsi(output[1])).toContain('Hello, Alice!');
+      expect(stripAnsi(output[2])).toContain('Generated at');
+    });
+
+    it('should handle different names', () => {
+      const response: GreetingResponse = {
+        message: 'Hello, Guest!',
+        timestamp: new Date().toISOString()
+      };
+      
+      const output = renderGreeting(response);
+      expect(stripAnsi(output[1])).toContain('Hello, Guest!');
     });
   });
 });
