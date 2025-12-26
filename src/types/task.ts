@@ -32,7 +32,7 @@ export interface RunnerConfig {
   /** 
    * Enable intervention feature (stdin piping for message injection).
    * Warning: May cause stdout buffering issues on some systems.
-   * Default: false
+   * Default: true
    */
   enableIntervention?: boolean;
   /**

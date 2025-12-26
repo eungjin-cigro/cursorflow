@@ -7,6 +7,7 @@
  * - Box format only for: user, assistant, system, result
  * - Compact format for: tool, tool_result, thinking (gray/dim)
  * - Tool names simplified: ShellToolCall → Shell
+ * - Lane labels fixed 20 chars: [1-1-backend       ]
  */
 
 import { COLORS } from './console';
@@ -64,10 +65,10 @@ export function formatMessageForConsole(
     : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
-  // Lane label max 16 chars
-  const truncatedLabel = laneLabel.length > 16 ? laneLabel.substring(0, 16) : laneLabel;
+  // Lane label max 20 chars
+  const truncatedLabel = laneLabel.length > 20 ? laneLabel.substring(0, 20) : laneLabel;
   const labelPrefix = truncatedLabel 
-    ? `${COLORS.magenta}${truncatedLabel.padEnd(16)}${COLORS.reset} ` 
+    ? `${COLORS.magenta}${truncatedLabel.padEnd(20)}${COLORS.reset} ` 
     : '';
 
   // Determine if should use box format

@@ -89,6 +89,10 @@ if (require.main === module) {
   // Add agent output format default
   config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'json';
   
+  // Merge intervention and logging settings
+  config.enableIntervention = config.enableIntervention ?? globalConfig?.enableIntervention ?? true;
+  config.verboseGit = config.verboseGit ?? globalConfig?.verboseGit ?? false;
+  
   // Handle process interruption to ensure cleanup
   const handleSignal = (signal: string) => {
     logger.warn(`\n⚠️ Runner received ${signal}. Shutting down...`);

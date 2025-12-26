@@ -149,12 +149,10 @@ export function withContext(context: string) {
  */
 export function laneOutput(laneName: string, message: string, isError = false, laneIndex?: number, taskIndex?: number, taskName?: string): void {
   const timestamp = `${COLORS.gray}[${formatTimestamp()}]${COLORS.reset}`;
-  // Format: [laneIdx-taskIdx-laneName-taskName] padded to 18 chars inside brackets
+  // Format: [laneIdx-taskIdx-laneName] padded to 18 chars inside brackets
   const lIdx = laneIndex ?? 1;
   const tIdx = taskIndex ?? 1;
-  const combined = taskName 
-    ? `${lIdx}-${tIdx}-${laneName}-${taskName}`
-    : `${lIdx}-${tIdx}-${laneName}`;
+  const combined = `${lIdx}-${tIdx}-${laneName}`;
   const label = combined.substring(0, 18).padEnd(18);
   const laneLabel = `${COLORS.magenta}[${label}]${COLORS.reset}`;
   const output = isError ? `${COLORS.red}${message}${COLORS.reset}` : message;

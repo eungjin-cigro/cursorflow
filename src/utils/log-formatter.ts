@@ -7,7 +7,7 @@
  * - Box format only for: user, assistant, system, result
  * - Compact format for: tool, tool_result, thinking (gray/dim)
  * - Tool names simplified: ShellToolCall → Shell
- * - Lane labels max 16 chars: [01-types-tests]
+ * - Lane labels fixed 20 chars: [1-1-backend       ]
  */
 
 import { COLORS } from './log-constants';

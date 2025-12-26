@@ -131,13 +131,13 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Get lane-task label like [L1-T2-lanename10]
+   * Get lane-task label like [1-1-lanename10]
    */
   private getLaneTaskLabel(): string {
     const laneNum = (this.session.laneIndex ?? 0) + 1;
     const taskNum = (this.session.taskIndex ?? 0) + 1;
     const shortLaneName = this.session.laneName.substring(0, 10);
-    return `L${laneNum}-T${taskNum}-${shortLaneName}`;
+    return `${laneNum}-${taskNum}-${shortLaneName}`.substring(0, 18).padEnd(18);
   }
 
   /**
@@ -267,7 +267,7 @@ export class EnhancedLogManager {
    */
   public writeReadableMessage(msg: ParsedMessage): void {
     // Use formatMessageForConsole for consistent formatting
-    // Use short lane-task label like [L01-T02]
+    // Use short lane-task label like [1-1-lanename10]
     const formatted = formatMessageForConsole(msg, {
       laneLabel: `[${this.getLaneTaskLabel()}]`,
       includeTimestamp: false, // We'll add our own short timestamp

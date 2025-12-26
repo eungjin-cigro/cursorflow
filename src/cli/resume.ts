@@ -425,15 +425,13 @@ function spawnLaneResume(
     runnerArgs.push('--executor', options.executor);
   }
 
-  // Generate lane label: [laneIdx-taskIdx-laneName-taskName] format, padded to 18 chars
+  // Generate lane label: [laneIdx-taskIdx-laneName] format, padded to 18 chars
   // Note: taskName will be updated dynamically via logManager.setTask()
   let currentTaskName = '';
   let currentTaskIdx = (state.currentTaskIndex ?? 0) + 1;
   const getLaneLabel = () => {
     const laneIdx = options.laneIndex ?? 1;
-    const combined = currentTaskName 
-      ? `${laneIdx}-${currentTaskIdx}-${laneName}-${currentTaskName}`
-      : `${laneIdx}-${currentTaskIdx}-${laneName}`;
+    const combined = `${laneIdx}-${currentTaskIdx}-${laneName}`;
     const label = combined.substring(0, 18).padEnd(18);
     return `[${label}]`;
   };

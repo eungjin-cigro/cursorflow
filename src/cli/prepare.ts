@@ -458,7 +458,6 @@ function getDefaultConfig(laneNumber: number, featureName: string, tasks: Task[]
     
     // Execution Settings
     timeout: 600000,
-    enableIntervention: false,
     
     // Dependency Policy
     dependencyPolicy: {

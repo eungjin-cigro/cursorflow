@@ -60,6 +60,9 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     allowDependencyChange: false,
     lockfileReadOnly: true,
     
+    // Intervention
+    enableIntervention: true,
+    
     // Lane defaults
     defaultLaneConfig: {
       devPort: 3001,
@@ -192,6 +195,9 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Dependency management
   allowDependencyChange: false,
   lockfileReadOnly: true,
+  
+  // Intervention - allows sending messages to running agents
+  enableIntervention: true,
   
   // Lane configuration
   defaultLaneConfig: {

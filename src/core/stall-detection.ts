@@ -142,6 +142,10 @@ export interface LaneStallState {
   laneName: string;
   /** 현재 복구 단계 */
   phase: StallPhase;
+  /** Lane의 현재 상태 (waiting, running 등) - waiting 시 stall 분석 스킵 */
+  laneStatus?: string;
+  /** Intervention 활성화 여부 - false면 continue 신호 스킵 */
+  interventionEnabled?: boolean;
   /** 마지막 실제 활동 시간 (bytes > 0) */
   lastRealActivityTime: number;
   /** 마지막 상태 변경 시간 (phase 변경) */
@@ -294,6 +298,7 @@ export class StallDetectionService {
       laneRunDir?: string;
       childProcess?: ChildProcess;
       startIndex?: number;
+      interventionEnabled?: boolean;
     } = {}
   ): void {
     const now = Date.now();
@@ -301,6 +306,7 @@ export class StallDetectionService {
     this.laneStates.set(laneName, {
       laneName,
       phase: StallPhase.NORMAL,
+      interventionEnabled: options.interventionEnabled ?? true, // default to true
       lastRealActivityTime: now,
       lastPhaseChangeTime: now,
       lastStateUpdateTime: now,
@@ -318,7 +324,7 @@ export class StallDetectionService {
     });
     
     if (this.config.verbose) {
-      logger.debug(`[StallService] Lane registered: ${laneName}`);
+      logger.debug(`[StallService] Lane registered: ${laneName} (intervention: ${options.interventionEnabled ?? true})`);
     }
   }
   
@@ -357,6 +363,44 @@ export class StallDetectionService {
     const state = this.laneStates.get(laneName);
     if (state) {
       state.laneRunDir = dir;
+    }
+  }
+  
+  /**
+   * Lane 상태 업데이트 (waiting, running 등)
+   * waiting 상태일 때는 stall 분석을 스킵함
+   */
+  setLaneStatus(laneName: string, status: string): void {
+    const state = this.laneStates.get(laneName);
+    if (state) {
+      state.laneStatus = status;
+      
+      // waiting 상태로 전환 시 타이머 리셋 (의존성 대기 시간을 stall로 간주하지 않음)
+      if (status === 'waiting') {
+        const now = Date.now();
+        state.lastRealActivityTime = now;
+        state.lastStateUpdateTime = now;
+        state.taskStartTime = now;
+      }
+      
+      if (this.config.verbose) {
+        logger.debug(`[StallService] [${laneName}] Lane status updated: ${status}`);
+      }
+    }
+  }
+  
+  /**
+   * Intervention 활성화 상태 설정
+   * false로 설정하면 continue 신호를 보내지 않음
+   */
+  setInterventionEnabled(laneName: string, enabled: boolean): void {
+    const state = this.laneStates.get(laneName);
+    if (state) {
+      state.interventionEnabled = enabled;
+      
+      if (this.config.verbose) {
+        logger.debug(`[StallService] [${laneName}] Intervention ${enabled ? 'enabled' : 'disabled'}`);
+      }
     }
   }
   
@@ -450,6 +494,7 @@ export class StallDetectionService {
    * Stall 상태 분석 - 현재 상태에서 필요한 액션 결정
    * 
    * 분석 우선순위:
+   * 0. waiting 상태면 스킵 (의존성 대기 중)
    * 1. Task timeout (30분) → RESTART/DOCTOR
    * 2. Zero bytes + idle → phase별 에스컬레이션
    * 3. No progress (10분) → 단계별 에스컬레이션
@@ -459,6 +504,17 @@ export class StallDetectionService {
     const state = this.laneStates.get(laneName);
     if (!state) {
       return this.buildAnalysis(StallType.IDLE, RecoveryAction.NONE, 'Lane not found', false);
+    }
+    
+    // 0. waiting 상태는 stall 분석 스킵 (의존성 대기 중이므로 정상)
+    if (state.laneStatus === 'waiting') {
+      return this.buildAnalysis(
+        StallType.IDLE, 
+        RecoveryAction.NONE, 
+        'Waiting for dependencies', 
+        true,
+        { laneStatus: 'waiting' }
+      );
     }
     
     const ctx = this.buildAnalysisContext(state);
@@ -734,6 +790,14 @@ export class StallDetectionService {
    * Continue 신호 발송
    */
   private sendContinueSignal(state: LaneStallState): void {
+    // Intervention이 비활성화된 경우 신호를 보내지 않고 phase만 업데이트
+    if (state.interventionEnabled === false) {
+      logger.warn(`[${state.laneName}] Continue signal skipped (intervention disabled). Stall will escalate on next check.`);
+      state.phase = StallPhase.CONTINUE_SENT;
+      state.lastPhaseChangeTime = Date.now();
+      return;
+    }
+    
     if (!state.laneRunDir) {
       logger.error(`[StallService] [${state.laneName}] Cannot send continue signal: laneRunDir not set`);
       return;
@@ -764,6 +828,14 @@ export class StallDetectionService {
    * Stronger prompt 발송
    */
   private sendStrongerPrompt(state: LaneStallState): void {
+    // Intervention이 비활성화된 경우 신호를 보내지 않고 phase만 업데이트
+    if (state.interventionEnabled === false) {
+      logger.warn(`[${state.laneName}] Stronger prompt skipped (intervention disabled). Will escalate to restart.`);
+      state.phase = StallPhase.STRONGER_PROMPT_SENT;
+      state.lastPhaseChangeTime = Date.now();
+      return;
+    }
+    
     if (!state.laneRunDir) {
       logger.error(`[StallService] [${state.laneName}] Cannot send stronger prompt: laneRunDir not set`);
       return;

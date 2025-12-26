@@ -77,9 +77,9 @@ cursorflow new SearchFeature --lanes "api,web,mobile"
 ```
 _cursorflow/flows/001_SearchFeature/
 ├── flow.meta.json       # Flow 메타데이터
-├── 01-api.json          # API 레인 (빈 상태)
-├── 02-web.json          # Web 레인 (빈 상태)
-└── 03-mobile.json       # Mobile 레인 (빈 상태)
+├── api.json             # API 레인 (빈 상태)
+├── web.json             # Web 레인 (빈 상태)
+└── mobile.json          # Mobile 레인 (빈 상태)
 ```
 
 ---
@@ -178,7 +178,7 @@ Within the `cursorflow monitor` dashboard:
 {
   "branchPrefix": "feature/lane-1-",
   "timeout": 600000,
-  "enableIntervention": false,
+  "enableIntervention": true,
   "enableReview": true,
   "reviewModel": "sonnet-4.5-thinking",
   "tasks": [
@@ -203,7 +203,7 @@ Within the `cursorflow monitor` dashboard:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `timeout` | number | 600000 | Task timeout in milliseconds (10 min) |
-| `enableIntervention` | boolean | false | Enable stdin piping for intervention |
+| `enableIntervention` | boolean | true | Enable stdin piping for intervention |
 | `model` | string | "sonnet-4.5" | AI model to use |
 | `enableReview` | boolean | true | Enable AI code review |
 
@@ -222,7 +222,7 @@ JSON 파일에서 `dependsOn` 필드 추가:
     { 
       "name": "integrate", 
       "prompt": "API 연동...",
-      "dependsOn": ["01-backend:implement"]  // ← 이 태스크 완료 후 시작
+      "dependsOn": ["backend:implement"]  // ← 이 태스크 완료 후 시작
     }
   ]
 }
@@ -233,9 +233,9 @@ JSON 파일에서 `dependsOn` 필드 추가:
 ### 실행 흐름 예시
 
 ```
-01-backend: [setup] → [implement] → [test]
+1-backend: [setup] → [implement] → [test]
                           ↓ 완료!
-02-frontend: [setup] ─────┴─ 대기 → [integrate] → [test]
+2-frontend: [setup] ─────┴─ 대기 → [integrate] → [test]
 ```
 
 - 백엔드와 프론트엔드 **동시 시작**
@@ -246,7 +246,7 @@ JSON 파일에서 `dependsOn` 필드 추가:
 
 ```bash
 cursorflow doctor --tasks-dir _cursorflow/tasks/MyFeature
-# ❌ Cyclic dependency: 01-a:task1 → 02-b:task2 → 01-a:task1
+# ❌ Cyclic dependency: a:task1 → b:task2 → a:task1
 ```
 
 ## 🩺 Pre-flight Checks
@@ -308,12 +308,12 @@ CursorFlow provides comprehensive logging with automatic cleanup and export opti
 
 ### Log Format
 
-Logs use the format `[L{n}-T{t}-{lanename}]`:
-- `L{n}`: Lane number (1-indexed, single digit)
-- `T{t}`: Task number (1-indexed, single digit)
+Logs use the format `[{n}-{t}-{lanename}]`:
+- `{n}`: Lane number (1-indexed)
+- `{t}`: Task number (1-indexed)
 - `{lanename}`: First 10 characters of lane name
 
-Example: `[L1-T2-backend]` = Lane 1, Task 2, lane "backend"
+Example: `[1-2-backend]` = Lane 1, Task 2, lane "backend"
 
 ### Features
 - **ANSI Stripping**: Clean logs without terminal escape codes

@@ -278,12 +278,13 @@ export function spawnLane({
   };
   
   if (logConfig.enabled) {
-    // Helper to get dynamic lane label like [L1-T1-lanename10]
+    // Helper to get dynamic lane label like [1-1-lanename10]
     const getDynamicLabel = () => {
-      const laneNum = `L${laneIndex + 1}`;
-      const taskPart = info.currentTaskIndex ? `-T${info.currentTaskIndex}` : '';
+      const laneNum = `${laneIndex + 1}`;
+      const taskPart = `-${info.currentTaskIndex || 1}`;
       const shortLaneName = laneName.substring(0, 10);
-      return `[${laneNum}${taskPart}-${shortLaneName}]`;
+      const combined = `${laneNum}${taskPart}-${shortLaneName}`.substring(0, 18).padEnd(18);
+      return `[${combined}]`;
     };
 
     // Create callback for clean console output
@@ -931,12 +932,18 @@ export async function orchestrate(tasksDir: string, options: {
         for (const [laneName, info] of running.entries()) {
           const lane = lanes.find(l => l.name === laneName)!;
           
-          // Check state file for progress updates
+          // Check state file for progress updates and sync lane status
           try {
             const stateStat = fs.statSync(info.statePath);
             const stallState = stallService.getState(laneName);
             if (stallState && stateStat.mtimeMs > stallState.lastStateUpdateTime) {
               stallService.recordStateUpdate(laneName);
+            }
+            
+            // Sync lane status to stall service (skips stall detection when 'waiting' for dependencies)
+            const laneState = loadState<LaneState>(info.statePath);
+            if (laneState && stallState && laneState.status !== stallState.laneStatus) {
+              stallService.setLaneStatus(laneName, laneState.status || 'running');
             }
           } catch {
             // State file might not exist yet

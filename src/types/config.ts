@@ -71,6 +71,8 @@ export interface CursorFlowConfig {
   /** Output format for cursor-agent (default: 'json') */
   agentOutputFormat: 'json' | 'plain' | 'stream-json';
   webhooks?: WebhookConfig[];
+  /** Enable intervention feature (stdin piping for message injection) */
+  enableIntervention?: boolean;
   /** Enhanced logging configuration */
   enhancedLogging?: Partial<EnhancedLogConfig>;
   /** Default AI model for tasks (default: 'gemini-3-flash') */
