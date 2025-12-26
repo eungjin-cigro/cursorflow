@@ -1,7 +1,8 @@
 /**
  * Utility for formatting log messages for console display
  * 
- * Format: [HH:MM:SS] [lane-task] ICON TYPE content
+ * Format: [HH:MM:SS] [MAIN] or [SUB:<id>] ICON TYPE content
+ * (labels are padded to keep alignment consistent)
  * 
  * Rules:
  * - Box format only for: user, assistant, system, result

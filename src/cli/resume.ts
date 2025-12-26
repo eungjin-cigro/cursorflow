@@ -18,6 +18,7 @@ import {
   ParsedMessage
 } from '../utils/enhanced-logger';
 import { formatMessageForConsole } from '../utils/log-formatter';
+import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 
 interface ResumeOptions {
   lane: string | null;
@@ -664,6 +665,9 @@ async function resume(args: string[]): Promise<void> {
   if (!runDir || !fs.existsSync(runDir)) {
     throw new Error(`Run directory not found: ${runDir || 'latest'}. Have you run any tasks yet?`);
   }
+
+  logger.setDefaultContext('MAIN');
+  logger.setLogFile(safeJoin(runDir, MAIN_LOG_FILENAME));
   
   const allLanes = getAllLaneStatuses(runDir);
   let lanesToResume: LaneInfo[] = [];

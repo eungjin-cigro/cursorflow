@@ -28,6 +28,7 @@ import {
   ParsedMessage,
   stripAnsi
 } from '../utils/enhanced-logger';
+import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 import { formatMessageForConsole } from '../utils/log-formatter';
 import { FailureType, analyzeFailure as analyzeFailureFromPolicy } from './failure-policy';
 import { 
@@ -283,7 +284,7 @@ export function spawnLane({
       const laneNum = `${laneIndex + 1}`;
       const taskPart = `-${info.currentTaskIndex || 1}`;
       const shortLaneName = laneName.substring(0, 10);
-      const combined = `${laneNum}${taskPart}-${shortLaneName}`.substring(0, 18).padEnd(18);
+      const combined = `SUB:${laneNum}${taskPart}-${shortLaneName}`.substring(0, 18).padEnd(18);
       return `[${combined}]`;
     };
 
@@ -683,6 +684,9 @@ export async function orchestrate(tasksDir: string, options: {
     : safeJoin(logsDir, 'runs', runId);
   
   fs.mkdirSync(runRoot, { recursive: true });
+  // Main process logs live at the run root; lane/subprocess logs stay in per-lane directories.
+  logger.setDefaultContext('MAIN');
+  logger.setLogFile(safeJoin(runRoot, MAIN_LOG_FILENAME));
   
   // Clean stale locks before starting
   try {

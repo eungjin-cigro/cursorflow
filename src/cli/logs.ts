@@ -14,6 +14,7 @@ import {
   JsonLogEntry 
 } from '../utils/enhanced-logger';
 import { formatPotentialJsonMessage } from '../utils/log-formatter';
+import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 import { startLogViewer } from '../ui/log-viewer';
 
 interface LogsOptions {
@@ -44,13 +45,13 @@ function printHelp(): void {
   console.log(`
 Usage: cursorflow logs [run-dir] [options]
 
-View and export lane logs.
+View and export logs.
 
 Options:
   [run-dir]              Run directory (default: latest)
   --run <id>             Specific run directory
-  --lane <name>          Filter to specific lane
-  --all, -a              View all lanes merged (sorted by timestamp)
+  --lane <name>          View a specific lane (subprocess) log
+  --all, -a              View all lane logs merged (sorted by timestamp)
   --format <fmt>         Output format: text, json, markdown, html (default: text)
   --output <path>        Write output to file instead of stdout
   --tail <n>             Show last n lines/entries (default: all)
@@ -58,13 +59,13 @@ Options:
   --interactive, -i      Open interactive log viewer
   --filter <pattern>     Filter entries by regex pattern
   --level <level>        Filter by log level: stdout, stderr, info, error, debug
-  --readable, -r         Show readable log (parsed AI output) (default)
-  --clean                Show clean terminal logs without ANSI codes
+  --readable, -r         Show readable lane log (parsed AI output) (default for lanes)
+  --clean                Strip ANSI codes (default is raw for main logs)
   --raw                  Show raw terminal logs with ANSI codes
   --help, -h             Show help
 
 Examples:
-  cursorflow logs                              # View latest run logs summary
+  cursorflow logs                              # View latest run main log (raw)
   cursorflow logs --lane api-setup             # View readable parsed log (default)
   cursorflow logs --lane api-setup --clean     # View clean terminal logs
   cursorflow logs --all                        # View all lanes merged by time
@@ -192,6 +193,35 @@ function displayTextLogs(
     lines = lines.map(line => stripAnsi(line));
   }
   
+  console.log(lines.join('\n'));
+}
+
+/**
+ * Read and display main process logs
+ */
+function displayMainLogs(runDir: string, options: LogsOptions): void {
+  const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+  if (!fs.existsSync(logFile)) {
+    console.log('No main log file found.');
+    return;
+  }
+
+  let content = fs.readFileSync(logFile, 'utf8');
+  let lines = content.split('\n');
+
+  if (options.filter) {
+    const filterLower = options.filter.toLowerCase();
+    lines = lines.filter(line => line.toLowerCase().includes(filterLower));
+  }
+
+  if (options.tail && lines.length > options.tail) {
+    lines = lines.slice(-options.tail);
+  }
+
+  if (options.clean) {
+    lines = lines.map(line => stripAnsi(line));
+  }
+
   console.log(lines.join('\n'));
 }
 
@@ -752,6 +782,68 @@ function followLogs(laneDir: string, options: LogsOptions): void {
 }
 
 /**
+ * Follow main process log in real-time
+ */
+function followMainLogs(runDir: string, options: LogsOptions): void {
+  const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+
+  if (!fs.existsSync(logFile)) {
+    console.log('Waiting for main log file...');
+  }
+
+  let lastSize = 0;
+  try {
+    lastSize = fs.statSync(logFile).size;
+  } catch {
+    lastSize = 0;
+  }
+
+  console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
+
+  const checkInterval = setInterval(() => {
+    let fd: number | null = null;
+    try {
+      fd = fs.openSync(logFile, 'r');
+      const stats = fs.fstatSync(fd);
+      if (stats.size > lastSize) {
+        const buffer = Buffer.alloc(stats.size - lastSize);
+        fs.readSync(fd, buffer, 0, buffer.length, lastSize);
+
+        let content = buffer.toString();
+
+        if (options.filter) {
+          const filterLower = options.filter.toLowerCase();
+          const lines = content.split('\n');
+          content = lines.filter(line => line.toLowerCase().includes(filterLower)).join('\n');
+        }
+
+        if (options.clean) {
+          content = stripAnsi(content);
+        }
+
+        if (content.trim()) {
+          process.stdout.write(content);
+        }
+
+        lastSize = stats.size;
+      }
+    } catch {
+      // Ignore errors (file might be rotating)
+    } finally {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch { /* ignore */ }
+      }
+    }
+  }, 100);
+
+  process.on('SIGINT', () => {
+    clearInterval(checkInterval);
+    console.log('\n\nStopped following logs.');
+    process.exit(0);
+  });
+}
+
+/**
  * Display logs summary for all lanes
  */
 function displaySummary(runDir: string): void {
@@ -865,10 +957,30 @@ async function logs(args: string[]): Promise<void> {
     return;
   }
   
-  // If no lane specified, show summary
+  // If no lane specified, show main process log by default
   if (!options.lane) {
-    displaySummary(runDir);
-    console.log(`${logger.COLORS.gray}Use --lane <name> to view logs (default: readable), --clean for terminal logs, or --all to view all lanes merged${logger.COLORS.reset}`);
+    if (options.follow) {
+      followMainLogs(runDir, options);
+      return;
+    }
+
+    if (options.output) {
+      const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+      if (!fs.existsSync(logFile)) {
+        console.log('No main log file found.');
+        return;
+      }
+      let content = fs.readFileSync(logFile, 'utf8');
+      if (options.clean) {
+        content = stripAnsi(content);
+      }
+      fs.writeFileSync(options.output, content, 'utf8');
+      console.log(`Exported main log to: ${options.output}`);
+      return;
+    }
+
+    displayMainLogs(runDir, options);
+    console.log(`${logger.COLORS.gray}Use --lane <name> for lane logs, --all to merge lanes, or --clean to strip ANSI codes.${logger.COLORS.reset}`);
     return;
   }
   
@@ -904,4 +1016,3 @@ async function logs(args: string[]): Promise<void> {
 }
 
 export = logs;
-

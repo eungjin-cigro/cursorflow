@@ -8,6 +8,9 @@
  * - Importance filtering
  * - Text search
  * - Readable format toggle
+ *
+ * Note: This viewer only reads lane/subprocess logs. Main process logs are
+ * written to the run-level main log file and shown by default in CLI logs.
  */
 
 import * as readline from 'readline';

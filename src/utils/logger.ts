@@ -3,14 +3,47 @@
  * 
  * 통일된 로그 형식: [HH:MM:SS] emoji TYPE message
  * 컨텍스트 포함 시: [HH:MM:SS] [context] emoji TYPE message
+ * 
+ * Main process logs are optionally mirrored to a dedicated file to keep
+ * orchestration logs separate from lane/subprocess logs.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { COLORS, LogLevel } from './log-constants';
 import { formatMessageForConsole } from './log-formatter';
 
 export { COLORS, LogLevel };
 
 let currentLogLevel: number = LogLevel.info;
+let defaultContext: string | null = null;
+let logFileStream: fs.WriteStream | null = null;
+
+/**
+ * Set default context label for logs (e.g., MAIN).
+ */
+export function setDefaultContext(context?: string | null): void {
+  defaultContext = context ?? null;
+}
+
+/**
+ * Mirror main process logs to a file (raw console output with ANSI codes).
+ */
+export function setLogFile(logPath?: string | null): void {
+  if (logFileStream) {
+    try {
+      logFileStream.end();
+    } catch {
+      // Ignore stream close errors
+    }
+    logFileStream = null;
+  }
+
+  if (!logPath) return;
+
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  logFileStream = fs.createWriteStream(logPath, { flags: 'a' });
+}
 
 /**
  * Set log level
@@ -66,11 +99,14 @@ function logInternal(
     timestamp: Date.now(),
   }, {
     includeTimestamp: !options.noTimestamp,
-    context: options.context,
+    context: options.context ?? defaultContext ?? undefined,
     compact: !options.box
   });
 
   console.log(formatted);
+  if (logFileStream) {
+    logFileStream.write(`${formatted}\n`);
+  }
 }
 
 // ============================================================================
@@ -144,10 +180,14 @@ export function withContext(context: string) {
  */
 export function section(message: string): void {
   console.log('');
-  console.log(`${COLORS.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLORS.reset}`);
+  const divider = `${COLORS.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLORS.reset}`;
+  console.log(divider);
   console.log(`${COLORS.cyan}  ${message}${COLORS.reset}`);
-  console.log(`${COLORS.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLORS.reset}`);
+  console.log(divider);
   console.log('');
+  if (logFileStream) {
+    logFileStream.write(`\n${divider}\n${COLORS.cyan}  ${message}${COLORS.reset}\n${divider}\n\n`);
+  }
 }
 
 /**
@@ -155,6 +195,9 @@ export function section(message: string): void {
  */
 export function raw(message: string): void {
   process.stdout.write(message);
+  if (logFileStream) {
+    logFileStream.write(message);
+  }
 }
 
 /**
@@ -162,6 +205,9 @@ export function raw(message: string): void {
  */
 export function log(message: string): void {
   console.log(message);
+  if (logFileStream) {
+    logFileStream.write(`${message}\n`);
+  }
 }
 
 // ============================================================================
