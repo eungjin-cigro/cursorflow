@@ -115,7 +115,7 @@ cursorflow add FullStack frontend --task "name=ui|prompt=Create UI" --after "api
 │  backend  │ ──▶ │    api    │ ──▶ │ frontend  │
 │   (db)    │     │  (impl)   │     │   (ui)    │
 └───────────┘     └───────────┘     └───────────┘
-                       │                 │
+                        │                 │
                    merges            merges
                    backend          backend,api
 ```

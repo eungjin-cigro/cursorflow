@@ -285,9 +285,9 @@ async function tasks(args: string[]): Promise<void> {
     // Then try as a legacy task
     const taskInfo = taskService.getTaskDirInfo(options.taskName);
     if (taskInfo) {
-      taskService.validateTaskDir(options.taskName);
-      const updatedInfo = taskService.getTaskDirInfo(options.taskName)!;
-      printTaskDetail(updatedInfo);
+    taskService.validateTaskDir(options.taskName);
+    const updatedInfo = taskService.getTaskDirInfo(options.taskName)!;
+    printTaskDetail(updatedInfo);
       return;
     }
     
@@ -298,17 +298,17 @@ async function tasks(args: string[]): Promise<void> {
   // List flows and/or tasks
   const flows = options.legacyOnly ? [] : listFlows(flowsDir);
   let taskList = options.flowsOnly ? [] : taskService.listTaskDirs();
-  
+    
   if (options.validate && taskList.length > 0) {
-    const spinner = logger.createSpinner('Validating tasks...');
-    spinner.start();
-    for (const task of taskList) {
-      taskService.validateTaskDir(task.name);
+      const spinner = logger.createSpinner('Validating tasks...');
+      spinner.start();
+      for (const task of taskList) {
+        taskService.validateTaskDir(task.name);
+      }
+      spinner.succeed('Validation complete');
+      taskList = taskService.listTaskDirs();
     }
-    spinner.succeed('Validation complete');
-    taskList = taskService.listTaskDirs();
-  }
-
+    
   // Print results
   if (flows.length > 0) {
     printFlowsList(flows);

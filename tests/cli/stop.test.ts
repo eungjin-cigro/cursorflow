@@ -17,7 +17,7 @@ describe('CLI stop command', () => {
   const mockedLoadConfig = config.loadConfig as jest.Mock;
   const mockedGetLogsDir = config.getLogsDir as jest.Mock;
   const mockedReadline = readline as jest.Mocked<typeof readline>;
-  
+
   const originalCwd = process.cwd();
   let chdirSpy: jest.SpyInstance;
 
