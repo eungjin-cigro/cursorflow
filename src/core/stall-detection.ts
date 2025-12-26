@@ -140,6 +140,8 @@ export enum StallType {
 export interface LaneStallState {
   /** Lane 이름 */
   laneName: string;
+  /** Run ID */
+  runId: string;
   /** 현재 복구 단계 */
   phase: StallPhase;
   /** Lane의 현재 상태 (waiting, running 등) - waiting 시 stall 분석 스킵 */
@@ -295,16 +297,18 @@ export class StallDetectionService {
   registerLane(
     laneName: string, 
     options: {
+      runId: string;
       laneRunDir?: string;
       childProcess?: ChildProcess;
       startIndex?: number;
       interventionEnabled?: boolean;
-    } = {}
+    }
   ): void {
     const now = Date.now();
     
     this.laneStates.set(laneName, {
       laneName,
+      runId: options.runId,
       phase: StallPhase.NORMAL,
       interventionEnabled: options.interventionEnabled ?? true, // default to true
       lastRealActivityTime: now,
@@ -324,7 +328,7 @@ export class StallDetectionService {
     });
     
     if (this.config.verbose) {
-      logger.debug(`[StallService] Lane registered: ${laneName} (intervention: ${options.interventionEnabled ?? true})`);
+      logger.debug(`[StallService] Lane registered: ${laneName} (runId: ${options.runId}, intervention: ${options.interventionEnabled ?? true})`);
     }
   }
   
@@ -818,7 +822,7 @@ export class StallDetectionService {
         laneName: state.laneName,
         idleSeconds: Math.round((Date.now() - state.lastRealActivityTime) / 1000),
         signalCount: state.continueSignalCount,
-      });
+      }, state.runId);
     } catch (error: any) {
       logger.error(`[StallService] [${state.laneName}] Failed to send continue signal: ${error.message}`);
     }
@@ -858,7 +862,7 @@ If you encountered a git error, resolve it and continue.`;
       
       events.emit('recovery.stronger_prompt', {
         laneName: state.laneName,
-      });
+      }, state.runId);
     } catch (error: any) {
       logger.error(`[StallService] [${state.laneName}] Failed to send stronger prompt: ${error.message}`);
     }
@@ -888,7 +892,7 @@ If you encountered a git error, resolve it and continue.`;
       laneName: state.laneName,
       restartCount: state.restartCount,
       maxRestarts: this.config.maxRestarts,
-    });
+    }, state.runId);
   }
   
   /**
@@ -903,7 +907,7 @@ If you encountered a git error, resolve it and continue.`;
     events.emit('recovery.diagnosed', {
       laneName: state.laneName,
       restartCount: state.restartCount,
-    });
+    }, state.runId);
   }
   
   /**
@@ -917,7 +921,7 @@ If you encountered a git error, resolve it and continue.`;
     
     events.emit('recovery.aborted', {
       laneName: state.laneName,
-    });
+    }, state.runId);
   }
   
   /**
