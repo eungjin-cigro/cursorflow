@@ -244,7 +244,7 @@ export class StallDetectionService {
   private config: StallDetectionConfig;
   private laneStates: Map<string, LaneStallState> = new Map();
   
-  private constructor(config: Partial<StallDetectionConfig> = {}) {
+  public constructor(config: Partial<StallDetectionConfig> = {}) {
     this.config = { ...DEFAULT_STALL_CONFIG, ...config };
   }
   
@@ -969,6 +969,16 @@ If you encountered a git error, resolve it and continue.`;
  */
 export function getStallService(config?: Partial<StallDetectionConfig>): StallDetectionService {
   return StallDetectionService.getInstance(config);
+}
+
+/**
+ * Stall Detection Service 팩토리 함수
+ * 
+ * @param flowId 플로우 ID
+ * @param config 설정
+ */
+export function createStallDetectionService(flowId: string, config?: Partial<StallDetectionConfig>): StallDetectionService {
+  return new StallDetectionService(config);
 }
 
 /**
