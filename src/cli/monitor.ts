@@ -126,11 +126,13 @@ interface MonitorState {
   terminalScrollOffset: number;
   messageScrollOffset: number;
   followMode: boolean;
+  readableFormat: boolean; // Toggle between readable and raw log format
   
   // Log view state
   unifiedLogScrollOffset: number;
   unifiedLogFollowMode: boolean;
   laneFilter: string | null;
+  readableLogFormat: boolean; // For unified log view
   
   // Action menu
   actionMenuVisible: boolean;
@@ -140,6 +142,9 @@ interface MonitorState {
   inputMode: 'none' | 'message' | 'timeout';
   inputBuffer: string;
   inputTarget: string | null;
+  
+  // Help overlay
+  showHelp: boolean;
   
   // Notification
   notification: { message: string; type: 'info' | 'error' | 'success'; time: number } | null;
@@ -228,14 +233,17 @@ class InteractiveMonitor {
       terminalScrollOffset: 0,
       messageScrollOffset: 0,
       followMode: true,
+      readableFormat: true,
       unifiedLogScrollOffset: 0,
       unifiedLogFollowMode: true,
       laneFilter: null,
+      readableLogFormat: true,
       actionMenuVisible: false,
       actionItems: [],
       inputMode: 'none',
       inputBuffer: '',
       inputTarget: null,
+      showHelp: false,
       notification: null,
     };
     
@@ -399,7 +407,16 @@ class InteractiveMonitor {
         
       // Help
       case '?':
-        this.showHelp();
+        this.state.showHelp = !this.state.showHelp;
+        this.render();
+        break;
+        
+      // Readable format toggle (for log tab)
+      case 'r':
+        if (this.state.currentTab === Tab.UNIFIED_LOG) {
+          this.state.readableLogFormat = !this.state.readableLogFormat;
+          this.render();
+        }
         break;
     }
   }
@@ -465,6 +482,18 @@ class InteractiveMonitor {
         if (this.state.followMode) {
           this.state.terminalScrollOffset = 0;
         }
+        this.render();
+        break;
+        
+      // Readable format toggle
+      case 'r':
+        this.state.readableFormat = !this.state.readableFormat;
+        this.render();
+        break;
+        
+      // Help
+      case '?':
+        this.state.showHelp = !this.state.showHelp;
         this.render();
         break;
         
@@ -994,6 +1023,11 @@ class InteractiveMonitor {
     if (this.state.inputMode !== 'none') {
       this.renderInputOverlay();
     }
+    
+    // Overlay: Help
+    if (this.state.showHelp) {
+      this.renderHelpOverlay();
+    }
   }
   
   private renderDashboard() {
@@ -1053,8 +1087,8 @@ class InteractiveMonitor {
     // Footer
     process.stdout.write(`${cyan}${hLine}${reset}\n`);
     const help = this.state.currentTab === Tab.UNIFIED_LOG
-      ? `${yellow}[←/→]${reset} Tab  ${yellow}[↑/↓]${reset} Scroll  ${yellow}[Space]${reset} Follow  ${yellow}[Enter]${reset} Action  ${yellow}[Q]${reset} Quit`
-      : `${yellow}[←/→]${reset} Tab/Enter  ${yellow}[↑/↓]${reset} Select  ${yellow}[Enter]${reset} Action  ${yellow}[Q]${reset} Quit`;
+      ? `${yellow}[←/→]${reset} Tab  ${yellow}[↑/↓]${reset} Scroll  ${yellow}[Space]${reset} Follow  ${yellow}[R]${reset} Format  ${yellow}[Enter]${reset} Action  ${yellow}[?]${reset} Help`
+      : `${yellow}[←/→]${reset} Tab/Enter  ${yellow}[↑/↓]${reset} Select  ${yellow}[Enter]${reset} Action  ${yellow}[?]${reset} Help  ${yellow}[Q]${reset} Quit`;
     process.stdout.write(`  ${help}\n`);
   }
   
@@ -1192,9 +1226,10 @@ class InteractiveMonitor {
     // Status bar
     const filterLabel = this.state.laneFilter || 'All';
     const followLabel = this.state.unifiedLogFollowMode ? `${green}Follow ON${reset}` : `${yellow}Follow OFF${reset}`;
+    const formatLabel = this.state.readableLogFormat ? `${green}Readable${reset}` : `${dim}Compact${reset}`;
     const totalEntries = this.unifiedLogBuffer?.getState().totalEntries || 0;
     
-    process.stdout.write(`  ${dim}Filter:${reset} ${cyan}${filterLabel}${reset}  │  ${followLabel}  │  ${dim}Total: ${totalEntries} entries${reset}\n\n`);
+    process.stdout.write(`  ${dim}Filter:${reset} ${cyan}${filterLabel}${reset}  │  ${followLabel}  │  ${yellow}[R]${reset} ${formatLabel}  │  ${dim}Total: ${totalEntries}${reset}\n\n`);
     
     if (!this.unifiedLogBuffer) {
       process.stdout.write(`  ${dim}No log buffer available${reset}\n`);
@@ -1215,11 +1250,20 @@ class InteractiveMonitor {
     
     for (const entry of entries) {
       const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
-      const lane = entry.laneName.substring(0, 10).padEnd(10);
       const typeInfo = this.getLogTypeInfo(entry.type || 'info');
-      const preview = entry.message.replace(/\n/g, ' ').substring(0, this.screenWidth - 50);
       
-      process.stdout.write(`  ${dim}[${ts}]${reset} ${entry.laneColor}[${lane}]${reset} ${typeInfo.color}[${typeInfo.label}]${reset} ${preview}\n`);
+      if (this.state.readableLogFormat) {
+        // Readable format: more context, wider lane name
+        const lane = entry.laneName.substring(0, 12).padEnd(12);
+        const preview = entry.message.replace(/\n/g, ' ').substring(0, this.screenWidth - 45);
+        process.stdout.write(`  ${dim}[${ts}]${reset} ${entry.laneColor}[${lane}]${reset} ${typeInfo.color}[${typeInfo.label}]${reset} ${preview}\n`);
+      } else {
+        // Compact format: shorter, for quick scanning
+        const lane = entry.laneName.substring(0, 8).padEnd(8);
+        const typeShort = (entry.type || 'info').substring(0, 4).toUpperCase();
+        const preview = entry.message.replace(/\n/g, ' ').substring(0, this.screenWidth - 35);
+        process.stdout.write(`  ${dim}${ts}${reset} ${entry.laneColor}${lane}${reset} ${typeInfo.color}${typeShort}${reset} ${preview}\n`);
+      }
     }
   }
   
@@ -1286,40 +1330,95 @@ class InteractiveMonitor {
     
     // Footer
     process.stdout.write(`${cyan}${hLine}${reset}\n`);
-    const followStatus = this.state.followMode ? `${green}Follow ON${reset}` : `${yellow}Follow OFF${reset}`;
-    process.stdout.write(`  ${yellow}[←]${reset} Back  ${yellow}[→]${reset} Panel  ${yellow}[↑/↓]${reset} Scroll  ${yellow}[Space]${reset} ${followStatus}  ${yellow}[Enter]${reset} Action  ${yellow}[Q]${reset} Quit\n`);
+    const followStatus = this.state.followMode ? `${green}ON${reset}` : `${yellow}OFF${reset}`;
+    const formatStatus = this.state.readableFormat ? `${green}Readable${reset}` : `${dim}Raw${reset}`;
+    process.stdout.write(`  ${yellow}[←]${reset} Back  ${yellow}[→]${reset} Panel  ${yellow}[↑/↓]${reset} Scroll  ${yellow}[Space]${reset} Follow:${followStatus}  ${yellow}[R]${reset} ${formatStatus}  ${yellow}[Enter]${reset} Action  ${yellow}[?]${reset} Help\n`);
   }
   
   private getTerminalLines(lanePath: string, maxLines: number): string[] {
-    const { dim, reset, cyan, green, yellow, red } = UI.COLORS;
+    const { dim, reset, cyan, green, yellow, red, gray } = UI.COLORS;
     
+    // Choose log source based on format setting
+    if (this.state.readableFormat) {
+      // Try JSONL first for structured readable format
+      const jsonlPath = safeJoin(lanePath, 'terminal.jsonl');
+      if (fs.existsSync(jsonlPath)) {
+        return this.getJsonlLogLines(jsonlPath, maxLines);
+      }
+    }
+    
+    // Fallback to raw terminal log
     const logPath = safeJoin(lanePath, 'terminal-readable.log');
     if (!fs.existsSync(logPath)) {
       return [`${dim}(No output yet)${reset}`];
     }
     
-    const content = fs.readFileSync(logPath, 'utf8');
-    const allLines = content.split('\n');
-    const totalLines = allLines.length;
+    try {
+      const content = fs.readFileSync(logPath, 'utf8');
+      const allLines = content.split('\n');
+      const totalLines = allLines.length;
+      
+      // Calculate visible range (from end, accounting for scroll offset)
+      const end = Math.max(0, totalLines - this.state.terminalScrollOffset);
+      const start = Math.max(0, end - maxLines);
+      const visibleLines = allLines.slice(start, end);
+      
+      // Format lines with syntax highlighting
+      return visibleLines.map(line => {
+        if (line.includes('[HUMAN INTERVENTION]') || line.includes('Injecting intervention:')) {
+          return `${yellow}${line}${reset}`;
+        }
+        if (line.includes('=== Task:') || line.includes('Starting task:')) {
+          return `${green}${line}${reset}`;
+        }
+        if (line.includes('Executing cursor-agent') || line.includes('cursor-agent-v')) {
+          return `${cyan}${line}${reset}`;
+        }
+        if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
+          return `${red}${line}${reset}`;
+        }
+        if (line.toLowerCase().includes('success') || line.toLowerCase().includes('completed')) {
+          return `${green}${line}${reset}`;
+        }
+        return line;
+      });
+    } catch {
+      return [`${dim}(Error reading log)${reset}`];
+    }
+  }
+  
+  /**
+   * Get structured log lines from JSONL file
+   */
+  private getJsonlLogLines(jsonlPath: string, maxLines: number): string[] {
+    const { dim, reset, cyan, green, yellow, red, gray } = UI.COLORS;
     
-    // Calculate visible range
-    const end = totalLines - this.state.terminalScrollOffset;
-    const start = Math.max(0, end - maxLines);
-    const visibleLines = allLines.slice(start, end);
-    
-    // Format lines
-    return visibleLines.map(line => {
-      if (line.includes('[HUMAN INTERVENTION]')) {
-        return `${yellow}${line}${reset}`;
-      }
-      if (line.includes('=== Task:') || line.includes('Starting task:')) {
-        return `${green}${line}${reset}`;
-      }
-      if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-        return `${red}${line}${reset}`;
-      }
-      return line;
-    });
+    try {
+      const content = fs.readFileSync(jsonlPath, 'utf8');
+      const allLines = content.split('\n').filter(l => l.trim());
+      const totalLines = allLines.length;
+      
+      // Calculate visible range
+      const end = Math.max(0, totalLines - this.state.terminalScrollOffset);
+      const start = Math.max(0, end - maxLines);
+      const visibleLines = allLines.slice(start, end);
+      
+      return visibleLines.map(line => {
+        try {
+          const entry = JSON.parse(line);
+          const ts = new Date(entry.timestamp || Date.now()).toLocaleTimeString('en-US', { hour12: false });
+          const type = (entry.type || 'info').toLowerCase();
+          const content = (entry.content || entry.message || '').replace(/\n/g, ' ');
+          
+          const typeInfo = this.getLogTypeInfo(type);
+          return `${gray}[${ts}]${reset} ${typeInfo.color}[${typeInfo.label}]${reset} ${content}`;
+        } catch {
+          return `${gray}${line}${reset}`;
+        }
+      });
+    } catch {
+      return [`${dim}(Error reading log)${reset}`];
+    }
   }
   
   private getMessageLines(maxLines: number): string[] {
@@ -1485,6 +1584,88 @@ class InteractiveMonitor {
     const visibleLength = stripAnsi(str).length;
     const padding = Math.max(0, width - visibleLength);
     return str + ' '.repeat(padding);
+  }
+  
+  /**
+   * Safe string truncation that handles ANSI codes
+   */
+  private safeSubstring(str: string, maxLen: number): string {
+    const stripped = stripAnsi(str);
+    if (stripped.length <= maxLen) return str;
+    
+    // Simple approach: truncate stripped, find corresponding position in original
+    let visibleCount = 0;
+    let i = 0;
+    while (i < str.length && visibleCount < maxLen - 3) {
+      // Skip ANSI sequences
+      if (str[i] === '\x1b') {
+        const match = str.slice(i).match(/^\x1b\[[0-9;]*m/);
+        if (match) {
+          i += match[0].length;
+          continue;
+        }
+      }
+      visibleCount++;
+      i++;
+    }
+    return str.slice(0, i) + '...';
+  }
+  
+  /**
+   * Render help overlay
+   */
+  private renderHelpOverlay() {
+    const { cyan, reset, bold, dim, yellow, gray } = UI.COLORS;
+    
+    const helpWidth = 60;
+    const helpHeight = 20;
+    const startX = Math.floor((this.screenWidth - helpWidth) / 2);
+    const startY = Math.floor((this.screenHeight - helpHeight) / 2);
+    
+    const helpContent = [
+      `${bold}📖 Keyboard Shortcuts${reset}`,
+      '',
+      `${yellow}Navigation${reset}`,
+      `  ←/→     Tab switch / Enter detail / Panel switch`,
+      `  ↑/↓     Select item / Scroll content`,
+      `  Tab     Quick tab switch`,
+      `  Esc     Go back / Close overlay`,
+      '',
+      `${yellow}Actions${reset}`,
+      `  Enter   Open action menu`,
+      `  Space   Toggle follow mode (in logs)`,
+      `  R       Toggle readable format`,
+      `  ?       Show/hide this help`,
+      `  Q       Quit`,
+      '',
+      `${yellow}Action Menu${reset}`,
+      `  1-9     Quick select action`,
+      `  ↑/↓     Navigate actions`,
+      `  Enter   Execute selected action`,
+    ];
+    
+    // Draw box
+    process.stdout.write(`\x1b[${startY};${startX}H`);
+    process.stdout.write(`${cyan}┌${'─'.repeat(helpWidth - 2)}┐${reset}`);
+    
+    for (let i = 0; i < helpContent.length; i++) {
+      process.stdout.write(`\x1b[${startY + 1 + i};${startX}H`);
+      const line = helpContent[i] || '';
+      const paddedLine = this.padWithAnsi(line, helpWidth - 4);
+      process.stdout.write(`${cyan}│${reset} ${paddedLine} ${cyan}│${reset}`);
+    }
+    
+    // Fill remaining space
+    for (let i = helpContent.length; i < helpHeight - 2; i++) {
+      process.stdout.write(`\x1b[${startY + 1 + i};${startX}H`);
+      process.stdout.write(`${cyan}│${reset}${' '.repeat(helpWidth - 2)}${cyan}│${reset}`);
+    }
+    
+    process.stdout.write(`\x1b[${startY + helpHeight - 1};${startX}H`);
+    process.stdout.write(`${cyan}│${reset}${dim} Press ? or Esc to close${reset}${' '.repeat(helpWidth - 27)}${cyan}│${reset}`);
+    
+    process.stdout.write(`\x1b[${startY + helpHeight};${startX}H`);
+    process.stdout.write(`${cyan}└${'─'.repeat(helpWidth - 2)}┘${reset}`);
   }
 }
 
