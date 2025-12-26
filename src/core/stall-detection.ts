@@ -202,6 +202,21 @@ export interface FailureRecord {
 }
 
 // ============================================================================
+// 분석 컨텍스트 (Analysis Context)
+// ============================================================================
+
+/** 분석에 필요한 시간 및 상태 컨텍스트 */
+interface AnalysisContext {
+  state: LaneStallState;
+  idleTime: number;
+  progressTime: number;
+  taskTime: number;
+  timeSincePhaseChange: number;
+  bytesDelta: number;
+  effectiveIdleTimeout: number;
+}
+
+// ============================================================================
 // Stall Detection Service
 // ============================================================================
 
@@ -420,207 +435,236 @@ export class StallDetectionService {
   // Stall 분석 (Analysis)
   // --------------------------------------------------------------------------
   
+  /** StallAnalysis 생성 헬퍼 */
+  private buildAnalysis(
+    type: StallType, 
+    action: RecoveryAction, 
+    message: string, 
+    isTransient: boolean, 
+    details?: Record<string, any>
+  ): StallAnalysis {
+    return { type, action, message, isTransient, details };
+  }
+  
   /**
    * Stall 상태 분석 - 현재 상태에서 필요한 액션 결정
    * 
    * 분석 우선순위:
    * 1. Task timeout (30분) → RESTART/DOCTOR
-   * 2. Zero bytes + idle → AGENT_NO_RESPONSE
+   * 2. Zero bytes + idle → phase별 에스컬레이션
    * 3. No progress (10분) → 단계별 에스컬레이션
    * 4. Idle timeout (2분) → 단계별 에스컬레이션
    */
   analyzeStall(laneName: string): StallAnalysis {
     const state = this.laneStates.get(laneName);
     if (!state) {
-      return {
-        type: StallType.IDLE,
-        action: RecoveryAction.NONE,
-        message: 'Lane not found',
-        isTransient: false,
-      };
+      return this.buildAnalysis(StallType.IDLE, RecoveryAction.NONE, 'Lane not found', false);
     }
     
+    const ctx = this.buildAnalysisContext(state);
+    
+    // 1. Task timeout (최우선)
+    const taskResult = this.checkTaskTimeout(ctx);
+    if (taskResult) return taskResult;
+    
+    // 2. Zero bytes + idle (에이전트 무응답)
+    const zeroByteResult = this.checkZeroBytes(ctx);
+    if (zeroByteResult) return zeroByteResult;
+    
+    // 3. Progress timeout
+    const progressResult = this.checkProgressTimeout(ctx);
+    if (progressResult) return progressResult;
+    
+    // 4. Phase별 idle 체크
+    const idleResult = this.checkPhaseBasedIdle(ctx);
+    if (idleResult) return idleResult;
+    
+    // 액션 필요 없음
+    return this.buildAnalysis(StallType.IDLE, RecoveryAction.NONE, 'Monitoring', true);
+  }
+  
+  /** 분석 컨텍스트 생성 */
+  private buildAnalysisContext(state: LaneStallState): AnalysisContext {
     const now = Date.now();
-    const idleTime = now - state.lastRealActivityTime;
-    const progressTime = now - state.lastStateUpdateTime;
-    const taskTime = now - state.taskStartTime;
-    const timeSincePhaseChange = now - state.lastPhaseChangeTime;
+    return {
+      state,
+      idleTime: now - state.lastRealActivityTime,
+      progressTime: now - state.lastStateUpdateTime,
+      taskTime: now - state.taskStartTime,
+      timeSincePhaseChange: now - state.lastPhaseChangeTime,
+      bytesDelta: state.totalBytesReceived - state.bytesAtLastCheck,
+      effectiveIdleTimeout: state.isLongOperation 
+        ? this.config.longOperationGraceMs 
+        : this.config.idleTimeoutMs,
+    };
+  }
+  
+  /** Task timeout 체크 */
+  private checkTaskTimeout(ctx: AnalysisContext): StallAnalysis | null {
+    if (ctx.taskTime <= this.config.taskTimeoutMs) return null;
     
-    // 바이트 델타 계산
-    const bytesDelta = state.totalBytesReceived - state.bytesAtLastCheck;
+    const canRestart = ctx.state.restartCount < this.config.maxRestarts;
+    return this.buildAnalysis(
+      StallType.TASK_TIMEOUT,
+      canRestart ? RecoveryAction.REQUEST_RESTART : RecoveryAction.RUN_DOCTOR,
+      `Task exceeded maximum timeout of ${Math.round(this.config.taskTimeoutMs / 60000)} minutes`,
+      canRestart,
+      { taskTimeMs: ctx.taskTime, restartCount: ctx.state.restartCount }
+    );
+  }
+  
+  /** Zero bytes 체크 (grace period 존중) */
+  private checkZeroBytes(ctx: AnalysisContext): StallAnalysis | null {
+    const { state, idleTime, timeSincePhaseChange, bytesDelta, effectiveIdleTimeout } = ctx;
     
-    // 장기 작업 유예 시간 적용
-    const effectiveIdleTimeout = state.isLongOperation 
-      ? this.config.longOperationGraceMs 
-      : this.config.idleTimeoutMs;
+    if (bytesDelta !== 0 || idleTime <= effectiveIdleTimeout) return null;
     
-    // 1. Task timeout 체크 (최우선)
-    if (taskTime > this.config.taskTimeoutMs) {
-      return {
-        type: StallType.TASK_TIMEOUT,
-        action: state.restartCount < this.config.maxRestarts 
-          ? RecoveryAction.REQUEST_RESTART 
-          : RecoveryAction.RUN_DOCTOR,
-        message: `Task exceeded maximum timeout of ${Math.round(this.config.taskTimeoutMs / 60000)} minutes`,
-        isTransient: state.restartCount < this.config.maxRestarts,
-        details: { taskTimeMs: taskTime, restartCount: state.restartCount },
-      };
-    }
+    const baseDetails = { idleTimeMs: idleTime, bytesDelta, phase: state.phase, timeSincePhaseChange };
     
-    // 2. Zero bytes + idle 체크 (에이전트 무응답)
-    if (bytesDelta === 0 && idleTime > effectiveIdleTimeout) {
-      return {
-        type: StallType.ZERO_BYTES,
-        action: state.phase < StallPhase.STRONGER_PROMPT_SENT 
-          ? RecoveryAction.SEND_CONTINUE 
-          : RecoveryAction.REQUEST_RESTART,
-        message: `Agent produced 0 bytes for ${Math.round(idleTime / 1000)}s - possible API issue`,
-        isTransient: true,
-        details: { idleTimeMs: idleTime, bytesDelta, phase: state.phase },
-      };
-    }
-    
-    // 3. Progress timeout 체크
-    if (progressTime > this.config.progressTimeoutMs) {
-      return this.getEscalatedAction(state, StallType.NO_PROGRESS, progressTime);
-    }
-    
-    // 4. Phase별 상태 체크
     switch (state.phase) {
       case StallPhase.NORMAL:
-        // Idle timeout 체크
+        return this.buildAnalysis(
+          StallType.ZERO_BYTES,
+          RecoveryAction.SEND_CONTINUE,
+          `Agent produced 0 bytes for ${Math.round(idleTime / 1000)}s - possible API issue`,
+          true, baseDetails
+        );
+        
+      case StallPhase.CONTINUE_SENT:
+        if (timeSincePhaseChange > this.config.continueGraceMs) {
+          return this.buildAnalysis(
+            StallType.ZERO_BYTES,
+            RecoveryAction.SEND_STRONGER_PROMPT,
+            `Still 0 bytes after continue signal (${Math.round(timeSincePhaseChange / 1000)}s). Escalating...`,
+            true, baseDetails
+          );
+        }
+        return null; // Grace period 내 → 대기
+        
+      case StallPhase.STRONGER_PROMPT_SENT:
+        if (timeSincePhaseChange > this.config.strongerPromptGraceMs) {
+          return this.buildAnalysis(
+            StallType.ZERO_BYTES,
+            RecoveryAction.REQUEST_RESTART,
+            `Still 0 bytes after stronger prompt (${Math.round(timeSincePhaseChange / 1000)}s). Restarting...`,
+            true, baseDetails
+          );
+        }
+        return null; // Grace period 내 → 대기
+        
+      default:
+        // RESTART_REQUESTED, DIAGNOSED, ABORTED
+        return this.buildAnalysis(
+          StallType.ZERO_BYTES,
+          RecoveryAction.REQUEST_RESTART,
+          `Agent produced 0 bytes for ${Math.round(idleTime / 1000)}s - possible API issue`,
+          true, baseDetails
+        );
+    }
+  }
+  
+  /** Progress timeout 체크 */
+  private checkProgressTimeout(ctx: AnalysisContext): StallAnalysis | null {
+    if (ctx.progressTime <= this.config.progressTimeoutMs) return null;
+    return this.getEscalatedAction(ctx.state, StallType.NO_PROGRESS, ctx.progressTime);
+  }
+  
+  /** Phase별 idle 상태 체크 */
+  private checkPhaseBasedIdle(ctx: AnalysisContext): StallAnalysis | null {
+    const { state, idleTime, timeSincePhaseChange, effectiveIdleTimeout } = ctx;
+    
+    switch (state.phase) {
+      case StallPhase.NORMAL:
         if (idleTime > effectiveIdleTimeout) {
-          return {
-            type: StallType.IDLE,
-            action: RecoveryAction.SEND_CONTINUE,
-            message: `Lane idle for ${Math.round(idleTime / 1000)}s. Sending continue signal...`,
-            isTransient: true,
-            details: { idleTimeMs: idleTime, isLongOperation: state.isLongOperation },
-          };
+          return this.buildAnalysis(
+            StallType.IDLE,
+            RecoveryAction.SEND_CONTINUE,
+            `Lane idle for ${Math.round(idleTime / 1000)}s. Sending continue signal...`,
+            true,
+            { idleTimeMs: idleTime, isLongOperation: state.isLongOperation }
+          );
         }
         break;
         
       case StallPhase.CONTINUE_SENT:
-        // Continue 신호 후 유예 시간 초과
         if (timeSincePhaseChange > this.config.continueGraceMs) {
-          return {
-            type: StallType.IDLE,
-            action: RecoveryAction.SEND_STRONGER_PROMPT,
-            message: `Still idle after continue signal. Sending stronger prompt...`,
-            isTransient: true,
-            details: { timeSincePhaseChange, continueSignalCount: state.continueSignalCount },
-          };
+          return this.buildAnalysis(
+            StallType.IDLE,
+            RecoveryAction.SEND_STRONGER_PROMPT,
+            `Still idle after continue signal. Sending stronger prompt...`,
+            true,
+            { timeSincePhaseChange, continueSignalCount: state.continueSignalCount }
+          );
         }
         break;
         
       case StallPhase.STRONGER_PROMPT_SENT:
-        // Stronger prompt 후 유예 시간 초과
         if (timeSincePhaseChange > this.config.strongerPromptGraceMs) {
-          if (state.restartCount < this.config.maxRestarts) {
-            return {
-              type: StallType.IDLE,
-              action: RecoveryAction.REQUEST_RESTART,
-              message: `No response after stronger prompt. Killing and restarting process...`,
-              isTransient: true,
-              details: { restartCount: state.restartCount, maxRestarts: this.config.maxRestarts },
-            };
-          } else {
-            return {
-              type: StallType.IDLE,
-              action: RecoveryAction.RUN_DOCTOR,
-              message: `Lane failed after ${state.restartCount} restarts. Running diagnostics...`,
-              isTransient: false,
-              details: { restartCount: state.restartCount },
-            };
-          }
+          return this.buildRestartOrDoctorAnalysis(state, 
+            'No response after stronger prompt. Killing and restarting process...',
+            `Lane failed after ${state.restartCount} restarts. Running diagnostics...`
+          );
         }
         break;
         
       case StallPhase.RESTART_REQUESTED:
-        // 재시작 후 idle timeout의 75%로 더 짧게 감지
         const postRestartTimeout = effectiveIdleTimeout * 0.75;
         if (idleTime > postRestartTimeout) {
-          if (state.restartCount < this.config.maxRestarts) {
-            return {
-              type: StallType.IDLE,
-              action: RecoveryAction.SEND_CONTINUE,
-              message: `Lane idle after restart. Retrying continue signal...`,
-              isTransient: true,
-              details: { idleTimeMs: idleTime, restartCount: state.restartCount },
-            };
-          } else {
-            return {
-              type: StallType.IDLE,
-              action: RecoveryAction.RUN_DOCTOR,
-              message: `Lane repeatedly stalled. Running diagnostics...`,
-              isTransient: false,
-              details: { restartCount: state.restartCount },
-            };
-          }
+          return this.buildRestartOrDoctorAnalysis(state,
+            'Lane idle after restart. Retrying continue signal...',
+            'Lane repeatedly stalled. Running diagnostics...',
+            RecoveryAction.SEND_CONTINUE  // restart 후에는 continue부터 시작
+          );
         }
         break;
         
       case StallPhase.DIAGNOSED:
       case StallPhase.ABORTED:
-        // 더 이상 복구 시도 안함
-        return {
-          type: StallType.IDLE,
-          action: RecoveryAction.ABORT_LANE,
-          message: 'Lane recovery exhausted',
-          isTransient: false,
-        };
+        return this.buildAnalysis(StallType.IDLE, RecoveryAction.ABORT_LANE, 'Lane recovery exhausted', false);
     }
     
-    // 액션 필요 없음
-    return {
-      type: StallType.IDLE,
-      action: RecoveryAction.NONE,
-      message: 'Monitoring',
-      isTransient: true,
-    };
+    return null;
   }
   
-  /**
-   * Progress timeout에 대한 에스컬레이션 액션 결정
-   */
+  /** 재시작 또는 Doctor 실행 결정 헬퍼 */
+  private buildRestartOrDoctorAnalysis(
+    state: LaneStallState, 
+    restartMsg: string, 
+    doctorMsg: string,
+    restartAction: RecoveryAction = RecoveryAction.REQUEST_RESTART
+  ): StallAnalysis {
+    const canRestart = state.restartCount < this.config.maxRestarts;
+    return this.buildAnalysis(
+      StallType.IDLE,
+      canRestart ? restartAction : RecoveryAction.RUN_DOCTOR,
+      canRestart ? restartMsg : doctorMsg,
+      canRestart,
+      { restartCount: state.restartCount, maxRestarts: this.config.maxRestarts }
+    );
+  }
+  
+  /** Progress timeout에 대한 에스컬레이션 액션 결정 */
   private getEscalatedAction(state: LaneStallState, type: StallType, progressTime: number): StallAnalysis {
+    const details = { progressTimeMs: progressTime };
+    
     switch (state.phase) {
       case StallPhase.NORMAL:
-        return {
-          type,
-          action: RecoveryAction.SEND_CONTINUE,
-          message: `No progress for ${Math.round(progressTime / 60000)} minutes. Sending continue signal...`,
-          isTransient: true,
-          details: { progressTimeMs: progressTime },
-        };
+        return this.buildAnalysis(type, RecoveryAction.SEND_CONTINUE,
+          `No progress for ${Math.round(progressTime / 60000)} minutes. Sending continue signal...`,
+          true, details);
         
       case StallPhase.CONTINUE_SENT:
-        return {
-          type,
-          action: RecoveryAction.SEND_STRONGER_PROMPT,
-          message: `Still no progress. Sending stronger prompt...`,
-          isTransient: true,
-          details: { progressTimeMs: progressTime },
-        };
+        return this.buildAnalysis(type, RecoveryAction.SEND_STRONGER_PROMPT,
+          'Still no progress. Sending stronger prompt...', true, details);
         
       default:
-        if (state.restartCount < this.config.maxRestarts) {
-          return {
-            type,
-            action: RecoveryAction.REQUEST_RESTART,
-            message: `No progress after interventions. Restarting...`,
-            isTransient: true,
-            details: { progressTimeMs: progressTime, restartCount: state.restartCount },
-          };
-        } else {
-          return {
-            type,
-            action: RecoveryAction.RUN_DOCTOR,
-            message: `Persistent no-progress state. Running diagnostics...`,
-            isTransient: false,
-            details: { progressTimeMs: progressTime, restartCount: state.restartCount },
-          };
-        }
+        const canRestart = state.restartCount < this.config.maxRestarts;
+        return this.buildAnalysis(type,
+          canRestart ? RecoveryAction.REQUEST_RESTART : RecoveryAction.RUN_DOCTOR,
+          canRestart ? 'No progress after interventions. Restarting...' : 'Persistent no-progress state. Running diagnostics...',
+          canRestart,
+          { ...details, restartCount: state.restartCount }
+        );
     }
   }
   
