@@ -10,7 +10,6 @@ import * as path from 'path';
 import * as logger from '../utils/logger';
 import { loadConfig } from '../utils/config';
 import { registerWebhooks } from '../utils/webhook';
-import { events } from '../utils/events';
 import { RunnerConfig } from '../types';
 
 // Re-export everything from modular components
@@ -47,61 +46,10 @@ if (require.main === module) {
   const runsIdx = parts.lastIndexOf('runs');
   const runId = runsIdx >= 0 && parts[runsIdx + 1] ? parts[runsIdx + 1]! : `run-${Date.now()}`;
   
-  events.setRunId(runId);
-
-  // Load global config for defaults and webhooks
-  let globalConfig;
-  try {
-    globalConfig = loadConfig();
-    if (globalConfig.webhooks) {
-      registerWebhooks(globalConfig.webhooks);
-    }
-  } catch (e) {
-    // Non-blocking
-  }
+  const config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
   
-  if (!fs.existsSync(tasksFile)) {
-    console.error(`Tasks file not found: ${tasksFile}`);
-    process.exit(1);
-  }
-  
-  // Load tasks configuration
-  let config: RunnerConfig;
-  try {
-    config = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
-    if (forcedPipelineBranch) {
-      config.pipelineBranch = forcedPipelineBranch;
-    }
-    if (forcedWorktreeDir) {
-      config.worktreeDir = forcedWorktreeDir;
-    }
-  } catch (error: any) {
-    console.error(`Failed to load tasks file: ${error.message}`);
-    process.exit(1);
-  }
-  
-  // Add defaults from global config or hardcoded
-  config.dependencyPolicy = config.dependencyPolicy || {
-    allowDependencyChange: globalConfig?.allowDependencyChange ?? false,
-    lockfileReadOnly: globalConfig?.lockfileReadOnly ?? true,
-  };
-  
-  // Add agent output format default
-  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'json';
-  
-  // Handle process interruption to ensure cleanup
-  const handleSignal = (signal: string) => {
-    logger.warn(`\n⚠️ Runner received ${signal}. Shutting down...`);
-    // Cleanup any active agent child processes
-    cleanupAgentChildren();
-    process.exit(1);
-  };
-
-  process.on('SIGINT', () => handleSignal('SIGINT'));
-  process.on('SIGTERM', () => handleSignal('SIGTERM'));
-
   // Run tasks
-  runTasks(tasksFile, config, runDir, { startIndex })
+  runTasks(tasksFile, config, runDir, { startIndex, runId })
     .then(() => {
       process.exit(0);
     })

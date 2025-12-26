@@ -94,6 +94,7 @@ export interface LaneRecoveryState {
   lastStageChangeTime: number;
   diagnosticInfo?: DiagnosticInfo;
   isLongOperation: boolean;
+  runId: string;
   failureHistory: FailureRecord[];
 }
 
@@ -242,7 +243,7 @@ export class AutoRecoveryManager {
   /**
    * Register a lane for recovery monitoring
    */
-  registerLane(laneName: string): void {
+  registerLane(laneName: string, runId: string): void {
     const now = Date.now();
     this.laneStates.set(laneName, {
       laneName,
@@ -255,6 +256,7 @@ export class AutoRecoveryManager {
       continueSignalsSent: 0,
       lastStageChangeTime: now,
       isLongOperation: false,
+      runId,
       failureHistory: [],
     });
     
@@ -464,7 +466,7 @@ export class AutoRecoveryManager {
         laneName,
         idleSeconds,
         signalCount: state.continueSignalsSent,
-      });
+      }, state.runId);
 
       return {
         success: true,
@@ -523,7 +525,7 @@ If you encountered a git error, resolve it and continue.`;
       events.emit('recovery.stronger_prompt', {
         laneName,
         prompt: strongerPrompt,
-      });
+      }, state.runId);
 
       return {
         success: true,
@@ -583,7 +585,7 @@ If you encountered a git error, resolve it and continue.`;
       laneName,
       restartCount: state.restartCount,
       maxRestarts: this.config.maxRestarts,
-    });
+    }, state.runId);
 
     return {
       success: true,
@@ -678,7 +680,7 @@ If you encountered a git error, resolve it and continue.`;
       events.emit('recovery.diagnosed', {
         laneName,
         diagnostic,
-      });
+      }, state.runId);
 
       return {
         success: true,

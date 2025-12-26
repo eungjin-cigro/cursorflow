@@ -178,6 +178,7 @@ async function handleDoctorDiagnostics(
         continueSignalsSent: stallState.continueSignalCount,
         lastStageChangeTime: stallState.lastPhaseChangeTime,
         isLongOperation: stallState.isLongOperation,
+        runId: stallState.runId,
         failureHistory: stallState.failureHistory.map(f => ({
           timestamp: f.timestamp,
           stage: f.phase as unknown as number,  // Both enums use 0-5
@@ -702,7 +703,6 @@ export async function orchestrate(tasksDir: string, options: {
   });
 
   // Initialize event system
-  events.setRunId(runId);
   if (options.webhooks) {
     registerWebhooks(options.webhooks);
   }
@@ -712,7 +712,7 @@ export async function orchestrate(tasksDir: string, options: {
     tasksDir,
     laneCount: lanes.length,
     runRoot,
-  });
+  }, runId);
   
   const maxConcurrent = options.maxConcurrentLanes || 10;
   const running: Map<string, RunningLaneInfo> = new Map();
@@ -837,6 +837,7 @@ export async function orchestrate(tasksDir: string, options: {
       // Register lane with unified stall detection service FIRST
       stallService.registerLane(lane.name, {
         laneRunDir: laneRunDirs[lane.name]!,
+        runId,
       });
       
       const laneIdx = lanes.findIndex(l => l.name === lane.name);
@@ -901,7 +902,7 @@ export async function orchestrate(tasksDir: string, options: {
         laneName: lane.name,
         pid: spawnResult.child.pid,
         logPath: spawnResult.logPath,
-      });
+      }, runId);
     }
     
     // 3. Wait for any running lane to finish OR check for stalls
@@ -985,7 +986,7 @@ export async function orchestrate(tasksDir: string, options: {
           events.emit('lane.completed', {
             laneName: finished.name,
             exitCode: finished.code,
-          });
+          }, runId);
         } else if (finished.code === 2) {
           // Blocked by dependency
           const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');
@@ -1001,7 +1002,7 @@ export async function orchestrate(tasksDir: string, options: {
             events.emit('lane.blocked', {
               laneName: finished.name,
               dependencyRequest: state.dependencyRequest,
-            });
+            }, runId);
             logger.warn(`Lane ${finished.name} is blocked on dependency change request`);
           } else {
             failedLanes.add(finished.name);
@@ -1050,7 +1051,7 @@ export async function orchestrate(tasksDir: string, options: {
             laneName: finished.name,
             exitCode: finished.code,
             error: errorMsg,
-          });
+          }, runId);
         }
         
         printLaneStatus(lanes, laneRunDirs);
@@ -1118,7 +1119,7 @@ export async function orchestrate(tasksDir: string, options: {
     events.emit('orchestration.failed', {
       error: 'Some lanes blocked on dependency change requests',
       blockedLanes: blocked,
-    });
+    }, runId);
     process.exit(2);
   }
   
@@ -1128,6 +1129,6 @@ export async function orchestrate(tasksDir: string, options: {
     laneCount: lanes.length,
     completedCount: completedLanes.size,
     failedCount: failedLanes.size,
-  });
+  }, runId);
   return { lanes, exitCodes, runRoot };
 }
