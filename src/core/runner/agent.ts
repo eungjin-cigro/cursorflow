@@ -143,7 +143,14 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   taskName?: string;
 }): Promise<AgentSendResult> {
   const timeoutMs = timeout || 10 * 60 * 1000; // 10 minutes default
-  const args = ['send', chatId, prompt];
+  
+  // Build args: cursor-agent [options] [prompt]
+  // Note: 'send' command no longer exists in cursor-agent CLI
+  // Use --resume <chatId> to continue an existing chat session
+  const args: string[] = [];
+  
+  // Resume existing chat session
+  args.push('--resume', chatId);
   
   if (model) {
     args.push('--model', model);
@@ -160,29 +167,33 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   if (workspaceDir) {
     args.push('--workspace', workspaceDir);
   }
+  
+  // NOTE: In latest cursor-agent, prompt must be sent via stdin, not as positional argument
 
   return new Promise((resolve) => {
     logger.info(`Sending prompt to cursor-agent (timeout: ${Math.round(timeoutMs / 1000)}s)...`);
     
+    // stdin must always be 'pipe' to send prompt via stdin (required by latest cursor-agent)
     const child = spawn('cursor-agent', args, {
       cwd: workspaceDir || process.cwd(),
-      stdio: enableIntervention ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     activeChildren.add(child);
-
-    if (!enableIntervention) {
-      logger.info('ℹ️ Intervention is disabled. Stall recovery using "continue" will not be available for this agent session.');
+    
+    // Send prompt via stdin (latest cursor-agent requires this)
+    // Note: stdin is closed after sending prompt, so intervention via stdin is not supported
+    if (child.stdin) {
+      child.stdin.write(prompt);
+      child.stdin.end();
     }
 
     let fullStdout = '';
     let fullStderr = '';
     let timeoutHandle: NodeJS.Timeout;
-    let heartbeatInterval: NodeJS.Timeout | undefined;
-    let lastActivity = Date.now();
-    let bytesReceived = 0;
 
-    // Signal watching for intervention and timeout
+    // Signal watching for dynamic timeout adjustment
+    // Note: Intervention via stdin is no longer supported (stdin is closed after prompt)
     let signalWatcher: fs.FSWatcher | null = null;
     if (signalDir) {
       if (!fs.existsSync(signalDir)) {
@@ -192,25 +203,21 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
       const interventionPath = path.join(signalDir, 'intervention.txt');
       const timeoutPath = path.join(signalDir, 'timeout.txt');
       
-      // Watch for intervention or timeout signals from UI
+      // Watch for timeout signals from UI (intervention via stdin no longer works)
       signalWatcher = fs.watch(signalDir, (event, filename) => {
         if (filename === 'intervention.txt' && fs.existsSync(interventionPath)) {
           try {
             const message = fs.readFileSync(interventionPath, 'utf8').trim();
             if (message) {
-              logger.info(`👋 Human intervention received: ${message.substring(0, 50)}...`);
-              if (child.stdin && child.stdin.writable) {
-                child.stdin.write(message + '\n');
-                
-                if (signalDir) {
-                  const convoPath = path.join(signalDir, 'conversation.jsonl');
-                  appendLog(convoPath, createConversationEntry('intervention', `[HUMAN INTERVENTION]: ${message}`, {
-                    task: taskName || 'AGENT_TURN',
-                    model: 'manual'
-                  }));
-                }
-              } else {
-                logger.warn(`Intervention requested but stdin not available: ${message}`);
+              // Log intervention but cannot send via stdin (already closed)
+              logger.warn(`👋 Intervention received but stdin is closed (cursor-agent CLI limitation): ${message.substring(0, 50)}...`);
+              
+              if (signalDir) {
+                const convoPath = path.join(signalDir, 'conversation.jsonl');
+                appendLog(convoPath, createConversationEntry('intervention', `[INTERVENTION IGNORED - stdin closed]: ${message}`, {
+                  task: taskName || 'AGENT_TURN',
+                  model: 'manual'
+                }));
               }
               fs.unlinkSync(interventionPath);
             }
@@ -227,7 +234,6 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
               const elapsed = Date.now() - startTime;
               const remaining = Math.max(1000, newTimeoutMs - elapsed);
               timeoutHandle = setTimeout(() => {
-                clearInterval(heartbeatInterval);
                 child.kill();
                 resolve({ ok: false, exitCode: -1, error: `cursor-agent timed out after updated limit.` });
               }, remaining);
@@ -241,7 +247,6 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     if (child.stdout) {
       child.stdout.on('data', (data) => {
         fullStdout += data.toString();
-        bytesReceived += data.length;
         process.stdout.write(data);
       });
     }
@@ -255,7 +260,6 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
 
     const startTime = Date.now();
     timeoutHandle = setTimeout(() => {
-      clearInterval(heartbeatInterval);
       child.kill();
       resolve({
         ok: false,
@@ -267,7 +271,6 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     child.on('close', (code) => {
       activeChildren.delete(child);
       clearTimeout(timeoutHandle);
-      clearInterval(heartbeatInterval);
       if (signalWatcher) signalWatcher.close();
       
       const json = parseJsonFromStdout(fullStdout);

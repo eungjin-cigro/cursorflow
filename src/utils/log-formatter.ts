@@ -156,6 +156,9 @@ export function formatMessageForConsole(
     case 'error':
       typePrefix = `${COLORS.red}❌ ERR${COLORS.reset}`;
       break;
+    case 'raw':
+      // Raw type means the content is already fully formatted - return as-is
+      return content;
   }
   
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${content}`;

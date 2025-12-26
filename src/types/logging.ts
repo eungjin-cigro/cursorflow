@@ -26,7 +26,8 @@ export type MessageType =
   | 'debug'
   | 'progress'
   | 'stdout' 
-  | 'stderr';
+  | 'stderr'
+  | 'raw';  // Pre-formatted output that should be printed as-is
 
 export interface ParsedMessage {
   type: MessageType;

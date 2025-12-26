@@ -317,15 +317,17 @@ export function spawnLane({
       currentTaskIndex: startIndex > 0 ? startIndex + 1 : 0
     };
 
-    // Buffer for non-JSON lines
+    // Buffer for task progress detection
     let lineBuffer = '';
 
     // Pipe stdout and stderr through enhanced logger
+    // Note: Console output is handled by onParsedMessage callback via logManager
+    // Do NOT write to stdout/stderr directly here to avoid duplicate output
     if (child.stdout) {
       child.stdout.on('data', (data: Buffer) => {
         logManager!.writeStdout(data);
         
-        // Filter out JSON lines from console output to keep it clean
+        // Track task progress for label updates (but don't output here)
         const str = data.toString();
         lineBuffer += str;
         const lines = lineBuffer.split('\n');
@@ -347,39 +349,12 @@ export function spawnLane({
             }
           }
 
-          // Show if it's a timestamped log line (starts with [YYYY-MM-DD... or [HH:MM:SS])
-          // or if it's NOT a noisy JSON line
+          // Track activity for stall detection (non-heartbeat lines only)
           const isJson = trimmed.startsWith('{') || trimmed.includes('{"type"');
-          // Filter out heartbeats - they should NOT reset the idle timer
           const isHeartbeat = trimmed.includes('Heartbeat') && trimmed.includes('bytes received');
           
-          if (!isJson) {
-            // Only trigger activity for non-heartbeat lines
-            if (onActivity && !isHeartbeat) onActivity();
-
-            const currentLabel = getDynamicLabel();
-            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
-            
-            // Regex that matches timestamp even if it has ANSI color codes
-            // Matches: [24:39:14] or \x1b[90m[24:39:14]\x1b[0m
-            const timestampRegex = /^((?:\x1b\[[0-9;]*m)*)\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/;
-            const tsMatch = trimmed.match(timestampRegex);
-
-            if (tsMatch) {
-              // If line already has timestamp format, just add lane prefix
-              // Check if lane label is already present to avoid triple duplication
-              if (!trimmed.includes(currentLabel)) {
-                // Insert label after the timestamp part
-                const tsPart = tsMatch[0];
-                const formatted = trimmed.replace(tsPart, `${tsPart} ${coloredLabel}`);
-                process.stdout.write(formatted + '\n');
-              } else {
-                process.stdout.write(trimmed + '\n');
-              }
-            } else {
-              // Add full prefix: timestamp + lane
-              process.stdout.write(`${logger.COLORS.gray}[${new Date().toLocaleTimeString('en-US', { hour12: false })}]${logger.COLORS.reset} ${coloredLabel} ${line}\n`);
-            }
+          if (!isJson && !isHeartbeat && onActivity) {
+            onActivity();
           }
         }
       });
@@ -387,30 +362,8 @@ export function spawnLane({
     
     if (child.stderr) {
       child.stderr.on('data', (data: Buffer) => {
+        // Console output is handled by logManager's onParsedMessage callback
         logManager!.writeStderr(data);
-        const str = data.toString();
-        const lines = str.split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed) {
-            // Check if it's a real error or just git/status output on stderr
-            const isStatus = trimmed.startsWith('Preparing worktree') || 
-                             trimmed.startsWith('Switched to a new branch') ||
-                             trimmed.startsWith('HEAD is now at') ||
-                             trimmed.includes('actual output');
-            
-            const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-            const currentLabel = getDynamicLabel();
-            const coloredLabel = `${logger.COLORS.magenta}${currentLabel}${logger.COLORS.reset}`;
-
-            if (isStatus) {
-              process.stdout.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${trimmed}\n`);
-            } else {
-              if (onActivity) onActivity();
-              process.stderr.write(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${coloredLabel} ${logger.COLORS.red}❌ ERR ${trimmed}${logger.COLORS.reset}\n`);
-            }
-          }
-        }
       });
     }
     

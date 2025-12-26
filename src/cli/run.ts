@@ -10,7 +10,7 @@ import { getLogsDir, loadConfig } from '../utils/config';
 import { runDoctor, getDoctorStatus } from '../utils/doctor';
 import { areCommandsInstalled, setupCommands } from './setup-commands';
 import { safeJoin } from '../utils/path';
-import { findFlowDir } from '../utils/flow';
+import { findFlowDir, findLatestFlowOrTask } from '../utils/flow';
 import { loadState } from '../utils/state';
 import { LaneState } from '../types';
 
@@ -182,11 +182,6 @@ async function run(args: string[]): Promise<void> {
     }
   }
 
-  if (!options.tasksDir) {
-    console.log('\nUsage: cursorflow run <tasks-dir> [options]');
-    throw new Error('Tasks directory required');
-  }
-  
   const config = loadConfig();
   const logsDir = getLogsDir(config);
   const originalCwd = process.cwd();
@@ -198,11 +193,22 @@ async function run(args: string[]): Promise<void> {
   }
 
   // Resolve tasks dir:
-  // 1. Prefer the exact path if it exists relative to original cwd
-  // 2. Search in flowsDir by name
-  // 3. Fall back to projectRoot-relative tasksDir for backward compatibility
+  // 1. If not provided, use the most recent flow or legacy task
+  // 2. Prefer the exact path if it exists relative to original cwd
+  // 3. Search in flowsDir by name
+  // 4. Fall back to projectRoot-relative tasksDir for backward compatibility
   let tasksDir = '';
-  if (path.isAbsolute(options.tasksDir)) {
+  
+  if (!options.tasksDir) {
+    const latestPath = findLatestFlowOrTask(config);
+    if (latestPath) {
+      logger.info(`No flow specified. Using the latest: ${path.basename(latestPath)}`);
+      tasksDir = latestPath;
+    } else {
+      console.log('\nUsage: cursorflow run <tasks-dir> [options]');
+      throw new Error('Tasks directory required (none found in flows or tasks directories)');
+    }
+  } else if (path.isAbsolute(options.tasksDir)) {
     tasksDir = options.tasksDir;
   } else {
     const relPath = path.resolve(originalCwd, options.tasksDir);
@@ -216,7 +222,15 @@ async function run(args: string[]): Promise<void> {
         tasksDir = foundFlow;
       } else {
         // Fallback to legacy tasksDir
-        tasksDir = safeJoin(config.projectRoot, options.tasksDir);
+        const legacyTasksDir = safeJoin(config.projectRoot, config.tasksDir);
+        const foundLegacy = findFlowDir(legacyTasksDir, options.tasksDir);
+        
+        if (foundLegacy) {
+          tasksDir = foundLegacy;
+        } else {
+          // Fallback to joining with project root
+          tasksDir = safeJoin(config.projectRoot, options.tasksDir);
+        }
       }
     }
   }

@@ -318,16 +318,30 @@ export class EnhancedLogManager {
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
         const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
         const label = this.getLaneTaskLabel();
+        const ts = this.getShortTime();
         
+        let formattedLine: string;
         if (hasTimestamp) {
           // If already has timestamp, just ensure label is present
-          const formatted = cleanLine.includes(`[${label}]`) 
+          formattedLine = cleanLine.includes(`[${label}]`) 
             ? cleanLine 
             : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
-          this.writeToReadableLog(`${formatted}\n`);
         } else {
-          const ts = this.getShortTime();
-          this.writeToReadableLog(`[${ts}] [${label}] ${cleanLine}\n`);
+          formattedLine = `[${ts}] [${label}] ${cleanLine}`;
+        }
+        
+        this.writeToReadableLog(`${formattedLine}\n`);
+        
+        // Also output to console via callback for non-JSON lines
+        // Use 'raw' type to indicate this line is already formatted
+        if (this.onParsedMessage) {
+          const rawMsg: ParsedMessage = {
+            type: 'raw',
+            role: 'system',
+            content: formattedLine,
+            timestamp: Date.now(),
+          };
+          this.onParsedMessage(rawMsg);
         }
       }
     }
@@ -439,25 +453,66 @@ export class EnhancedLogManager {
     // Write raw log
     this.writeToRawLog(data);
     
-    // Write to readable log with error prefix
+    // Write to readable log - treat stderr same as stdout
+    // Git and many tools use stderr for non-error output
     const lines = text.split('\n');
     for (const line of lines) {
       const cleanLine = stripAnsi(line).trim();
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
         const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
         const label = this.getLaneTaskLabel();
+        const ts = this.getShortTime();
         
+        // Determine if this is actually an error message
+        const isError = this.isErrorLine(cleanLine);
+        const prefix = isError ? '❌ ERR' : '';
+        
+        let formattedLine: string;
         if (hasTimestamp) {
-          const formatted = cleanLine.includes(`[${label}]`) 
+          formattedLine = cleanLine.includes(`[${label}]`) 
             ? cleanLine 
-            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}] ❌ ERR`);
-          this.writeToReadableLog(`${formatted}\n`);
+            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]${prefix ? ' ' + prefix : ''}`);
         } else {
-          const ts = this.getShortTime();
-          this.writeToReadableLog(`[${ts}] [${label}] ❌ ERR ${cleanLine}\n`);
+          formattedLine = prefix 
+            ? `[${ts}] [${label}] ${prefix} ${cleanLine}`
+            : `[${ts}] [${label}] ${cleanLine}`;
+        }
+        
+        this.writeToReadableLog(`${formattedLine}\n`);
+        
+        // Output to console
+        if (this.onParsedMessage) {
+          const rawMsg: ParsedMessage = {
+            type: 'raw',
+            role: 'system',
+            content: formattedLine,
+            timestamp: Date.now(),
+          };
+          this.onParsedMessage(rawMsg);
         }
       }
     }
+  }
+
+  /**
+   * Check if a line is actually an error message
+   */
+  private isErrorLine(text: string): boolean {
+    const errorPatterns = [
+      /^error:/i,
+      /^fatal:/i,
+      /^panic:/i,
+      /\berror\b.*:/i,
+      /\bfailed\b/i,
+      /\bexception\b/i,
+      /^ENOENT:/i,
+      /^EACCES:/i,
+      /^EPERM:/i,
+      /^ERR!/i,
+      /npm ERR!/i,
+    ];
+    
+    return errorPatterns.some(p => p.test(text));
   }
 
   /**

@@ -591,6 +591,16 @@ async function resumeLanes(
         laneIndex: laneIndexMap.get(lane.name) ?? 1,
       });
       
+      // Update state.json with the new PID for monitor tracking
+      const statePath = safeJoin(lane.dir, 'state.json');
+      const updatedState: LaneState = {
+        ...lane.state!,
+        status: 'running',
+        pid: child.pid,
+        error: null,
+      };
+      saveState(statePath, updatedState);
+      
       active.set(lane.name, child);
       
       waitForChild(child).then(code => {

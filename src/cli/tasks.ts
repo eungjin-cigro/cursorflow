@@ -15,17 +15,10 @@ import * as logger from '../utils/logger';
 import { TaskService, TaskDirInfo, ValidationStatus } from '../utils/task-service';
 import { findProjectRoot, loadConfig, getTasksDir, getFlowsDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
+import { listFlows } from '../utils/flow';
+import { FlowInfo } from '../types/flow';
 
 const COLORS = logger.COLORS;
-
-interface FlowInfo {
-  id: string;
-  name: string;
-  path: string;
-  timestamp: Date;
-  lanes: string[];
-  status: string;
-}
 
 interface TasksCliOptions {
   validate: boolean;
@@ -73,56 +66,6 @@ function parseArgs(args: string[]): TasksCliOptions {
   }
 
   return options;
-}
-
-/**
- * List flows from _cursorflow/flows/
- */
-function listFlows(flowsDir: string): FlowInfo[] {
-  if (!fs.existsSync(flowsDir)) {
-    return [];
-  }
-
-  const dirs = fs.readdirSync(flowsDir)
-    .filter(name => {
-      const dirPath = safeJoin(flowsDir, name);
-      return fs.statSync(dirPath).isDirectory() && !name.startsWith('.');
-    })
-    .sort((a, b) => b.localeCompare(a)); // Most recent first
-
-  return dirs.map(name => {
-    const flowPath = safeJoin(flowsDir, name);
-    const metaPath = safeJoin(flowPath, 'flow.meta.json');
-    
-    let meta: any = {};
-    try {
-      if (fs.existsSync(metaPath)) {
-        meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-      }
-    } catch {}
-
-    // Parse flow name from directory (e.g., "001_TestFeature" -> "TestFeature")
-    const match = name.match(/^(\d+)_(.+)$/);
-    const id = match ? match[1] : name;
-    const flowName = match ? match[2] : name;
-
-    // Get lane files
-    const laneFiles = fs.readdirSync(flowPath)
-      .filter(f => f.endsWith('.json') && f !== 'flow.meta.json')
-      .map(f => {
-        const laneMatch = f.match(/^\d+-([^.]+)\.json$/);
-        return laneMatch ? laneMatch[1] : f.replace('.json', '');
-      });
-
-    return {
-      id,
-      name: flowName,
-      path: flowPath,
-      timestamp: meta.createdAt ? new Date(meta.createdAt) : new Date(),
-      lanes: laneFiles,
-      status: meta.status || 'pending',
-    };
-  });
 }
 
 /**

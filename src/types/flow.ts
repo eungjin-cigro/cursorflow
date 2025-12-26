@@ -77,15 +77,19 @@ export interface ParsedTaskSpec {
  * Flow directory info for listing
  */
 export interface FlowInfo {
-  /** Flow ID */
+  /** Flow ID (sequential number) */
   id: string;
-  /** Flow name */
+  /** Human-readable flow name */
   name: string;
   /** Full directory path */
   path: string;
-  /** Flow metadata */
-  meta: FlowMeta;
-  /** Lane count */
-  laneCount: number;
+  /** Creation timestamp */
+  timestamp: Date;
+  /** List of lane names */
+  lanes: string[];
+  /** Current flow status */
+  status: FlowStatus;
+  /** Full metadata from flow.meta.json */
+  meta?: FlowMeta;
 }
 

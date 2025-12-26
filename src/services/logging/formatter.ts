@@ -236,6 +236,7 @@ function getTypeInfo(type: MessageType): { label: string; color: string } {
     progress: { label: 'PROG  ', color: COLORS.blue || COLORS.cyan },
     stdout: { label: 'STDOUT', color: COLORS.white },
     stderr: { label: 'STDERR', color: COLORS.red },
+    raw: { label: 'RAW   ', color: COLORS.white },
   };
   
   return typeMap[type] || { label: type.toUpperCase().padEnd(6), color: COLORS.white };
