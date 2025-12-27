@@ -22,6 +22,7 @@
     "test:verify:quick": "./scripts/verify-change.sh --quick",
     "test:verify:full": "./scripts/verify-change.sh --full",
     "test:pipeline": "pnpm test:unit && pnpm test:contract && pnpm test:integration && pnpm test:smoke",
+    "test:ci": "npm run build && npm run test:unit && npm run test:contract && npm run test:integration && npm run test:smoke",
     "prepublishOnly": "pnpm run build && pnpm run validate",
     "postinstall": "node scripts/postinstall.js",
     "validate": "pnpm pack",
