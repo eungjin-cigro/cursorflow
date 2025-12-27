@@ -14,10 +14,6 @@ import {
   TaskFailedPayload,
   AgentPromptSentPayload,
   AgentResponseReceivedPayload,
-  ReviewStartedPayload,
-  ReviewCompletedPayload,
-  ReviewApprovedPayload,
-  ReviewRejectedPayload
 } from './types';
 
 class CursorFlowEvents extends EventEmitter {
@@ -40,10 +36,6 @@ class CursorFlowEvents extends EventEmitter {
   emit(type: 'task.failed', payload: TaskFailedPayload): boolean;
   emit(type: 'agent.prompt_sent', payload: AgentPromptSentPayload): boolean;
   emit(type: 'agent.response_received', payload: AgentResponseReceivedPayload): boolean;
-  emit(type: 'review.started', payload: ReviewStartedPayload): boolean;
-  emit(type: 'review.completed', payload: ReviewCompletedPayload): boolean;
-  emit(type: 'review.approved', payload: ReviewApprovedPayload): boolean;
-  emit(type: 'review.rejected', payload: ReviewRejectedPayload): boolean;
   emit(type: string, payload: any): boolean;
   emit(type: string, payload: any): boolean {
     const event: CursorFlowEvent = {
@@ -82,10 +74,6 @@ class CursorFlowEvents extends EventEmitter {
   on(pattern: 'task.failed', handler: EventHandler<TaskFailedPayload>): this;
   on(pattern: 'agent.prompt_sent', handler: EventHandler<AgentPromptSentPayload>): this;
   on(pattern: 'agent.response_received', handler: EventHandler<AgentResponseReceivedPayload>): this;
-  on(pattern: 'review.started', handler: EventHandler<ReviewStartedPayload>): this;
-  on(pattern: 'review.completed', handler: EventHandler<ReviewCompletedPayload>): this;
-  on(pattern: 'review.approved', handler: EventHandler<ReviewApprovedPayload>): this;
-  on(pattern: 'review.rejected', handler: EventHandler<ReviewRejectedPayload>): this;
   on(pattern: string, handler: EventHandler): this;
   on(pattern: string, handler: EventHandler): this {
     return super.on(pattern, handler);
@@ -103,10 +91,6 @@ class CursorFlowEvents extends EventEmitter {
   once(pattern: 'task.failed', handler: EventHandler<TaskFailedPayload>): this;
   once(pattern: 'agent.prompt_sent', handler: EventHandler<AgentPromptSentPayload>): this;
   once(pattern: 'agent.response_received', handler: EventHandler<AgentResponseReceivedPayload>): this;
-  once(pattern: 'review.started', handler: EventHandler<ReviewStartedPayload>): this;
-  once(pattern: 'review.completed', handler: EventHandler<ReviewCompletedPayload>): this;
-  once(pattern: 'review.approved', handler: EventHandler<ReviewApprovedPayload>): this;
-  once(pattern: 'review.rejected', handler: EventHandler<ReviewRejectedPayload>): this;
   once(pattern: string, handler: EventHandler): this;
   once(pattern: string, handler: EventHandler): this {
     return super.once(pattern, handler);

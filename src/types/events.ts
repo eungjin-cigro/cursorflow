@@ -91,31 +91,6 @@ export interface AgentResponseReceivedPayload {
   error?: string;
 }
 
-// Review Events
-export interface ReviewStartedPayload {
-  taskName: string;
-  taskBranch: string;
-}
-
-export interface ReviewCompletedPayload {
-  taskName: string;
-  status: 'approved' | 'needs_changes';
-  issueCount: number;
-  summary: string;
-  raw: string;
-}
-
-export interface ReviewApprovedPayload {
-  taskName: string;
-  iterations: number;
-}
-
-export interface ReviewRejectedPayload {
-  taskName: string;
-  reason: string;
-  iterations: number;
-}
-
 // Recovery Events
 export interface RecoveryContinueSignalPayload {
   laneName: string;
