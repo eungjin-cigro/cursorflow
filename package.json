@@ -19,6 +19,7 @@
     "test:smoke": "jest tests/smoke --runInBand --testTimeout=120000",
     "test:all": "jest",
     "test:verify": "./scripts/verify-change.sh",
+    "test:quick": "pnpm run test:verify:quick",
     "test:verify:quick": "./scripts/verify-change.sh --quick",
     "test:verify:full": "./scripts/verify-change.sh --full",
     "test:pipeline": "pnpm test:unit && pnpm test:contract && pnpm test:integration && pnpm test:smoke",
