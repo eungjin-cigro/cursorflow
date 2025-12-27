@@ -13,6 +13,8 @@ export interface Task {
   dependsOn?: string[];
   /** Task execution timeout in milliseconds. Overrides lane-level timeout. */
   timeout?: number;
+  /** Enable browser automation for this task. Required for web testing/scraping. */
+  browser?: boolean;
 }
 
 export interface RunnerConfig {
@@ -40,6 +42,15 @@ export interface RunnerConfig {
    * Default: false
    */
   verboseGit?: boolean;
+  /** 
+   * Enable browser automation for all tasks in this config. 
+   * Required for web testing/scraping.
+   */
+  browser?: boolean;
+  /** Auto-approve commands (--force flag). Default: true */
+  autoApproveCommands?: boolean;
+  /** Auto-approve MCP servers (--approve-mcps flag). Default: true */
+  autoApproveMcps?: boolean;
 }
 
 export interface TaskDirInfo {

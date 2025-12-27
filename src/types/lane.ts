@@ -10,8 +10,7 @@ export type LaneStatus =
   | 'completed' 
   | 'failed' 
   | 'paused' 
-  | 'waiting' 
-  | 'reviewing';
+  | 'waiting';
 
 export interface LaneInfo {
   name: string;

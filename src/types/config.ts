@@ -77,5 +77,11 @@ export interface CursorFlowConfig {
   enhancedLogging?: Partial<EnhancedLogConfig>;
   /** Default AI model for tasks (default: 'gemini-3-flash') */
   defaultModel: string;
+  /** Auto-approve agent commands (--force flag). Default: true for automation. */
+  autoApproveCommands?: boolean;
+  /** Auto-approve MCP servers (--approve-mcps flag). Default: true for automation. */
+  autoApproveMcps?: boolean;
+  /** Enable browser automation (--browser flag). Required for web testing/scraping. */
+  browser?: boolean;
 }
 
