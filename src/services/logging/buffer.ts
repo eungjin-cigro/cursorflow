@@ -7,8 +7,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { LogImportance, JsonLogEntry, BufferedLogEntry as BufferedLogEntryType, MessageType } from '../../types/logging';
+import { LogImportance, BufferedLogEntry as BufferedLogEntryType, MessageType } from '../../types/logging';
 import { COLORS } from './console';
+import { getLaneLogPath } from './paths';
+import { parseRawLogLine } from './raw-log';
 
 // Re-export types for convenience
 export type { BufferedLogEntry } from '../../types/logging';
@@ -108,13 +110,13 @@ export class LogBufferService extends EventEmitter {
     const newEntries: BufferedLogEntryType[] = [];
 
     for (const laneName of this.lanes) {
-      const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
+      const rawLogPath = getLaneLogPath(path.join(lanesDir, laneName), 'raw');
 
       let fd: number | null = null;
       try {
         // Read file content atomically to avoid TOCTOU race condition
-        const lastPos = this.filePositions.get(jsonlPath) || 0;
-        fd = fs.openSync(jsonlPath, 'r');
+        const lastPos = this.filePositions.get(rawLogPath) || 0;
+        fd = fs.openSync(rawLogPath, 'r');
         const stat = fs.fstatSync(fd); // Use fstat on open fd to avoid race
         
         if (stat.size > lastPos) {
@@ -124,15 +126,14 @@ export class LogBufferService extends EventEmitter {
           const newContent = buffer.toString('utf-8');
           const lines = newContent.split('\n').filter(line => line.trim());
 
-          for (const line of lines) {
-            try {
-              const entry = JSON.parse(line) as JsonLogEntry;
-              const processed = this.processEntry(entry, laneName);
-              if (processed) newEntries.push(processed);
-            } catch { /* Skip invalid JSON */ }
-          }
+          lines.forEach((line, lineIndex) => {
+            const fallback = new Date(Date.now() + lineIndex);
+            const parsed = parseRawLogLine(line, fallback);
+            const processed = this.processEntry(parsed, laneName);
+            if (processed) newEntries.push(processed);
+          });
 
-          this.filePositions.set(jsonlPath, stat.size);
+          this.filePositions.set(rawLogPath, stat.size);
         }
       } catch { /* File in use, skip */ }
       finally {
@@ -156,11 +157,14 @@ export class LogBufferService extends EventEmitter {
     }
   }
 
-  private processEntry(entry: JsonLogEntry, laneName: string): BufferedLogEntryType | null {
-    const timestamp = new Date(entry.timestamp || Date.now());
-    const type = (entry.type || 'unknown') as MessageType;
-    const level = entry.level || this.inferLevel(type);
-    const message = entry.content || entry.message || JSON.stringify(entry);
+  private processEntry(
+    entry: { timestamp: Date; level: string; message: string },
+    laneName: string
+  ): BufferedLogEntryType | null {
+    const timestamp = entry.timestamp;
+    const level = entry.level || 'info';
+    const type: MessageType = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'stdout';
+    const message = entry.message;
     const importance = this.inferImportance(type, level);
 
     return {
@@ -172,23 +176,7 @@ export class LogBufferService extends EventEmitter {
       message: this.truncateMessage(message),
       importance,
       laneColor: this.laneColorMap.get(laneName) || COLORS.white,
-      raw: entry,
     };
-  }
-
-  private inferLevel(type: string): string {
-    switch (type.toLowerCase()) {
-      case 'error':
-      case 'stderr':
-        return 'error';
-      case 'warning':
-        return 'warn';
-      case 'debug':
-      case 'thinking':
-        return 'debug';
-      default:
-        return 'info';
-    }
   }
 
   private inferImportance(type: string, level: string): LogImportance {
@@ -323,4 +311,3 @@ export class LogBufferService extends EventEmitter {
 export function createLogBuffer(runDir: string, options?: LogBufferOptions): LogBufferService {
   return new LogBufferService(runDir, options);
 }
-
