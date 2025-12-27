@@ -131,7 +131,7 @@ function parseJsonFromStdout(stdout: string): any {
 /**
  * Execute cursor-agent command with timeout and better error handling
  */
-async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention, outputFormat, taskName }: { 
+async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalDir, timeout, enableIntervention, outputFormat, taskName, browser, autoApproveCommands, autoApproveMcps }: { 
   workspaceDir: string; 
   chatId: string; 
   prompt: string; 
@@ -141,6 +141,12 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   enableIntervention?: boolean;
   outputFormat?: 'json' | 'stream-json';
   taskName?: string;
+  /** Enable browser automation (--browser flag) */
+  browser?: boolean;
+  /** Auto-approve commands (--force flag). Default: true */
+  autoApproveCommands?: boolean;
+  /** Auto-approve MCP servers (--approve-mcps flag). Default: true */
+  autoApproveMcps?: boolean;
 }): Promise<AgentSendResult> {
   const timeoutMs = timeout || 10 * 60 * 1000; // 10 minutes default
   
@@ -160,8 +166,20 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
     args.push('--print', '--output-format', outputFormat);
   }
 
-  // Ensure non-interactive execution with automatic approvals
-  args.push('--force', '--approve-mcps');
+  // Auto-approve commands if enabled (default: true for automation)
+  if (autoApproveCommands !== false) {
+    args.push('--force');
+  }
+  
+  // Auto-approve MCP servers if enabled (default: true for automation)
+  if (autoApproveMcps !== false) {
+    args.push('--approve-mcps');
+  }
+
+  // Enable browser automation if requested (required for web testing/scraping)
+  if (browser) {
+    args.push('--browser');
+  }
 
   // Add worktree context if provided
   if (workspaceDir) {
@@ -284,6 +302,12 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
           exitCode: code ?? 0,
           sessionId: json.session_id || chatId,
           resultText: json.result || '',
+          // Extended fields from cursor-agent result
+          durationMs: json.duration_ms,
+          durationApiMs: json.duration_api_ms,
+          requestId: json.request_id,
+          subtype: json.subtype,
+          model: json.model,
         });
       }
     });
@@ -310,6 +334,12 @@ export async function cursorAgentSend(options: {
   enableIntervention?: boolean;
   outputFormat?: 'json' | 'stream-json';
   taskName?: string;
+  /** Enable browser automation (--browser flag) */
+  browser?: boolean;
+  /** Auto-approve commands (--force flag). Default: true */
+  autoApproveCommands?: boolean;
+  /** Auto-approve MCP servers (--approve-mcps flag). Default: true */
+  autoApproveMcps?: boolean;
 }): Promise<AgentSendResult> {
   const laneName = options.signalDir ? path.basename(path.dirname(options.signalDir)) : 'agent';
   

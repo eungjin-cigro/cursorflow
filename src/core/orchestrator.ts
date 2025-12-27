@@ -229,8 +229,10 @@ export function spawnLane({
   worktreeDir,
   enhancedLogConfig,
   noGit = false,
+  skipPreflight = false,
   onActivity,
   laneIndex = 0,
+  browser,
 }: { 
   laneName: string; 
   tasksFile: string; 
@@ -241,8 +243,10 @@ export function spawnLane({
   worktreeDir?: string;
   enhancedLogConfig?: Partial<EnhancedLogConfig>;
   noGit?: boolean;
+  skipPreflight?: boolean;
   onActivity?: () => void;
   laneIndex?: number;
+  browser?: boolean;
 }): SpawnLaneResult {
   fs.mkdirSync(laneRunDir, { recursive: true});
   
@@ -267,6 +271,14 @@ export function spawnLane({
   
   if (noGit) {
     args.push('--no-git');
+  }
+
+  if (skipPreflight) {
+    args.push('--skip-preflight');
+  }
+
+  if (browser) {
+    args.push('--browser');
   }
   
   // Create enhanced log manager if enabled
@@ -590,6 +602,7 @@ export async function orchestrate(tasksDir: string, options: {
   noGit?: boolean;
   skipPreflight?: boolean;
   stallConfig?: Partial<StallDetectionConfig>;
+  browser?: boolean;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -824,7 +837,9 @@ export async function orchestrate(tasksDir: string, options: {
         worktreeDir: laneWorktreeDirs[lane.name],
         enhancedLogConfig: options.enhancedLogging,
         noGit: options.noGit,
+        skipPreflight: options.skipPreflight,
         laneIndex: laneIdx >= 0 ? laneIdx : 0,
+        browser: options.browser,
         onActivity: () => {
           // Record state file update activity
           stallService.recordStateUpdate(lane.name);
@@ -915,7 +930,8 @@ export async function orchestrate(tasksDir: string, options: {
           }
           
           // Run stall analysis and recovery (all logic is in StallDetectionService)
-          const analysis = stallService.checkAndRecover(laneName);
+          // Note: checkAndRecover is now async as it may kill processes
+          const analysis = await stallService.checkAndRecover(laneName);
           
           // Log to lane log manager if there was an action
           if (analysis.action !== RecoveryAction.NONE) {

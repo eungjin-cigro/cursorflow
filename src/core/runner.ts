@@ -36,6 +36,8 @@ if (require.main === module) {
   const startIdxIdx = args.indexOf('--start-index');
   const pipelineBranchIdx = args.indexOf('--pipeline-branch');
   const worktreeDirIdx = args.indexOf('--worktree-dir');
+  const browser = args.includes('--browser');
+  const skipPreflight = args.includes('--skip-preflight');
   
   const runDir = runDirIdx >= 0 ? args[runDirIdx + 1]! : '.';
   const startIndex = startIdxIdx >= 0 ? parseInt(args[startIdxIdx + 1] || '0') : 0;
@@ -75,6 +77,9 @@ if (require.main === module) {
     if (forcedWorktreeDir) {
       config.worktreeDir = forcedWorktreeDir;
     }
+    if (browser) {
+      config.browser = true;
+    }
   } catch (error: any) {
     console.error(`Failed to load tasks file: ${error.message}`);
     process.exit(1);
@@ -92,6 +97,7 @@ if (require.main === module) {
   // Merge intervention and logging settings
   config.enableIntervention = config.enableIntervention ?? globalConfig?.enableIntervention ?? true;
   config.verboseGit = config.verboseGit ?? globalConfig?.verboseGit ?? false;
+  config.browser = config.browser ?? globalConfig?.browser ?? false;
   
   // Handle process interruption to ensure cleanup
   const handleSignal = (signal: string) => {
@@ -105,7 +111,7 @@ if (require.main === module) {
   process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
   // Run tasks
-  runTasks(tasksFile, config, runDir, { startIndex })
+  runTasks(tasksFile, config, runDir, { startIndex, skipPreflight })
     .then(() => {
       process.exit(0);
     })

@@ -155,6 +155,9 @@ export async function runTask({
     enableIntervention: config.enableIntervention,
     outputFormat: config.agentOutputFormat,
     taskName: task.name,
+    browser: task.browser || config.browser,
+    autoApproveCommands: config.autoApproveCommands,
+    autoApproveMcps: config.autoApproveMcps,
   });
 
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {

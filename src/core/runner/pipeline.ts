@@ -19,6 +19,11 @@ import {
   waitForTaskDependencies
 } from './task';
 import { GitPipelineCoordinator } from '../git-pipeline-coordinator';
+import {
+  readPendingIntervention,
+  clearPendingIntervention,
+  InterventionRequest,
+} from '../intervention';
 
 /**
  * Validate task configuration
@@ -33,6 +38,26 @@ function validateTaskConfig(config: RunnerConfig): void {
     if (!task.name) throw new Error(`Task at index ${i} has no name`);
     if (!task.prompt) throw new Error(`Task "${task.name}" has no prompt`);
   }
+}
+
+/**
+ * Check for pending intervention and return intervention message if present
+ * This is called at the start of each task to inject intervention messages
+ */
+function checkAndConsumePendingIntervention(runDir: string): InterventionRequest | null {
+  const intervention = readPendingIntervention(runDir);
+  
+  if (intervention) {
+    logger.info(`📨 Pending intervention found (type: ${intervention.type})`);
+    logger.info(`   Message: "${intervention.message.substring(0, 80)}${intervention.message.length > 80 ? '...' : ''}"`);
+    
+    // Clear the intervention file so it's not picked up again
+    clearPendingIntervention(runDir);
+    
+    return intervention;
+  }
+  
+  return null;
 }
 
 /**
@@ -225,6 +250,10 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   let previousTaskBranch: string | null = null;
   
   for (let i = startIndex; i < config.tasks.length; i++) {
+    // Check for pending intervention at the start of each task
+    // This handles both resume cases and mid-run interventions
+    const intervention = checkAndConsumePendingIntervention(runDir);
+    
     // Re-read tasks file to allow dynamic updates to future tasks
     try {
       const currentConfig = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
@@ -252,7 +281,15 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       logger.warn(`⚠️ Could not reload tasks from ${tasksFile}. Using existing configuration. (${e instanceof Error ? e.message : String(e)})`);
     }
 
-    const task = config.tasks[i]!;
+    // Clone the task to avoid mutating the original config
+    let task = { ...config.tasks[i]! };
+    
+    // If there's a pending intervention, prepend it to the task prompt
+    if (intervention) {
+      const originalPrompt = task.prompt;
+      task.prompt = `${intervention.message}\n\n---\n\nContinue with the following task:\n${originalPrompt}`;
+      logger.info(`🔀 Intervention message injected into task prompt`);
+    }
     const taskBranch = `${pipelineBranch}--${String(i + 1).padStart(2, '0')}-${task.name}`;
 
     // Delete previous task branch if it exists (Task 1 deleted when Task 2 starts, etc.)
