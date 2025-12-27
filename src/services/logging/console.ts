@@ -94,6 +94,10 @@ function normalizeOptions(options: LogOptions | string | undefined, defaultEmoji
 }
 
 // Primary logging functions
+// Color rules:
+// - Important (colored): error(red), warn(yellow), success(green)
+// - Less important (gray): info, debug
+
 export function error(message: string, options?: LogOptions | string): void {
   logWithColor(COLORS.red, 'error', message, normalizeOptions(options, '❌'));
 }
@@ -103,7 +107,8 @@ export function warn(message: string, options?: LogOptions | string): void {
 }
 
 export function info(message: string, options?: LogOptions | string): void {
-  logWithColor(COLORS.cyan, 'info', message, normalizeOptions(options, 'ℹ️'));
+  // Info is gray (less important) - focus on important messages
+  logWithColor(COLORS.gray, 'info', message, normalizeOptions(options, 'ℹ️'));
 }
 
 export function success(message: string, options?: LogOptions | string): void {
@@ -115,6 +120,7 @@ export function debug(message: string, options?: LogOptions | string): void {
 }
 
 export function progress(message: string, options?: LogOptions | string): void {
+  // Progress is blue (visible but not critical)
   logWithColor(COLORS.blue, 'info', message, normalizeOptions(options, '🔄'));
 }
 

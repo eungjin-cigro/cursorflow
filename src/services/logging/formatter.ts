@@ -3,18 +3,26 @@
  * 
  * Formats log messages for console display with various styles.
  * 
- * Rules:
- * - Box format only for: user, assistant, system, result
- * - Compact format for: tool, tool_result, thinking (gray/dim)
+ * ## Color Rules (by importance):
+ * - HIGH (colored): user(cyan), assistant(green), result(green), error(red), warn(yellow)
+ * - LOW (gray/dim): tool, tool_result, thinking, system, debug, stdout, raw, info
+ * 
+ * ## Format Rules:
+ * - Box format only for: user, assistant, result
+ * - Compact format for: tool, tool_result, thinking, system (gray/dim)
  * - Tool names simplified: ShellToolCall → Shell
- * - Lane labels fixed 20 chars: [1-1-backend       ]
+ * - Lane labels fixed 14 chars: [1-1-lanename  ]
+ * - Type labels: emoji + 4char (USER, ASST, TOOL, RESL, SYS, DONE, THNK)
  */
 
 import { COLORS } from './console';
 import { ParsedMessage, MessageType } from '../../types/logging';
 
-// Types that should use box format
-const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
+// Types that should use box format (important messages)
+const BOX_TYPES = new Set(['user', 'assistant', 'result']);
+
+// Types that should be gray/dim (less important)
+const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking', 'system', 'debug', 'stdout', 'raw', 'info']);
 
 /**
  * Strip ANSI escape sequences from text
@@ -65,10 +73,11 @@ export function formatMessageForConsole(
     : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
-  // Lane label max 20 chars
-  const truncatedLabel = laneLabel.length > 20 ? laneLabel.substring(0, 20) : laneLabel;
+  // Lane label: fixed 14 chars inside brackets [1-1-lanename  ]
+  const labelContent = laneLabel.replace(/^\[|\]$/g, ''); // Remove existing brackets if any
+  const truncatedLabel = labelContent.length > 14 ? labelContent.substring(0, 14) : labelContent;
   const labelPrefix = truncatedLabel 
-    ? `${COLORS.magenta}${truncatedLabel.padEnd(20)}${COLORS.reset} ` 
+    ? `${COLORS.magenta}[${truncatedLabel.padEnd(14)}]${COLORS.reset} ` 
     : '';
 
   // Determine if should use box format
@@ -78,17 +87,17 @@ export function formatMessageForConsole(
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${formattedContent}`;
 
   if (!useBox) {
-    return `${tsPrefix}${labelPrefix}${typePrefix.padEnd(12)} ${formattedContent}`;
+    // Compact format: type prefix is already formatted with proper spacing
+    return `${tsPrefix}${labelPrefix}${typePrefix} ${formattedContent}`;
   }
 
-  // Multi-line box format (only for user, assistant, system, result)
-  // Emoji width is 2, so we need to account for that in indent calculation
+  // Multi-line box format (only for user, assistant, result)
   const lines = formattedContent.split('\n');
   const fullPrefix = `${tsPrefix}${labelPrefix}`;
   const strippedPrefix = stripAnsi(typePrefix);
   // Count emojis (they take 2 terminal columns but 1-2 chars in string)
   const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
-  const visualWidth = strippedPrefix.length + emojiCount; // emoji adds 1 extra width
+  const visualWidth = strippedPrefix.length + emojiCount;
   
   const boxWidth = 60;
   const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
@@ -112,6 +121,9 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
     formattedContent = formattedContent.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
   }
 
+  // Determine if this type should be gray (less important)
+  const isGray = GRAY_TYPES.has(msg.type);
+
   switch (msg.type) {
     case 'user':
       typePrefix = `${COLORS.cyan}🧑 USER${COLORS.reset}`;
@@ -124,20 +136,20 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       break;
       
     case 'tool':
-      // Tool calls are always gray
+      // Tool calls are always gray (less important)
       typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
       formattedContent = formatToolCall(formattedContent);
       break;
       
     case 'tool_result':
-      // Tool results are always gray
+      // Tool results are always gray (less important)
       typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
       const resMatch = formattedContent.match(/\[Tool Result: ([^\]]+)\]/);
       if (resMatch) {
         const simpleName = simplifyToolName(resMatch[1]!);
         formattedContent = `${COLORS.gray}${simpleName} OK${COLORS.reset}`;
       } else {
-        formattedContent = `${COLORS.gray}result${COLORS.reset}`;
+        formattedContent = `${COLORS.gray}OK${COLORS.reset}`;
       }
       break;
       
@@ -146,13 +158,56 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       break;
       
     case 'system':
-      typePrefix = `${COLORS.gray}⚙️ SYS${COLORS.reset}`;
+      // System messages are gray (less important)
+      typePrefix = `${COLORS.gray}⚙️  SYS${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
       break;
       
     case 'thinking':
-      // Thinking is always gray and compact
+      // Thinking is always gray and compact (less important)
       typePrefix = `${COLORS.gray}🤔 THNK${COLORS.reset}`;
       formattedContent = `${COLORS.gray}${truncate(formattedContent, 100)}${COLORS.reset}`;
+      break;
+      
+    case 'info':
+      // Info messages are gray (less important)
+      typePrefix = `${COLORS.gray}ℹ️  INFO${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
+      break;
+      
+    case 'warn':
+      // Warnings are yellow (important)
+      typePrefix = `${COLORS.yellow}⚠️  WARN${COLORS.reset}`;
+      break;
+      
+    case 'error':
+      // Errors are red (important)
+      typePrefix = `${COLORS.red}❌ ERR${COLORS.reset}`;
+      break;
+      
+    case 'success':
+      typePrefix = `${COLORS.green}✅ DONE${COLORS.reset}`;
+      break;
+      
+    case 'debug':
+      // Debug is gray (less important)
+      typePrefix = `${COLORS.gray}🔍 DBUG${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
+      break;
+      
+    case 'progress':
+      typePrefix = `${COLORS.blue}🔄 PROG${COLORS.reset}`;
+      break;
+      
+    case 'stdout':
+    case 'raw':
+      // Raw output is gray (less important)
+      typePrefix = `${COLORS.gray}   >>${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
+      break;
+      
+    case 'stderr':
+      typePrefix = `${COLORS.red}   >>${COLORS.reset}`;
       break;
   }
 

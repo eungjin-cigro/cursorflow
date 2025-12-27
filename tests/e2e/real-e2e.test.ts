@@ -249,7 +249,9 @@ function createTaskFile(
 function getGitBranches(repoDir: string): string[] {
   const result = execSync('git branch -a', { cwd: repoDir, encoding: 'utf8' });
   return result.split('\n')
-    .map(line => line.trim().replace(/^\*\s*/, ''))
+    .map(line => line.trim())
+    // Remove * (current branch) and + (checked out in worktree) prefixes
+    .map(line => line.replace(/^[\*\+]\s*/, ''))
     .filter(line => line.length > 0);
 }
 
@@ -529,7 +531,8 @@ Important:
       console.log('📋 Two task files created, starting parallel execution (max-concurrent 2)...\n');
       
       // Run with --max-concurrent 2 to test parallel execution
-      const result = await runCursorflow('run', ['--skip-preflight', '--max-concurrent', '2', tasksDir], {
+      // Note: tasksDir must come first as the positional argument
+      const result = await runCursorflow('run', [tasksDir, '--skip-preflight', '--max-concurrent', '2'], {
         cwd: testRepo.repoDir,
         timeout: TEST_TIMEOUT,
       });
@@ -633,7 +636,8 @@ Important:
       console.log('   dependent-lane: creates loader.js (depends on base-lane:create-config)\n');
       
       // Run with sequential execution to ensure dependencies are respected
-      const result = await runCursorflow('run', ['--skip-preflight', '--max-concurrent', '1', tasksDir], {
+      // Note: tasksDir must come first as the positional argument
+      const result = await runCursorflow('run', [tasksDir, '--skip-preflight', '--max-concurrent', '1'], {
         cwd: testRepo.repoDir,
         timeout: TEST_TIMEOUT,
       });

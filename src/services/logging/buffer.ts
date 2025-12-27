@@ -333,28 +333,52 @@ export class LogBufferService extends EventEmitter {
     }
 
     if (showLane) {
-      parts.push(`${entry.laneColor}[${entry.laneName.padEnd(12)}]${COLORS.reset}`);
+      // Lane label: fixed 14 chars inside brackets
+      const truncatedLane = entry.laneName.length > 14 ? entry.laneName.substring(0, 14) : entry.laneName;
+      parts.push(`${COLORS.magenta}[${truncatedLane.padEnd(14)}]${COLORS.reset}`);
     }
 
-    parts.push(this.getTypeIndicator(entry.type));
-    parts.push(entry.message);
+    const { indicator, messageColor } = this.getTypeIndicator(entry.type);
+    parts.push(indicator);
+    
+    // Apply message color if needed
+    const coloredMessage = messageColor ? `${messageColor}${entry.message}${COLORS.reset}` : entry.message;
+    parts.push(coloredMessage);
 
     return parts.join(' ');
   }
 
-  private getTypeIndicator(type: string): string {
-    const indicators: Record<string, string> = {
-      user: `${COLORS.cyan}[USER  ]${COLORS.reset}`,
-      assistant: `${COLORS.green}[ASST  ]${COLORS.reset}`,
-      tool: `${COLORS.yellow}[TOOL  ]${COLORS.reset}`,
-      tool_result: `${COLORS.gray}[RESULT]${COLORS.reset}`,
-      error: `${COLORS.red}[ERROR ]${COLORS.reset}`,
-      stderr: `${COLORS.red}[ERROR ]${COLORS.reset}`,
-      thinking: `${COLORS.gray}[THINK ]${COLORS.reset}`,
-      result: `${COLORS.green}[DONE  ]${COLORS.reset}`,
-      stdout: `${COLORS.white}[STDOUT]${COLORS.reset}`,
+  private getTypeIndicator(type: string): { indicator: string; messageColor: string } {
+    // Color rules:
+    // - Important (colored): user(cyan), assistant(green), result(green), error(red), warn(yellow)
+    // - Less important (gray): tool, tool_result, thinking, system, debug, stdout, info, raw
+    const indicators: Record<string, { indicator: string; messageColor: string }> = {
+      user: { indicator: `${COLORS.cyan}🧑 USER${COLORS.reset}`, messageColor: '' },
+      assistant: { indicator: `${COLORS.green}🤖 ASST${COLORS.reset}`, messageColor: '' },
+      tool: { indicator: `${COLORS.gray}🔧 TOOL${COLORS.reset}`, messageColor: COLORS.gray },
+      tool_result: { indicator: `${COLORS.gray}📄 RESL${COLORS.reset}`, messageColor: COLORS.gray },
+      error: { indicator: `${COLORS.red}❌ ERR${COLORS.reset}`, messageColor: COLORS.red },
+      stderr: { indicator: `${COLORS.red}   >>${COLORS.reset}`, messageColor: COLORS.red },
+      thinking: { indicator: `${COLORS.gray}🤔 THNK${COLORS.reset}`, messageColor: COLORS.gray },
+      result: { indicator: `${COLORS.green}✅ DONE${COLORS.reset}`, messageColor: '' },
+      success: { indicator: `${COLORS.green}✅ DONE${COLORS.reset}`, messageColor: '' },
+      stdout: { indicator: `${COLORS.gray}   >>${COLORS.reset}`, messageColor: COLORS.gray },
+      raw: { indicator: `${COLORS.gray}   >>${COLORS.reset}`, messageColor: COLORS.gray },
+      info: { indicator: `${COLORS.gray}ℹ️  INFO${COLORS.reset}`, messageColor: COLORS.gray },
+      warn: { indicator: `${COLORS.yellow}⚠️  WARN${COLORS.reset}`, messageColor: '' },
+      debug: { indicator: `${COLORS.gray}🔍 DBUG${COLORS.reset}`, messageColor: COLORS.gray },
+      system: { indicator: `${COLORS.gray}⚙️  SYS${COLORS.reset}`, messageColor: COLORS.gray },
+      progress: { indicator: `${COLORS.blue}🔄 PROG${COLORS.reset}`, messageColor: '' },
     };
-    return indicators[type.toLowerCase()] || `${COLORS.gray}[${type.toUpperCase().padEnd(6)}]${COLORS.reset}`;
+    
+    const match = indicators[type.toLowerCase()];
+    if (match) return match;
+    
+    // Default: gray for unknown types
+    return { 
+      indicator: `${COLORS.gray}   ${type.toUpperCase().substring(0, 4).padEnd(4)}${COLORS.reset}`,
+      messageColor: COLORS.gray 
+    };
   }
 }
 
