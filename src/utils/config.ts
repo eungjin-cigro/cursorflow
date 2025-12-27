@@ -96,6 +96,11 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     // Default AI model
     defaultModel: 'gemini-3-flash',
     
+    // Agent execution flags (cursor-agent CLI options)
+    autoApproveCommands: true,  // --force flag
+    autoApproveMcps: true,      // --approve-mcps flag
+    browser: true,             // --browser flag
+    
     // Internal
     projectRoot,
   };
@@ -234,6 +239,11 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
     writeJsonLog: true,      // Write structured JSON logs
     timestampFormat: 'iso',  // 'iso' | 'relative' | 'short'
   },
+
+  // Agent execution flags (cursor-agent CLI options)
+  autoApproveCommands: true,  // --force flag
+  autoApproveMcps: true,      // --approve-mcps flag
+  browser: false,             // --browser flag
 };
 `;
   

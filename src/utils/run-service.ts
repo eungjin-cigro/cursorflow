@@ -183,7 +183,7 @@ export class RunService {
     const statuses = lanes.map(l => l.status);
     
     // If any lane is running, the run is running
-    if (statuses.some(s => s === 'running' || s === 'reviewing')) {
+    if (statuses.some(s => s === 'running')) {
       return 'running';
     }
     

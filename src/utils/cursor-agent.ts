@@ -111,18 +111,44 @@ export function validateSetup(executor = 'cursor-agent'): { valid: boolean; erro
 }
 
 /**
+ * Known models in cursor-agent (2025.12 version)
+ * Reference: docs/CURSOR_AGENT_GUIDE.md
+ */
+export const KNOWN_MODELS = [
+  // Special modes
+  'composer-1',
+  'auto',
+  // Anthropic Claude models
+  'sonnet-4.5',
+  'sonnet-4.5-thinking',
+  'opus-4.5',
+  'opus-4.5-thinking',
+  'opus-4.1',
+  // Google Gemini models
+  'gemini-3-flash',
+  'gemini-3-pro',
+  // OpenAI GPT models
+  'gpt-5.2',
+  'gpt-5.2-high',
+  'gpt-5.1',
+  'gpt-5.1-high',
+  // OpenAI Codex models
+  'gpt-5.1-codex',
+  'gpt-5.1-codex-high',
+  'gpt-5.1-codex-max',
+  'gpt-5.1-codex-max-high',
+  // xAI
+  'grok',
+] as const;
+
+export type KnownModel = typeof KNOWN_MODELS[number];
+
+/**
  * Get available models (if cursor-agent supports it)
  */
 export function getAvailableModels(): string[] {
-  // Known models in the current version of cursor-agent
-  const knownModels = [
-    'sonnet-4.5',
-    'sonnet-4.5-thinking',
-    'opus-4.5',
-    'opus-4.5-thinking',
-    'gpt-5.2',
-    'gpt-5.2-high',
-  ];
+  // Use the known models list
+  const knownModels = [...KNOWN_MODELS];
 
   try {
     // Try to trigger a model list by using an invalid model with --print
@@ -236,34 +262,49 @@ export interface AuthCheckResult {
 }
 
 /**
- * Check cursor-agent authentication
+ * Check cursor-agent authentication using status/whoami command
+ * This is faster and has no side effects (unlike create-chat which creates a session)
+ * 
+ * Reference: docs/CURSOR_AGENT_GUIDE.md
+ * Expected output: " ✓ Logged in as user@email.com"
  */
 export function checkCursorAuth(): AuthCheckResult {
   try {
-    const result = spawnSync('cursor-agent', ['create-chat'], {
+    // Use 'status' command (or 'whoami' alias) - faster than create-chat
+    const result = spawnSync('cursor-agent', ['status'], {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 10000, // 10 second timeout
     });
     
-    if (result.status === 0 && result.stdout.trim()) {
+    const output = (result.stdout?.trim() || '').toString();
+    const errorOutput = (result.stderr?.trim() || '').toString();
+    
+    // Check for successful login (output contains "Logged in as")
+    if (result.status === 0 && output.includes('Logged in')) {
+      // Extract email if present
+      const emailMatch = output.match(/Logged in as\s+(\S+)/i);
+      const email = emailMatch ? emailMatch[1] : undefined;
+      
       return {
         authenticated: true,
         message: 'Cursor authentication OK',
+        details: email ? `Logged in as ${email}` : undefined,
       };
     }
     
-    const errorMsg = (result.stderr?.trim() || result.stdout?.trim() || '').toString();
+    const errorMsg = errorOutput || output;
     
     // Check for authentication errors
     if (errorMsg.includes('not authenticated') || 
+        errorMsg.includes('not logged') ||
         errorMsg.includes('login') || 
         errorMsg.includes('auth')) {
       return {
         authenticated: false,
         message: 'Not authenticated with Cursor',
         details: errorMsg,
-        help: 'Please open Cursor IDE and sign in to your account',
+        help: 'Run: cursor-agent login',
       };
     }
     
@@ -279,13 +320,24 @@ export function checkCursorAuth(): AuthCheckResult {
       };
     }
     
+    // If status command failed but no specific error, might still be authenticated
+    // Fall back to checking if cursor-agent is responsive
+    if (result.status !== 0) {
+      return {
+        authenticated: false,
+        message: 'Authentication status check failed',
+        details: errorMsg || `Exit code: ${result.status}`,
+        help: 'Try running: cursor-agent status',
+      };
+    }
+    
     return {
       authenticated: false,
-      message: 'Unknown error',
+      message: 'Unknown authentication status',
       details: errorMsg,
     };
   } catch (error: any) {
-    if (error.code === 'ETIMEDOUT') {
+    if (error.code === 'ETIMEDOUT' || error.killed) {
       return {
         authenticated: false,
         message: 'Connection timeout',

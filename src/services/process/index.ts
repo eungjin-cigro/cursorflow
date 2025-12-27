@@ -154,7 +154,7 @@ export function getLaneProcessStatus(lanePath: string, laneName: string): LanePr
     if (result.startTime) {
       if (result.endTime) {
         result.duration = result.endTime - result.startTime;
-      } else if (result.stateStatus === 'running' || result.stateStatus === 'reviewing') {
+      } else if (result.stateStatus === 'running') {
         result.duration = Date.now() - result.startTime;
       }
     }
