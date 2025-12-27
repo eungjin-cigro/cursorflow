@@ -198,12 +198,13 @@ describe('Legacy Stall Detection (Backward Compatibility)', () => {
   describe('AutoRecoveryManager', () => {
     let manager: AutoRecoveryManager;
     const laneName = 'test-lane';
+    const runId = 'test-run-1';
 
     beforeEach(() => {
       manager = new AutoRecoveryManager({
         idleTimeoutMs: 1000, // 1 second for testing
       });
-      manager.registerLane(laneName);
+      manager.registerLane(laneName, runId);
     });
 
     test('should update lastActivityTime when real activity (bytes > 0) is recorded', async () => {

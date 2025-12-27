@@ -18,6 +18,14 @@ import { ChildProcess } from 'child_process';
 import * as logger from '../utils/logger';
 import { events } from '../utils/events';
 import { safeJoin } from '../utils/path';
+import {
+  createInterventionRequest,
+  InterventionType,
+  createContinueMessage,
+  createStrongerPromptMessage,
+  createRestartMessage,
+  killAndWait,
+} from './intervention';
 
 // ============================================================================
 // 설정 (Configuration)
@@ -732,8 +740,10 @@ export class StallDetectionService {
    * Stall 체크 및 복구 액션 실행
    * 
    * @returns 실행된 분석 결과 (orchestrator에서 추가 처리 필요시 사용)
+   * 
+   * 새로운 방식에서는 복구 액션이 프로세스 중단을 포함하므로 async
    */
-  checkAndRecover(laneName: string): StallAnalysis {
+  async checkAndRecover(laneName: string): Promise<StallAnalysis> {
     const state = this.laneStates.get(laneName);
     if (!state) {
       return {
@@ -760,18 +770,18 @@ export class StallDetectionService {
     // 실패 이력 기록
     this.recordFailure(state, analysis);
     
-    // 액션 실행
+    // 액션 실행 (프로세스 중단 포함 - await 필요)
     switch (analysis.action) {
       case RecoveryAction.SEND_CONTINUE:
-        this.sendContinueSignal(state);
+        await this.sendContinueSignal(state);
         break;
         
       case RecoveryAction.SEND_STRONGER_PROMPT:
-        this.sendStrongerPrompt(state);
+        await this.sendStrongerPrompt(state);
         break;
         
       case RecoveryAction.REQUEST_RESTART:
-        this.requestRestart(state);
+        await this.requestRestart(state);
         break;
         
       case RecoveryAction.RUN_DOCTOR:
@@ -787,9 +797,14 @@ export class StallDetectionService {
   }
   
   /**
-   * Continue 신호 발송
+   * Continue 신호 발송 - 프로세스 중단 및 개입 메시지와 함께 resume
+   * 
+   * 새로운 방식:
+   * 1. pending-intervention.json 생성
+   * 2. 현재 프로세스 SIGTERM으로 종료
+   * 3. Orchestrator가 감지하여 개입 메시지와 함께 resume
    */
-  private sendContinueSignal(state: LaneStallState): void {
+  private async sendContinueSignal(state: LaneStallState): Promise<void> {
     // Intervention이 비활성화된 경우 신호를 보내지 않고 phase만 업데이트
     if (state.interventionEnabled === false) {
       logger.warn(`[${state.laneName}] Continue signal skipped (intervention disabled). Stall will escalate on next check.`);
@@ -803,16 +818,26 @@ export class StallDetectionService {
       return;
     }
     
-    const interventionPath = safeJoin(state.laneRunDir, 'intervention.txt');
-    
     try {
-      fs.writeFileSync(interventionPath, 'continue');
+      // 1. 개입 요청 생성
+      createInterventionRequest(state.laneRunDir, {
+        type: InterventionType.CONTINUE_SIGNAL,
+        message: createContinueMessage(),
+        source: 'stall-detector',
+        priority: 5,
+      });
+      
+      // 2. 프로세스 종료 (있는 경우)
+      if (state.childProcess?.pid && !state.childProcess.killed) {
+        logger.info(`[${state.laneName}] Interrupting process ${state.childProcess.pid} for continue signal`);
+        await killAndWait(state.childProcess.pid);
+      }
       
       state.phase = StallPhase.CONTINUE_SENT;
       state.lastPhaseChangeTime = Date.now();
       state.continueSignalCount++;
       
-      logger.info(`[${state.laneName}] Sent continue signal (#${state.continueSignalCount})`);
+      logger.info(`[${state.laneName}] Continue signal queued (#${state.continueSignalCount}) - agent will resume with intervention`);
       
       events.emit('recovery.continue_signal', {
         laneName: state.laneName,
@@ -825,9 +850,9 @@ export class StallDetectionService {
   }
   
   /**
-   * Stronger prompt 발송
+   * Stronger prompt 발송 - 프로세스 중단 및 강력한 개입 메시지와 함께 resume
    */
-  private sendStrongerPrompt(state: LaneStallState): void {
+  private async sendStrongerPrompt(state: LaneStallState): Promise<void> {
     // Intervention이 비활성화된 경우 신호를 보내지 않고 phase만 업데이트
     if (state.interventionEnabled === false) {
       logger.warn(`[${state.laneName}] Stronger prompt skipped (intervention disabled). Will escalate to restart.`);
@@ -841,20 +866,25 @@ export class StallDetectionService {
       return;
     }
     
-    const interventionPath = safeJoin(state.laneRunDir, 'intervention.txt');
-    const prompt = `[SYSTEM INTERVENTION] You seem to be stuck or waiting. 
-Please continue with your current task immediately. 
-If you're waiting for something, explain what you need and proceed with what you can do now.
-If you've completed the task, please summarize your work and finish.
-If you encountered a git error, resolve it and continue.`;
-    
     try {
-      fs.writeFileSync(interventionPath, prompt);
+      // 1. 개입 요청 생성
+      createInterventionRequest(state.laneRunDir, {
+        type: InterventionType.STRONGER_PROMPT,
+        message: createStrongerPromptMessage(),
+        source: 'stall-detector',
+        priority: 7,
+      });
+      
+      // 2. 프로세스 종료 (있는 경우)
+      if (state.childProcess?.pid && !state.childProcess.killed) {
+        logger.warn(`[${state.laneName}] Interrupting process ${state.childProcess.pid} for stronger prompt`);
+        await killAndWait(state.childProcess.pid);
+      }
       
       state.phase = StallPhase.STRONGER_PROMPT_SENT;
       state.lastPhaseChangeTime = Date.now();
       
-      logger.warn(`[${state.laneName}] Sent stronger prompt after continue signal failed`);
+      logger.warn(`[${state.laneName}] Stronger prompt queued - agent will resume with intervention`);
       
       events.emit('recovery.stronger_prompt', {
         laneName: state.laneName,
@@ -865,16 +895,31 @@ If you encountered a git error, resolve it and continue.`;
   }
   
   /**
-   * 재시작 요청 (프로세스 종료)
+   * 재시작 요청 - 프로세스 종료 및 재시작 메시지와 함께 resume
    */
-  private requestRestart(state: LaneStallState): void {
+  private async requestRestart(state: LaneStallState): Promise<void> {
     state.restartCount++;
     state.phase = StallPhase.RESTART_REQUESTED;
     state.lastPhaseChangeTime = Date.now();
     
-    // 프로세스 종료
-    if (state.childProcess && !state.childProcess.killed) {
+    // 1. 개입 요청 생성 (재시작 메시지)
+    if (state.laneRunDir) {
+      createInterventionRequest(state.laneRunDir, {
+        type: InterventionType.SYSTEM_RESTART,
+        message: createRestartMessage('Agent became unresponsive after multiple intervention attempts'),
+        source: 'stall-detector',
+        priority: 9,
+        metadata: {
+          restartCount: state.restartCount,
+          maxRestarts: this.config.maxRestarts,
+        },
+      });
+    }
+    
+    // 2. 프로세스 종료 (SIGKILL 사용 - 강제 종료)
+    if (state.childProcess?.pid && !state.childProcess.killed) {
       try {
+        // SIGKILL로 즉시 종료 (SIGTERM이 안 먹힐 수 있으므로)
         state.childProcess.kill('SIGKILL');
         logger.info(`[StallService] [${state.laneName}] Killed process ${state.childProcess.pid}`);
       } catch (error: any) {
@@ -882,7 +927,7 @@ If you encountered a git error, resolve it and continue.`;
       }
     }
     
-    logger.warn(`[${state.laneName}] Killing and restarting lane (restart #${state.restartCount})`);
+    logger.warn(`[${state.laneName}] Restart requested (restart #${state.restartCount}/${this.config.maxRestarts})`);
     
     events.emit('recovery.restart', {
       laneName: state.laneName,
