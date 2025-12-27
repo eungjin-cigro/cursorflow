@@ -31,6 +31,7 @@ interface ResumeOptions {
   maxConcurrent: number;
   help: boolean;
   executor: string | null;
+  browser: boolean;
 }
 
 function printHelp(): void {
@@ -49,6 +50,7 @@ Options:
   --restart              Restart from the first task (index 0)
   --skip-doctor          Skip environment/branch checks (not recommended)
   --executor <type>      Override executor (default: cursor-agent)
+  --browser              Enable browser automation for all resumed tasks
   --help, -h             Show help
 
 Examples:
@@ -57,6 +59,7 @@ Examples:
   cursorflow resume lane-1                   # Resume single lane
   cursorflow resume _cursorflow/flows/MyFeature  # Resume all lanes in flow
   cursorflow resume --all --restart          # Restart all incomplete lanes from task 0
+  cursorflow resume --all --browser          # Resume all lanes with browser mode enabled
   `);
 }
 
@@ -76,6 +79,7 @@ function parseArgs(args: string[]): ResumeOptions {
     maxConcurrent: maxConcurrentIdx >= 0 ? parseInt(args[maxConcurrentIdx + 1] || '3') : 3,
     help: args.includes('--help') || args.includes('-h'),
     executor: executorIdx >= 0 ? args[executorIdx + 1] || null : null,
+    browser: args.includes('--browser'),
   };
 }
 
@@ -104,7 +108,6 @@ const STATUS_COLORS: Record<string, string> = {
   failed: '\x1b[31m',    // red
   paused: '\x1b[35m',    // magenta
   waiting: '\x1b[33m',   // yellow
-  reviewing: '\x1b[36m', // cyan
   unknown: '\x1b[90m',   // gray
 };
 const RESET = '\x1b[0m';
@@ -397,6 +400,7 @@ function spawnLaneResume(
     restart: boolean;
     pipelineBranch?: string;
     executor?: string | null;
+    browser?: boolean;
     enhancedLogConfig?: any;
     laneIndex?: number;
   }
@@ -424,6 +428,11 @@ function spawnLaneResume(
   // Pass executor if provided
   if (options.executor) {
     runnerArgs.push('--executor', options.executor);
+  }
+
+  // Pass browser flag if provided
+  if (options.browser) {
+    runnerArgs.push('--browser');
   }
 
   // Generate lane label: [laneIdx-taskIdx-laneName] format, padded to 18 chars
@@ -494,6 +503,7 @@ async function resumeLanes(
     maxConcurrent: number; 
     skipDoctor: boolean; 
     executor: string | null;
+    browser: boolean;
     enhancedLogConfig?: any;
   }
 ): Promise<{ succeeded: string[]; failed: string[]; skipped: string[] }> {
@@ -588,6 +598,7 @@ async function resumeLanes(
       const { child } = spawnLaneResume(lane.name, lane.dir, lane.state!, {
         restart: options.restart,
         executor: options.executor,
+        browser: options.browser,
         enhancedLogConfig: options.enhancedLogConfig,
         laneIndex: laneIndexMap.get(lane.name) ?? 1,
       });
@@ -750,6 +761,7 @@ async function resume(args: string[]): Promise<void> {
     maxConcurrent: options.maxConcurrent,
     skipDoctor: options.skipDoctor,
     executor: options.executor,
+    browser: options.browser,
     enhancedLogConfig: config.enhancedLogging,
   });
   

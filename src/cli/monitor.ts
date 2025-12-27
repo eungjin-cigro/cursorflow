@@ -980,7 +980,7 @@ class InteractiveMonitor {
     const progress = state.totalTasks > 0 ? Math.round((state.currentTaskIndex / state.totalTasks) * 100) : 0;
     const duration = state.startTime ? (state.endTime 
       ? state.endTime - state.startTime 
-      : (state.status === 'running' || state.status === 'reviewing' ? Date.now() - state.startTime : 0)) : 0;
+      : (state.status === 'running' ? Date.now() - state.startTime : 0)) : 0;
     
     return {
       status: state.status || 'unknown',
@@ -1558,7 +1558,6 @@ class InteractiveMonitor {
       'failed': '❌',
       'blocked_dependency': '🚫',
       'pending': '⚪',
-      'reviewing': '👀',
     };
     return icons[status] || '❓';
   }

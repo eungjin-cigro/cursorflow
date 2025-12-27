@@ -119,6 +119,7 @@ interface RunOptions {
   skipDoctor: boolean;
   skipPreflight: boolean;
   raw: boolean;
+  browser: boolean;
   help: boolean;
 }
 
@@ -138,6 +139,7 @@ Options:
   --skip-doctor          Skip environment checks (not recommended)
   --skip-preflight       Skip preflight checks (Git remote, etc.)
   --raw                  Save raw logs (absolute raw, no processing)
+  --browser              Enable browser automation for all tasks
   --dry-run              Show execution plan without starting agents
   --help, -h             Show help
 
@@ -160,6 +162,7 @@ function parseArgs(args: string[]): RunOptions {
     skipDoctor: args.includes('--skip-doctor') || args.includes('--no-doctor'),
     skipPreflight: args.includes('--skip-preflight'),
     raw: args.includes('--raw'),
+    browser: args.includes('--browser'),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -332,6 +335,7 @@ async function run(args: string[]): Promise<void> {
         ...(options.raw ? { raw: true } : {}),
       },
       skipPreflight: options.skipPreflight,
+      browser: options.browser,
     });
   } catch (error: any) {
     // Re-throw to be handled by the main entry point

@@ -9,16 +9,33 @@ import { getAvailableModels } from '../utils/cursor-agent';
 
 /**
  * Model details metadata
+ * Reference: docs/CURSOR_AGENT_GUIDE.md (2025.12 version)
  */
 const MODEL_METADATA: Record<string, { name: string; provider: string; description: string }> = {
+  // Special modes
+  'composer-1': { name: 'Composer 1', provider: 'Cursor', description: 'Multi-file orchestration mode' },
+  'auto': { name: 'Auto', provider: 'Cursor', description: 'Automatic model selection' },
+  // Anthropic Claude models
   'sonnet-4.5': { name: 'Claude 3.7 Sonnet', provider: 'Anthropic', description: 'General implementation, fast work (Most versatile)' },
-  'sonnet-4.5-thinking': { name: 'Claude 3.7 Sonnet (Thinking)', provider: 'Anthropic', description: 'Code review, deeper reasoning (Thinking model)' },
+  'sonnet-4.5-thinking': { name: 'Claude 3.7 Sonnet (Thinking)', provider: 'Anthropic', description: 'Deeper reasoning (Thinking model)' },
   'opus-4.5': { name: 'Claude 4.0 Opus', provider: 'Anthropic', description: 'Complex tasks, high quality (Advanced)' },
   'opus-4.5-thinking': { name: 'Claude 4.0 Opus (Thinking)', provider: 'Anthropic', description: 'Architecture design (Premium)' },
+  'opus-4.1': { name: 'Claude 4.1 Opus', provider: 'Anthropic', description: 'Latest Opus model' },
+  // Google Gemini models
+  'gemini-3-flash': { name: 'Gemini 3 Flash', provider: 'Google', description: 'Fast, general tasks (Default)' },
+  'gemini-3-pro': { name: 'Gemini 3 Pro', provider: 'Google', description: 'Advanced reasoning (High performance)' },
+  // OpenAI GPT models
   'gpt-5.2': { name: 'GPT-5.2', provider: 'OpenAI', description: 'General tasks' },
   'gpt-5.2-high': { name: 'GPT-5.2 High Reasoning', provider: 'OpenAI', description: 'Advanced reasoning (High performance)' },
-  'gemini-3-flash': { name: 'Gemini 3 Flash', provider: 'Google', description: 'General tasks' },
-  'gemini-3-pro': { name: 'Gemini 3 Pro', provider: 'Google', description: 'Advanced reasoning (High performance)' }
+  'gpt-5.1': { name: 'GPT-5.1', provider: 'OpenAI', description: 'General tasks' },
+  'gpt-5.1-high': { name: 'GPT-5.1 High Reasoning', provider: 'OpenAI', description: 'Advanced reasoning' },
+  // OpenAI Codex models
+  'gpt-5.1-codex': { name: 'GPT-5.1 Codex', provider: 'OpenAI', description: 'Code-optimized model' },
+  'gpt-5.1-codex-high': { name: 'GPT-5.1 Codex High', provider: 'OpenAI', description: 'Code-optimized (High performance)' },
+  'gpt-5.1-codex-max': { name: 'GPT-5.1 Codex Max', provider: 'OpenAI', description: 'Code-optimized (Maximum)' },
+  'gpt-5.1-codex-max-high': { name: 'GPT-5.1 Codex Max High', provider: 'OpenAI', description: 'Code-optimized (Maximum, High performance)' },
+  // xAI
+  'grok': { name: 'Grok', provider: 'xAI', description: 'xAI Grok model' },
 };
 
 function printHelp(): void {
