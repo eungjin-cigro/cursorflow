@@ -9,8 +9,6 @@ export * from './console';
 export * from './formatter';
 export * from './parser';
 export * from './buffer';
-export * from './file-writer';
 
 // Re-export types
 export * from '../../types/logging';
-

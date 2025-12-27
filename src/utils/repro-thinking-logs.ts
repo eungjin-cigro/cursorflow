@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogManager } from './enhanced-logger';
-import { getLaneLogPath } from '../services/logging/paths';
 
 async function testThinkingLogs() {
   const testDir = path.join(process.cwd(), '_test_thinking_logs');
@@ -12,7 +11,6 @@ async function testThinkingLogs() {
 
   console.log('--- Initializing Log Manager ---');
   const manager = createLogManager(testDir, 'test-lane-thinking', {
-    writeJsonLog: true,
     keepRawLogs: true
   });
 
@@ -33,9 +31,9 @@ async function testThinkingLogs() {
 
   manager.close();
 
-  console.log('\n--- Verifying terminal-raw.log ---');
-  const rawLog = fs.readFileSync(getLaneLogPath(testDir, 'raw'), 'utf8');
-  console.log(rawLog);
+  console.log('\n--- Verifying terminal-readable.log ---');
+  const readableLog = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
+  console.log(readableLog);
 }
 
 testThinkingLogs().catch(console.error);
