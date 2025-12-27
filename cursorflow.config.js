@@ -18,12 +18,6 @@ module.exports = {
   // Intervention - allows sending messages to running agents
   enableIntervention: true,
   
-  // Review configuration
-  enableReview: false,
-  reviewModel: 'sonnet-4.5-thinking',
-  reviewAllTasks: false,
-  maxReviewIterations: 3,
-  
   // Lane configuration
   defaultLaneConfig: {
     devPort: 3001,           // 3000 + laneNumber
@@ -37,16 +31,7 @@ module.exports = {
   // Advanced
   worktreePrefix: 'cursorflow-',
   maxConcurrentLanes: 10,
-  agentOutputFormat: 'stream-json', // 'stream-json' | 'json' | 'plain'
-
-  // Webhook configuration
-  // webhooks: [
-  //   {
-  //     enabled: true,
-  //     url: 'https://api.example.com/events',
-  //     events: ['*'],
-  //   }
-  // ],
+  agentOutputFormat: 'stream-json', // 'stream-json' | 'json' | 'text'
 
   // Enhanced logging configuration
   enhancedLogging: {

@@ -92,7 +92,6 @@ echo "✅ Semgrep Static Analysis (automatic)"
 echo "✅ Trivy Filesystem Scan (automatic)"
 echo "✅ CodeQL Analysis (automatic)"
 echo "⚙️  Snyk Scan (requires SNYK_TOKEN)"
-echo "⚙️  AI Security Review (requires OPENAI_API_KEY)"
 
 echo -e "\n${BLUE}Test security scan locally:${NC}"
 echo -e "${GREEN}npm audit${NC}"
