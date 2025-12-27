@@ -19,6 +19,7 @@ import { safeJoin } from '../utils/path';
 import { getLaneProcessStatus, getFlowSummary, LaneProcessStatus } from '../services/process';
 import { LogBufferService, BufferedLogEntry } from '../services/logging/buffer';
 import { formatReadableEntry, stripAnsi } from '../services/logging/formatter';
+import { createInterventionRequest, InterventionType, wrapUserIntervention } from '../core/intervention';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // UI Constants
@@ -805,9 +806,24 @@ class InteractiveMonitor {
     if (!lane || !message.trim()) return;
     
     try {
-      const interventionPath = safeJoin(lane.path, 'intervention.txt');
-      fs.writeFileSync(interventionPath, message, 'utf8');
+      // Create pending-intervention.json for the system
+      createInterventionRequest(lane.path, {
+        type: InterventionType.USER_MESSAGE,
+        message: wrapUserIntervention(message),
+        source: 'user',
+        priority: 10
+      });
       
+      // Kill the process if it's running - this triggers the restart in orchestrator
+      const status = this.laneProcessStatuses.get(lane.name);
+      if (status && status.pid && status.actualStatus === 'running') {
+        try {
+          process.kill(status.pid, 'SIGTERM');
+        } catch {
+          // Ignore kill errors
+        }
+      }
+
       const convoPath = safeJoin(lane.path, 'conversation.jsonl');
       const entry = {
         timestamp: new Date().toISOString(),

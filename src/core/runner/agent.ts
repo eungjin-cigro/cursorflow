@@ -218,27 +218,32 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
         fs.mkdirSync(signalDir, { recursive: true });
       }
       
-      const interventionPath = path.join(signalDir, 'intervention.txt');
+      const interventionPath = path.join(signalDir, 'pending-intervention.json');
       const timeoutPath = path.join(signalDir, 'timeout.txt');
       
-      // Watch for timeout signals from UI (intervention via stdin no longer works)
+      // Watch for signals from UI (intervention via stdin no longer works)
       signalWatcher = fs.watch(signalDir, (event, filename) => {
-        if (filename === 'intervention.txt' && fs.existsSync(interventionPath)) {
+        if (filename === 'pending-intervention.json' && fs.existsSync(interventionPath)) {
           try {
-            const message = fs.readFileSync(interventionPath, 'utf8').trim();
-            if (message) {
-              // Log intervention but cannot send via stdin (already closed)
-              logger.warn(`👋 Intervention received but stdin is closed (cursor-agent CLI limitation): ${message.substring(0, 50)}...`);
-              
-              if (signalDir) {
-                const convoPath = path.join(signalDir, 'conversation.jsonl');
-                appendLog(convoPath, createConversationEntry('intervention', `[INTERVENTION IGNORED - stdin closed]: ${message}`, {
-                  task: taskName || 'AGENT_TURN',
-                  model: 'manual'
-                }));
-              }
-              fs.unlinkSync(interventionPath);
+            // Log intervention
+            logger.warn(`👋 Intervention received. Interrupting agent for resume...`);
+            
+            if (signalDir) {
+              const convoPath = path.join(signalDir, 'conversation.jsonl');
+              appendLog(convoPath, createConversationEntry('intervention', `[INTERVENTION RECEIVED]`, {
+                task: taskName || 'AGENT_TURN',
+                model: 'manual'
+              }));
             }
+            
+            // Kill the agent child process. 
+            // This will cause the runner to finish this task (with error)
+            // and since we've already written pending-intervention.json,
+            // it will be picked up on next resume.
+            child.kill('SIGTERM');
+            
+            // Note: we don't unlink pending-intervention.json here, 
+            // the runner will do it when resuming to read the message.
           } catch {}
         }
         

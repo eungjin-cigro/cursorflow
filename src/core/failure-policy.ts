@@ -310,11 +310,12 @@ export function analyzeFailure(error: string | null | undefined, context?: Failu
   // 1. Network errors
   if (msg.includes('econnreset') || msg.includes('econnrefused') || 
       msg.includes('etimedout') || msg.includes('enotfound') ||
-      msg.includes('socket hang up') || msg.includes('network')) {
+      msg.includes('socket hang up') || msg.includes('network') ||
+      msg.includes('canceled') || msg.includes('http/2') || msg.includes('stream closed')) {
     return {
       type: FailureType.NETWORK_ERROR,
       action: (context?.retryCount || 0) < 3 ? RecoveryAction.RETRY_TASK : RecoveryAction.RESTART_LANE,
-      message: 'Network error. Retrying...',
+      message: 'Network error or connection lost. Retrying...',
       isTransient: true,
       suggestedDelayMs: 5000 * Math.pow(2, context?.retryCount || 0),
     };

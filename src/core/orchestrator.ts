@@ -41,6 +41,9 @@ import {
   LaneRecoveryState,
 } from './auto-recovery';
 import {
+  isInterventionRestart,
+} from './intervention';
+import {
   StallDetectionService,
   getStallService,
   StallDetectionConfig,
@@ -994,9 +997,16 @@ export async function orchestrate(tasksDir: string, options: {
             logger.error(`Lane ${finished.name} exited with code 2 but no dependency request found`);
           }
         } else {
-          // Check if it was a restart request (RESTART_REQUESTED phase)
-          if (stallPhase === StallPhase.RESTART_REQUESTED) {
-            logger.info(`🔄 Lane ${finished.name} is being restarted due to stall...`);
+          // Check if it was a restart request or intervention (killed to be resumed)
+          if (stallPhase === StallPhase.RESTART_REQUESTED || 
+              stallPhase === StallPhase.CONTINUE_SENT || 
+              stallPhase === StallPhase.STRONGER_PROMPT_SENT ||
+              isInterventionRestart(laneRunDirs[finished.name]!)) {
+            const isManual = isInterventionRestart(laneRunDirs[finished.name]!);
+            const phaseName = isManual ? 'manual intervention' : 
+                            (stallPhase === StallPhase.RESTART_REQUESTED ? 'restart' : 'automatic intervention');
+            
+            logger.info(`🔄 Lane ${finished.name} is being resumed/restarted due to ${phaseName}...`);
             
             // Update startIndex from current state to resume from the same task
             const statePath = safeJoin(laneRunDirs[finished.name]!, 'state.json');

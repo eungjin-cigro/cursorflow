@@ -186,7 +186,7 @@ describe('AutoRecoveryManager', () => {
       expect(manager.getState('test-lane')!.stage).toBe(RecoveryStage.CONTINUE_SIGNAL);
       
       // Check intervention file was created
-      const interventionPath = path.join(laneRunDir, 'intervention.txt');
+      const interventionPath = path.join(laneRunDir, 'pending-intervention.json');
       expect(fs.existsSync(interventionPath)).toBe(true);
     });
 

@@ -82,9 +82,6 @@ export interface InterventionResult {
 /** 개입 요청 파일명 */
 export const PENDING_INTERVENTION_FILE = 'pending-intervention.json';
 
-/** 기존 intervention.txt 파일명 (호환성 유지) */
-export const LEGACY_INTERVENTION_FILE = 'intervention.txt';
-
 /** 프로세스 종료 대기 시간 (ms) */
 const KILL_TIMEOUT_MS = 5000;
 
@@ -138,13 +135,6 @@ export function getPendingInterventionPath(laneRunDir: string): string {
 }
 
 /**
- * 기존 intervention.txt 경로 가져오기 (호환성)
- */
-export function getLegacyInterventionPath(laneRunDir: string): string {
-  return safeJoin(laneRunDir, LEGACY_INTERVENTION_FILE);
-}
-
-/**
  * 개입 요청 생성 및 저장
  * 
  * @param laneRunDir Lane 실행 디렉토리
@@ -173,10 +163,6 @@ export function createInterventionRequest(
   fs.writeFileSync(filePath, JSON.stringify(fullRequest, null, 2), 'utf8');
   logger.debug(`[Intervention] Created request: ${filePath}`);
 
-  // 기존 intervention.txt에도 기록 (호환성 및 로깅용)
-  const legacyPath = getLegacyInterventionPath(laneRunDir);
-  fs.writeFileSync(legacyPath, fullRequest.message, 'utf8');
-
   return filePath;
 }
 
@@ -204,14 +190,10 @@ export function readPendingIntervention(laneRunDir: string): InterventionRequest
  */
 export function clearPendingIntervention(laneRunDir: string): void {
   const filePath = getPendingInterventionPath(laneRunDir);
-  const legacyPath = getLegacyInterventionPath(laneRunDir);
 
   try {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-    }
-    if (fs.existsSync(legacyPath)) {
-      fs.unlinkSync(legacyPath);
     }
   } catch (error) {
     // Ignore cleanup errors

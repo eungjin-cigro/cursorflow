@@ -17,6 +17,13 @@ import { LaneState } from '../utils/types';
 import { events } from '../utils/events';
 import { safeJoin } from '../utils/path';
 import { runHealthCheck, checkAgentHealth, checkAuthHealth } from '../utils/health';
+import { 
+  createInterventionRequest, 
+  InterventionType,
+  createContinueMessage,
+  createStrongerPromptMessage,
+  createRestartMessage,
+} from './intervention';
 
 // ============================================================================
 // Types & Constants
@@ -439,10 +446,13 @@ export class AutoRecoveryManager {
     state: LaneRecoveryState,
     idleSeconds: number
   ): Promise<RecoveryActionResult> {
-    const interventionPath = safeJoin(laneRunDir, 'intervention.txt');
-    
     try {
-      fs.writeFileSync(interventionPath, 'continue');
+      createInterventionRequest(laneRunDir, {
+        type: InterventionType.CONTINUE_SIGNAL,
+        message: createContinueMessage(),
+        source: 'stall-detector',
+        priority: 5,
+      });
       
       state.stage = RecoveryStage.CONTINUE_SIGNAL;
       state.lastStageChangeTime = Date.now();
@@ -495,16 +505,13 @@ export class AutoRecoveryManager {
     laneRunDir: string,
     state: LaneRecoveryState
   ): Promise<RecoveryActionResult> {
-    const interventionPath = safeJoin(laneRunDir, 'intervention.txt');
-    
-    const strongerPrompt = `[SYSTEM INTERVENTION] You seem to be stuck or waiting. 
-Please continue with your current task immediately. 
-If you're waiting for something, explain what you need and proceed with what you can do now.
-If you've completed the task, please summarize your work and finish.
-If you encountered a git error, resolve it and continue.`;
-    
     try {
-      fs.writeFileSync(interventionPath, strongerPrompt);
+      createInterventionRequest(laneRunDir, {
+        type: InterventionType.STRONGER_PROMPT,
+        message: createStrongerPromptMessage(),
+        source: 'stall-detector',
+        priority: 7,
+      });
       
       state.stage = RecoveryStage.STRONGER_PROMPT;
       state.lastStageChangeTime = Date.now();
@@ -526,7 +533,7 @@ If you encountered a git error, resolve it and continue.`;
       events.emit('recovery.stronger_prompt', {
         runId: state.runId,
         laneName,
-        prompt: strongerPrompt,
+        prompt: createStrongerPromptMessage(),
       });
 
       return {

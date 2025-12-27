@@ -18,7 +18,6 @@ import {
   hasPendingIntervention,
   InterventionType,
   PENDING_INTERVENTION_FILE,
-  LEGACY_INTERVENTION_FILE,
   createContinueMessage,
   createStrongerPromptMessage,
   createRestartMessage,
@@ -56,20 +55,6 @@ describe('Intervention Module', () => {
       expect(content.timestamp).toBeDefined();
     });
 
-    test('should also create legacy intervention.txt file', () => {
-      createInterventionRequest(testDir, {
-        type: InterventionType.CONTINUE_SIGNAL,
-        message: 'Continue message',
-        source: 'stall-detector',
-      });
-
-      const legacyPath = path.join(testDir, LEGACY_INTERVENTION_FILE);
-      expect(fs.existsSync(legacyPath)).toBe(true);
-
-      const content = fs.readFileSync(legacyPath, 'utf8');
-      expect(content).toBe('Continue message');
-    });
-
     test('should read pending intervention', () => {
       createInterventionRequest(testDir, {
         type: InterventionType.STRONGER_PROMPT,
@@ -103,7 +88,6 @@ describe('Intervention Module', () => {
 
       expect(hasPendingIntervention(testDir)).toBe(false);
       expect(fs.existsSync(path.join(testDir, PENDING_INTERVENTION_FILE))).toBe(false);
-      expect(fs.existsSync(path.join(testDir, LEGACY_INTERVENTION_FILE))).toBe(false);
     });
 
     test('should respect priority when existing request has higher priority', () => {

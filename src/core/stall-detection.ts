@@ -827,15 +827,16 @@ export class StallDetectionService {
         priority: 5,
       });
       
-      // 2. 프로세스 종료 (있는 경우)
+      // 2. 상태 먼저 업데이트 (race condition 방지)
+      state.phase = StallPhase.CONTINUE_SENT;
+      state.lastPhaseChangeTime = Date.now();
+      state.continueSignalCount++;
+
+      // 3. 프로세스 종료 (있는 경우)
       if (state.childProcess?.pid && !state.childProcess.killed) {
         logger.info(`[${state.laneName}] Interrupting process ${state.childProcess.pid} for continue signal`);
         await killAndWait(state.childProcess.pid);
       }
-      
-      state.phase = StallPhase.CONTINUE_SENT;
-      state.lastPhaseChangeTime = Date.now();
-      state.continueSignalCount++;
       
       logger.info(`[${state.laneName}] Continue signal queued (#${state.continueSignalCount}) - agent will resume with intervention`);
       
@@ -875,14 +876,15 @@ export class StallDetectionService {
         priority: 7,
       });
       
-      // 2. 프로세스 종료 (있는 경우)
+      // 2. 상태 먼저 업데이트 (race condition 방지)
+      state.phase = StallPhase.STRONGER_PROMPT_SENT;
+      state.lastPhaseChangeTime = Date.now();
+
+      // 3. 프로세스 종료 (있는 경우)
       if (state.childProcess?.pid && !state.childProcess.killed) {
         logger.warn(`[${state.laneName}] Interrupting process ${state.childProcess.pid} for stronger prompt`);
         await killAndWait(state.childProcess.pid);
       }
-      
-      state.phase = StallPhase.STRONGER_PROMPT_SENT;
-      state.lastPhaseChangeTime = Date.now();
       
       logger.warn(`[${state.laneName}] Stronger prompt queued - agent will resume with intervention`);
       

@@ -19,6 +19,9 @@ import {
   executeUserIntervention,
   isProcessAlive,
   InterventionResult,
+  createInterventionRequest,
+  InterventionType,
+  wrapUserIntervention,
 } from '../core/intervention';
 
 interface SignalOptions {
@@ -26,7 +29,6 @@ interface SignalOptions {
   message: string | null;
   timeout: number | null;
   runDir: string | null;
-  force: boolean;  // 프로세스 종료 없이 대기 모드로 전송
   help: boolean;
 }
 
@@ -35,8 +37,12 @@ function printHelp(): void {
 Usage: cursorflow signal <lane> "<message>" [options]
        cursorflow signal <lane> --timeout <ms>
 
-Directly intervene in a running lane. The agent will be interrupted immediately
-and resume with your intervention message.
+Send an intervention message to a lane. For running lanes, the agent will be
+interrupted immediately and resume with your message. For pending/waiting/failed
+lanes, the message will be applied when the lane starts or resumes.
+
+Note: Completed lanes cannot receive signals.
+      To re-run a completed lane, start a new run with: cursorflow run
 
 Arguments:
   <lane>                 Lane name to signal
@@ -45,15 +51,12 @@ Arguments:
 Options:
   --timeout <ms>         Update execution timeout (in milliseconds)
   --run-dir <path>       Use a specific run directory (default: latest)
-  --force                Send signal without interrupting current process
-                         (message will be picked up on next task)
   --help, -h             Show help
 
 Examples:
   cursorflow signal lane-1 "Please focus on error handling first"
   cursorflow signal lane-2 "Skip the optional tasks and finish" 
   cursorflow signal lane-1 --timeout 600000   # Set 10 minute timeout
-  cursorflow signal lane-1 "Continue" --force # Don't interrupt, wait for next turn
   `);
 }
 
@@ -61,15 +64,24 @@ function parseArgs(args: string[]): SignalOptions {
   const runDirIdx = args.indexOf('--run-dir');
   const timeoutIdx = args.indexOf('--timeout');
   
+  // Collect indices of option values to exclude from nonOptions
+  const optionValueIndices = new Set<number>();
+  if (runDirIdx >= 0 && runDirIdx + 1 < args.length) {
+    optionValueIndices.add(runDirIdx + 1);
+  }
+  if (timeoutIdx >= 0 && timeoutIdx + 1 < args.length) {
+    optionValueIndices.add(timeoutIdx + 1);
+  }
+  
   // First non-option is lane, second (or rest joined) is message
-  const nonOptions = args.filter(a => !a.startsWith('--'));
+  // Exclude option flags and their values
+  const nonOptions = args.filter((a, i) => !a.startsWith('--') && !optionValueIndices.has(i));
   
   return {
     lane: nonOptions[0] || null,
     message: nonOptions.slice(1).join(' ') || null,
     timeout: timeoutIdx >= 0 ? parseInt(args[timeoutIdx + 1] || '0') || null : null,
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
-    force: args.includes('--force'),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -108,18 +120,15 @@ function getLaneStatus(laneDir: string): { state: LaneState | null; isRunning: b
 }
 
 /**
- * 기존 방식으로 intervention.txt만 작성 (--force 옵션용)
+ * 개입 요청 파일 작성 (비실행 중인 lane용)
  */
-function sendLegacyIntervention(laneDir: string, message: string): void {
-  const interventionPath = safeJoin(laneDir, 'intervention.txt');
-  const convoPath = safeJoin(laneDir, 'conversation.jsonl');
-  
-  fs.writeFileSync(interventionPath, message);
-  
-  const entry = createConversationEntry('intervention', `[HUMAN INTERVENTION]: ${message}`, {
-    task: 'DIRECT_SIGNAL'
+function sendInterventionRequest(laneDir: string, message: string): void {
+  createInterventionRequest(laneDir, {
+    type: InterventionType.USER_MESSAGE,
+    message: wrapUserIntervention(message),
+    source: 'user',
+    priority: 10
   });
-  appendLog(convoPath, entry);
 }
 
 async function signal(args: string[]): Promise<void> {
@@ -167,30 +176,25 @@ async function signal(args: string[]): Promise<void> {
     logger.info(`📨 Sending intervention to lane: ${options.lane}`);
     logger.info(`   Message: "${options.message.substring(0, 50)}${options.message.length > 50 ? '...' : ''}"`);
     
+    // Completed 레인은 signal 거부 (브랜치 충돌 방지)
+    if (state?.status === 'completed') {
+      logger.error(`❌ Cannot signal a completed lane.`);
+      logger.info('   To re-run this lane, start a new run with: cursorflow run');
+      throw new Error('Lane is already completed');
+    }
+
     // Log to conversation for history
     const entry = createConversationEntry('intervention', `[HUMAN INTERVENTION]: ${options.message}`, {
       task: 'DIRECT_SIGNAL'
     });
     appendLog(convoPath, entry);
 
-    // --force: 기존 방식 (프로세스 중단 없이 파일만 작성)
-    if (options.force) {
-      sendLegacyIntervention(laneDir, options.message);
-      logger.success('✅ Signal queued (--force mode). Message will be applied on next task.');
-      return;
-    }
-
-    // Lane이 실행 중이 아닌 경우
+    // Lane이 실행 중이 아닌 경우 (pending/waiting/failed/paused)
     if (!isRunning) {
-      if (state?.status === 'completed') {
-        logger.warn(`⚠ Lane ${options.lane} is already completed.`);
-        return;
-      }
-      
-      // 실행 중이 아니면 다음 resume 시 적용되도록 파일만 작성
-      sendLegacyIntervention(laneDir, options.message);
+      // 실행 중이 아니면 다음 시작/resume 시 적용되도록 파일만 작성
+      sendInterventionRequest(laneDir, options.message);
       logger.info(`ℹ Lane ${options.lane} is not currently running (status: ${state?.status || 'unknown'}).`);
-      logger.success('✅ Signal queued. Message will be applied when lane resumes.');
+      logger.success('✅ Signal queued. Message will be applied when lane starts or resumes.');
       return;
     }
 
