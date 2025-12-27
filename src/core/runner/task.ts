@@ -1,17 +1,12 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as git from '../../utils/git';
 import * as logger from '../../utils/logger';
 import { events } from '../../utils/events';
 import { safeJoin } from '../../utils/path';
 import { appendLog, createConversationEntry } from '../../utils/state';
-import { Task, RunnerConfig, TaskExecutionResult, LaneState } from '../../types';
-import { loadState } from '../../utils/state';
+import { Task, RunnerConfig, TaskExecutionResult } from '../../types';
 import { waitForTaskDependencies as waitForDeps, DependencyWaitOptions } from '../../utils/dependency';
-import { 
-  cursorAgentSend, 
-  extractDependencyRequest 
-} from './agent';
+import { extractDependencyRequest } from './agent';
 import { 
   wrapPrompt, 
   applyDependencyFilePermissions 
@@ -23,6 +18,7 @@ import {
   clearDependencyRequestFile,
   DependencyResult
 } from './utils';
+import { AgentSupervisor } from '../agent-supervisor';
 
 /**
  * Wait for task-level dependencies to be completed by other lanes
@@ -57,78 +53,6 @@ export async function waitForTaskDependencies(
 }
 
 /**
- * Merge branches from dependency lanes with safe merge and conflict pre-check
- */
-export async function mergeDependencyBranches(deps: string[], runDir: string, worktreeDir: string, pipelineBranch: string): Promise<void> {
-  if (!deps || deps.length === 0) return;
-
-  const lanesRoot = path.dirname(runDir);
-  const lanesToMerge = new Set(deps.map(d => d.split(':')[0]!));
-
-  // Ensure we are on the pipeline branch before merging dependencies
-  logger.info(`🔄 Syncing with ${pipelineBranch} before merging dependencies`);
-  git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
-
-  for (const laneName of lanesToMerge) {
-    const depStatePath = safeJoin(lanesRoot, laneName, 'state.json');
-    if (!fs.existsSync(depStatePath)) continue;
-
-    try {
-      const state = loadState<LaneState>(depStatePath);
-      if (!state?.pipelineBranch) continue;
-      
-      logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
-      
-      // Ensure we have the latest from remote
-      git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
-      
-      // Use the remote ref for merging (origin/<branch>) since dependency branches
-      // are pushed to remote by other lanes and may not exist as local branches
-      const remoteBranchRef = `origin/${state.pipelineBranch}`;
-      
-      // Pre-check for conflicts before attempting merge
-      const conflictCheck = git.checkMergeConflict(remoteBranchRef, { cwd: worktreeDir });
-      
-      if (conflictCheck.willConflict) {
-        logger.warn(`⚠️ Pre-check: Merge conflict detected with ${laneName}`);
-        logger.warn(`   Conflicting files: ${conflictCheck.conflictingFiles.join(', ')}`);
-        
-        // Emit event for potential auto-recovery or notification
-        events.emit('merge.conflict_detected', {
-          laneName,
-          targetBranch: state.pipelineBranch,
-          conflictingFiles: conflictCheck.conflictingFiles,
-          preCheck: true,
-        });
-        
-        throw new Error(`Pre-merge conflict check failed: ${conflictCheck.conflictingFiles.join(', ')}. Consider rebasing or resolving conflicts manually.`);
-      }
-      
-      // Use safe merge with conflict detection - merge from remote ref
-      const mergeResult = git.safeMerge(remoteBranchRef, {
-        cwd: worktreeDir,
-        noFf: true,
-        message: `chore: merge task dependency from ${laneName}`,
-        abortOnConflict: true,
-      });
-      
-      if (!mergeResult.success) {
-        if (mergeResult.conflict) {
-          logger.error(`Merge conflict with ${laneName}: ${mergeResult.conflictingFiles.join(', ')}`);
-          throw new Error(`Merge conflict: ${mergeResult.conflictingFiles.join(', ')}`);
-        }
-        throw new Error(mergeResult.error || 'Merge failed');
-      }
-      
-      logger.success(`✓ Merged ${laneName}`);
-    } catch (e) {
-      logger.error(`Failed to merge branch from ${laneName}: ${e}`);
-      throw e;
-    }
-  }
-}
-
-/**
  * Run a single task
  */
 export async function runTask({
@@ -141,6 +65,8 @@ export async function runTask({
   chatId,
   runDir,
   runRoot,
+  agentSupervisor,
+  laneName,
 }: {
   task: Task;
   config: RunnerConfig;
@@ -151,6 +77,8 @@ export async function runTask({
   chatId: string;
   runDir: string;
   runRoot?: string;
+  agentSupervisor: AgentSupervisor;
+  laneName: string;
 }): Promise<TaskExecutionResult> {
   // Calculate runRoot if not provided (runDir is lanes/{laneName}/, runRoot is parent of lanes/)
   const calculatedRunRoot = runRoot || path.dirname(path.dirname(runDir));
@@ -216,32 +144,17 @@ export async function runTask({
   }));
   
   logger.info('Sending prompt to agent...');
-  const startTime = Date.now();
-  events.emit('agent.prompt_sent', {
-    taskName: task.name,
-    model,
-    promptLength: wrappedPrompt.length,
-  });
-
-  const r1 = await cursorAgentSend({
+  const r1 = await agentSupervisor.sendTaskPrompt({
     workspaceDir: worktreeDir,
     chatId,
     prompt: wrappedPrompt,
     model,
+    laneName,
     signalDir: runDir,
     timeout,
     enableIntervention: config.enableIntervention,
     outputFormat: config.agentOutputFormat,
     taskName: task.name,
-  });
-  
-  const duration = Date.now() - startTime;
-  events.emit('agent.response_received', {
-    taskName: task.name,
-    ok: r1.ok,
-    duration,
-    responseLength: r1.resultText?.length || 0,
-    error: r1.error,
   });
 
   appendLog(convoPath, createConversationEntry('assistant', r1.resultText || r1.error || 'No response', {
@@ -308,4 +221,3 @@ export async function runTask({
     status: 'FINISHED',
   };
 }
-

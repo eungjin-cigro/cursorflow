@@ -13,14 +13,12 @@ import {
   TaskExecutionResult, 
   LaneState
 } from '../../types';
-import { 
-  cursorAgentCreateChat 
-} from './agent';
+import { AgentSupervisor } from '../agent-supervisor';
 import { 
   runTask, 
-  waitForTaskDependencies, 
-  mergeDependencyBranches 
+  waitForTaskDependencies
 } from './task';
+import { GitPipelineCoordinator } from '../git-pipeline-coordinator';
 
 /**
  * Validate task configuration
@@ -175,68 +173,13 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.info(`Worktree: ${worktreeDir}`);
   logger.info(`Tasks: ${config.tasks.length}`);
   
-  // Check if worktree needs to be created or repaired
-  const worktreeNeedsCreation = !fs.existsSync(worktreeDir);
-  const worktreeIsInvalid = !worktreeNeedsCreation && !git.isValidWorktree(worktreeDir);
-  
-  if (worktreeIsInvalid) {
-    // Directory exists but is NOT a valid worktree - this can cause branch leakage!
-    // Clean it up and recreate
-    logger.warn(`⚠️ Directory exists but is not a valid worktree: ${worktreeDir}`);
-    logger.info(`   Cleaning up invalid directory and recreating worktree...`);
-    try {
-      git.cleanupInvalidWorktreeDir(worktreeDir);
-    } catch (e: any) {
-      logger.error(`Failed to cleanup invalid worktree directory: ${e.message}`);
-      throw new Error(`Cannot proceed: worktree directory is invalid and cleanup failed`);
-    }
-  }
-  
-  // Create worktree if it doesn't exist or was just cleaned up
-  if (worktreeNeedsCreation || worktreeIsInvalid) {
-    // Use a simple retry mechanism for Git worktree creation to handle potential race conditions
-    let retries = 3;
-    let lastError: Error | null = null;
-    
-    while (retries > 0) {
-      try {
-        // Ensure parent directory exists before calling git worktree
-        const worktreeParent = path.dirname(worktreeDir);
-        if (!fs.existsSync(worktreeParent)) {
-          fs.mkdirSync(worktreeParent, { recursive: true });
-        }
-
-        // Always use the current branch (already captured at start) as the base branch
-        await git.createWorktreeAsync(worktreeDir, pipelineBranch, { 
-          baseBranch: currentBranch,
-          cwd: repoRoot,
-        });
-        break; // Success
-      } catch (e: any) {
-        lastError = e;
-        retries--;
-        if (retries > 0) {
-          const delay = Math.floor(Math.random() * 1000) + 500;
-          logger.warn(`Worktree creation failed, retrying in ${delay}ms... (${retries} retries left)`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-    
-    if (retries === 0 && lastError) {
-      throw new Error(`Failed to create Git worktree after retries: ${lastError.message}`);
-    }
-  } else {
-    // Worktree exists and is valid - reuse it
-    logger.info(`Reusing existing worktree: ${worktreeDir}`);
-    try {
-      git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
-    } catch (e) {
-      // If checkout fails in a valid worktree, log warning but continue
-      // The worktree might be on a different branch that will be handled later
-      logger.warn(`Failed to checkout branch ${pipelineBranch} in existing worktree: ${e}`);
-    }
-  }
+  const gitCoordinator = new GitPipelineCoordinator();
+  await gitCoordinator.ensureWorktree({
+    worktreeDir,
+    pipelineBranch,
+    repoRoot,
+    baseBranch: currentBranch,
+  });
   
   // Change current directory to worktree for all subsequent operations
   // This ensures that all spawned processes (like git or npm) inherit the correct CWD
@@ -245,7 +188,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   
   // Create chat
   logger.info('Creating chat session...');
-  const chatId = cursorAgentCreateChat(worktreeDir);
+  const agentSupervisor = new AgentSupervisor();
+  const chatId = agentSupervisor.createChat(worktreeDir);
   
   // Initialize state if not loaded
   if (!state) {
@@ -348,7 +292,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
           onTimeout: 'fail',
         });
         
-        await mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch);
+        await gitCoordinator.mergeDependencyBranches(task.dependsOn, runDir, worktreeDir, pipelineBranch);
         
         state.status = 'running';
         state.waitingFor = [];
@@ -380,6 +324,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       taskBranch,
       chatId,
       runDir,
+      agentSupervisor,
+      laneName,
     });
     
     results.push(result);
@@ -418,52 +364,18 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     }
     
     // Merge into pipeline
-    logger.info(`Merging ${taskBranch} → ${pipelineBranch}`);
-    
-    // Ensure we are on the pipeline branch before merging the task branch
-    logger.info(`🔄 Switching to pipeline branch ${pipelineBranch} to integrate changes`);
-    git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
-    
-    // Pre-check for conflicts (should be rare since task branch was created from pipeline)
-    const conflictCheck = git.checkMergeConflict(taskBranch, { cwd: worktreeDir });
-    if (conflictCheck.willConflict) {
-      logger.warn(`⚠️ Unexpected conflict detected when merging ${taskBranch}`);
-      logger.warn(`   Conflicting files: ${conflictCheck.conflictingFiles.join(', ')}`);
-      logger.warn(`   This may indicate concurrent modifications to ${pipelineBranch}`);
-      
-      events.emit('merge.conflict_detected', {
+    try {
+      gitCoordinator.mergeTaskIntoPipeline({
         taskName: task.name,
         taskBranch,
         pipelineBranch,
-        conflictingFiles: conflictCheck.conflictingFiles,
-        preCheck: true,
+        worktreeDir,
       });
-    }
-    
-    // Use safeMerge instead of plain merge for better error handling
-    logger.info(`🔀 Merging task ${task.name} (${taskBranch}) into ${pipelineBranch}`);
-    const mergeResult = git.safeMerge(taskBranch, { 
-      cwd: worktreeDir, 
-      noFf: true,
-      message: `chore: merge task ${task.name} into pipeline`,
-      abortOnConflict: true,
-    });
-    
-    if (!mergeResult.success) {
-      if (mergeResult.conflict) {
-        logger.error(`❌ Merge conflict: ${mergeResult.conflictingFiles.join(', ')}`);
-        state.status = 'failed';
-        state.error = `Merge conflict when integrating task ${task.name}: ${mergeResult.conflictingFiles.join(', ')}`;
-        saveState(statePath, state);
-        process.exit(1);
-      }
-      throw new Error(mergeResult.error || 'Merge failed');
-    }
-    
-    // Log changed files
-    const stats = git.getLastOperationStats(worktreeDir);
-    if (stats) {
-      logger.info('Changed files:\n' + stats);
+    } catch (e: any) {
+      state.status = 'failed';
+      state.error = e.message;
+      saveState(statePath, state);
+      process.exit(1);
     }
 
     git.push(pipelineBranch, { cwd: worktreeDir });
@@ -487,30 +399,11 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   }
 
   // 2. Create flow branch from pipelineBranch and cleanup
-  if (flowBranch !== pipelineBranch) {
-    logger.info(`🌿 Creating final flow branch: ${flowBranch}`);
-    try {
-      // Create/Overwrite flow branch from pipeline branch
-      git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir });
-      git.push(flowBranch, { cwd: worktreeDir, setUpstream: true });
-      
-      // 3. Delete temporary pipeline branch (LOCAL ONLY)
-      // Keep remote branch for dependency lanes that may need to merge it!
-      logger.info(`🗑️ Deleting local pipeline branch: ${pipelineBranch}`);
-      // Must be on another branch to delete pipelineBranch
-      git.runGit(['checkout', flowBranch], { cwd: worktreeDir });
-      git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true });
-      
-      // NOTE: We intentionally keep the remote pipeline branch alive
-      // because other lanes with dependsOn may need to merge it.
-      // The pipeline branch on remote serves as the "official" completion branch
-      // that dependency-tracking code in task.ts uses (via state.pipelineBranch).
-      
-      logger.success(`✓ Flow branch '${flowBranch}' created. Remote pipeline branch preserved for dependencies.`);
-    } catch (e) {
-      logger.error(`❌ Failed during final consolidation: ${e}`);
-    }
-  }
+  gitCoordinator.finalizeFlowBranch({
+    flowBranch,
+    pipelineBranch,
+    worktreeDir,
+  });
 
   // Complete
   state.status = 'completed';
@@ -531,4 +424,3 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   logger.success('All tasks completed!');
   return results;
 }
-
