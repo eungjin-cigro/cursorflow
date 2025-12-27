@@ -1,5 +1,8 @@
 /**
  * Tests for LogBufferService utility
+ * 
+ * Note: LogBufferService reads from terminal-readable.log (human-readable format)
+ * not from JSONL files.
  */
 
 import * as fs from 'fs';
@@ -19,11 +22,20 @@ describe('LogBufferService', () => {
     message: msg,
   });
 
+  /**
+   * Write a log entry in terminal-readable.log format
+   * Format: [HH:MM:SS] [lane-label] emoji TYPE message
+   */
   const writeLogEntry = (laneDir: string, entry: JsonLogEntry) => {
     if (!fs.existsSync(laneDir)) {
       fs.mkdirSync(laneDir, { recursive: true });
     }
-    fs.appendFileSync(path.join(laneDir, 'terminal.jsonl'), JSON.stringify(entry) + '\n');
+    // Format timestamp
+    const date = new Date(entry.timestamp);
+    const ts = date.toLocaleTimeString('en-US', { hour12: false });
+    // Format as readable log line
+    const line = `[${ts}] ℹ️ INFO ${entry.message}\n`;
+    fs.appendFileSync(path.join(laneDir, 'terminal-readable.log'), line);
   };
 
   beforeEach(() => {
@@ -51,8 +63,9 @@ describe('LogBufferService', () => {
     
     const entries = service.getEntries({ offset: 0, limit: 10 });
     expect(entries).toHaveLength(2);
-    expect(entries.some(e => e.message === 'Lane 1 initial')).toBe(true);
-    expect(entries.some(e => e.message === 'Lane 2 initial')).toBe(true);
+    // Message includes the type prefix from readable log format
+    expect(entries.some(e => e.message.includes('Lane 1 initial'))).toBe(true);
+    expect(entries.some(e => e.message.includes('Lane 2 initial'))).toBe(true);
     
     service.stopStreaming();
   });
@@ -63,10 +76,11 @@ describe('LogBufferService', () => {
 
     service.once('update', (newEntries) => {
       expect(newEntries).toHaveLength(1);
-      expect(newEntries[0].message).toBe('New streaming log');
+      // Message includes the type prefix from readable log format
+      expect(newEntries[0].message).toContain('New streaming log');
       
       const allEntries = service.getEntries({ offset: 0, limit: 10 });
-      expect(allEntries.some(e => e.message === 'New streaming log')).toBe(true);
+      expect(allEntries.some(e => e.message.includes('New streaming log'))).toBe(true);
       
       service.stopStreaming();
       done();
@@ -86,12 +100,13 @@ describe('LogBufferService', () => {
     const lane1Entries = service.getEntries({ offset: 0, limit: 10, filter: { lane: 'lane-1' } });
     expect(lane1Entries).toHaveLength(1);
     expect(lane1Entries[0].laneName).toBe('lane-1');
-    expect(lane1Entries[0].message).toBe('L1 Log');
+    // Message includes the type prefix from readable log format
+    expect(lane1Entries[0].message).toContain('L1 Log');
 
     const lane2Entries = service.getEntries({ offset: 0, limit: 10, filter: { lane: 'lane-2' } });
     expect(lane2Entries).toHaveLength(1);
     expect(lane2Entries[0].laneName).toBe('lane-2');
-    expect(lane2Entries[0].message).toBe('L2 Log');
+    expect(lane2Entries[0].message).toContain('L2 Log');
 
     service.stopStreaming();
   });
@@ -186,7 +201,8 @@ describe('LogBufferService', () => {
     });
     
     expect(searchResults).toHaveLength(1);
-    expect(searchResults[0].message).toBe('Needle in a haystack');
+    // Message includes the type prefix from readable log format
+    expect(searchResults[0].message).toContain('Needle in a haystack');
 
     service.stopStreaming();
   });

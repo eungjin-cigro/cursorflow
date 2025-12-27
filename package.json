@@ -1,6 +1,6 @@
 {
   "name": "@litmers/cursorflow-orchestrator",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "description": "Git worktree-based parallel AI agent orchestration system for Cursor",
   "main": "dist/cli/index.js",
   "bin": {
@@ -10,7 +10,6 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    
     "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit",
     "test:contract": "jest --selectProjects contract",
@@ -19,26 +18,21 @@
     "test:e2e:real": "jest tests/e2e/real-e2e.test.ts --runInBand --testTimeout=300000",
     "test:smoke": "jest tests/smoke --runInBand --testTimeout=120000",
     "test:all": "jest",
-    
     "test:verify": "./scripts/verify-change.sh",
     "test:verify:quick": "./scripts/verify-change.sh --quick",
     "test:verify:full": "./scripts/verify-change.sh --full",
     "test:pipeline": "pnpm test:unit && pnpm test:contract && pnpm test:integration && pnpm test:smoke",
-    
     "prepublishOnly": "pnpm run build && pnpm run validate",
     "postinstall": "node scripts/postinstall.js",
     "validate": "pnpm pack",
-    
     "release": "scripts/release.sh",
     "release:patch": "scripts/release.sh patch",
     "release:minor": "scripts/release.sh minor",
     "release:major": "scripts/release.sh major",
     "prerelease": "npm run build && npm run test && npm run test:smoke && npm run security:check",
-    
     "security:check": "scripts/local-security-gate.sh",
     "security:audit": "pnpm audit",
     "security:audit:fix": "pnpm audit --fix",
-    
     "cf": "node dist/cli/index.js",
     "cf:doctor": "node dist/cli/index.js doctor",
     "cf:run": "node dist/cli/index.js run",
@@ -46,7 +40,6 @@
     "cf:clean": "node dist/cli/index.js clean",
     "cf:resume": "node dist/cli/index.js resume",
     "cf:logs": "node dist/cli/index.js logs",
-    
     "prepare": "husky"
   },
   "keywords": [
