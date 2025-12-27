@@ -27,21 +27,84 @@ import {
 // Longer timeouts for real execution
 const SMOKE_TIMEOUT = 60_000; // 60 seconds
 
-// Path to the smoke test project
-const SMOKE_PROJECT_PATH = path.resolve(__dirname, '../../test-projects/smoke-test');
+/**
+ * Create a minimal smoke test project dynamically
+ * This avoids dependency on gitignored test-projects directory
+ */
+function createSmokeTestProject(destDir: string): void {
+  // Create directory structure
+  fs.mkdirSync(path.join(destDir, '_cursorflow', 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(destDir, 'src'), { recursive: true });
+  
+  // Create package.json
+  fs.writeFileSync(
+    path.join(destDir, 'package.json'),
+    JSON.stringify({
+      name: 'cursorflow-smoke-test',
+      version: '1.0.0',
+      description: 'Smoke test project for CursorFlow verification',
+      private: true,
+      scripts: {
+        test: 'echo "Smoke test project"',
+      },
+      dependencies: {},
+    }, null, 2)
+  );
+  
+  // Create README.md
+  fs.writeFileSync(
+    path.join(destDir, 'README.md'),
+    '# CursorFlow Smoke Test Project\n\nMinimal test project for smoke tests.\n'
+  );
+  
+  // Create src/index.ts
+  fs.writeFileSync(
+    path.join(destDir, 'src', 'index.ts'),
+    `/**
+ * Minimal source file for smoke testing
+ */
+
+export function hello(): string {
+  return 'Hello from smoke test project!';
+}
+
+export function add(a: number, b: number): number {
+  return a + b;
+}
+`
+  );
+  
+  // Create task file
+  fs.writeFileSync(
+    path.join(destDir, '_cursorflow', 'tasks', 'smoke-lane.json'),
+    JSON.stringify({
+      baseBranch: 'main',
+      tasks: [
+        {
+          name: 'smoke-task-1',
+          prompt: 'Add a simple comment to the hello function in src/index.ts',
+        },
+      ],
+      dependencyPolicy: {
+        allowDependencyChange: false,
+        lockfileReadOnly: true,
+      },
+    }, null, 2)
+  );
+}
 
 /**
  * Setup smoke test environment
  */
-async function setupSmokeProject(): Promise<{ cleanup: () => void }> {
+async function setupSmokeProject(): Promise<{ cleanup: () => void; tempDir: string }> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorflow-smoke-'));
   
-  // Copy smoke-test project to temp directory
-  copyDirSync(SMOKE_PROJECT_PATH, tempDir);
+  // Create smoke test project dynamically
+  createSmokeTestProject(tempDir);
   
   // Initialize git repo
   try {
-    execSync('git init', { cwd: tempDir, stdio: 'pipe' });
+    execSync('git init -b main', { cwd: tempDir, stdio: 'pipe' });
     execSync('git config user.email "test@smoke.test"', { cwd: tempDir, stdio: 'pipe' });
     execSync('git config user.name "Smoke Test"', { cwd: tempDir, stdio: 'pipe' });
     execSync('git add -A', { cwd: tempDir, stdio: 'pipe' });
@@ -50,7 +113,7 @@ async function setupSmokeProject(): Promise<{ cleanup: () => void }> {
     // Create bare repo as origin
     const bareDir = path.join(tempDir, '..', 'smoke-origin.git');
     fs.mkdirSync(bareDir, { recursive: true });
-    execSync('git init --bare', { cwd: bareDir, stdio: 'pipe' });
+    execSync('git init --bare -b main', { cwd: bareDir, stdio: 'pipe' });
     execSync(`git remote add origin "${bareDir}"`, { cwd: tempDir, stdio: 'pipe' });
     execSync('git push -u origin main', { cwd: tempDir, stdio: 'pipe' });
   } catch (err) {
@@ -59,6 +122,7 @@ async function setupSmokeProject(): Promise<{ cleanup: () => void }> {
   }
   
   return {
+    tempDir,
     cleanup: () => {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -71,30 +135,6 @@ async function setupSmokeProject(): Promise<{ cleanup: () => void }> {
       }
     },
   };
-}
-
-/**
- * Copy directory recursively
- */
-function copyDirSync(src: string, dest: string): void {
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    
-    // Skip git directory and logs
-    if (entry.name === '.git' || entry.name === 'logs') {
-      continue;
-    }
-    
-    if (entry.isDirectory()) {
-      copyDirSync(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
 }
 
 describe('Smoke Tests - Real CLI Execution', () => {
@@ -153,35 +193,17 @@ describe('Smoke Tests - Real CLI Execution', () => {
   });
 
   describe('Doctor Command', () => {
-    let tempProject: { cleanup: () => void } | null = null;
+    let tempProject: { cleanup: () => void; tempDir: string } | null = null;
     let tempDir: string;
 
     beforeAll(async () => {
       tempProject = await setupSmokeProject();
-      // Get the temp directory path from the cleanup function's closure
-      // We need to track this separately
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorflow-doctor-'));
-      copyDirSync(SMOKE_PROJECT_PATH, tempDir);
-      
-      // Initialize git
-      try {
-        execSync('git init', { cwd: tempDir, stdio: 'pipe' });
-        execSync('git config user.email "test@smoke.test"', { cwd: tempDir, stdio: 'pipe' });
-        execSync('git config user.name "Smoke Test"', { cwd: tempDir, stdio: 'pipe' });
-        execSync('git add -A', { cwd: tempDir, stdio: 'pipe' });
-        execSync('git commit -m "Initial commit"', { cwd: tempDir, stdio: 'pipe' });
-      } catch {
-        // Ignore git errors for doctor tests
-      }
+      tempDir = tempProject.tempDir;
     });
 
     afterAll(() => {
-      if (tempDir) {
-        try {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-        } catch {
-          // Ignore
-        }
+      if (tempProject) {
+        tempProject.cleanup();
       }
     });
 
@@ -324,39 +346,16 @@ describe('Smoke Tests - Artifact Generation', () => {
   
   const ARTIFACT_TIMEOUT = 120_000; // 2 minutes
   let testDir: string;
+  let testProject: { cleanup: () => void; tempDir: string } | null = null;
 
-  beforeAll(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorflow-artifact-'));
-    copyDirSync(SMOKE_PROJECT_PATH, testDir);
-    
-    // Initialize git
-    try {
-      execSync('git init', { cwd: testDir, stdio: 'pipe' });
-      execSync('git config user.email "test@smoke.test"', { cwd: testDir, stdio: 'pipe' });
-      execSync('git config user.name "Smoke Test"', { cwd: testDir, stdio: 'pipe' });
-      execSync('git add -A', { cwd: testDir, stdio: 'pipe' });
-      execSync('git commit -m "Initial commit"', { cwd: testDir, stdio: 'pipe' });
-      
-      // Create bare repo as origin
-      const bareDir = path.join(testDir, '..', 'artifact-origin.git');
-      fs.mkdirSync(bareDir, { recursive: true });
-      execSync('git init --bare', { cwd: bareDir, stdio: 'pipe' });
-      execSync(`git remote add origin "${bareDir}"`, { cwd: testDir, stdio: 'pipe' });
-      execSync('git push -u origin main', { cwd: testDir, stdio: 'pipe' });
-    } catch (err) {
-      console.warn('Git setup warning:', err);
-    }
+  beforeAll(async () => {
+    testProject = await setupSmokeProject();
+    testDir = testProject.tempDir;
   });
 
   afterAll(() => {
-    try {
-      fs.rmSync(testDir, { recursive: true, force: true });
-      const bareDir = path.join(testDir, '..', 'artifact-origin.git');
-      if (fs.existsSync(bareDir)) {
-        fs.rmSync(bareDir, { recursive: true, force: true });
-      }
-    } catch {
-      // Ignore
+    if (testProject) {
+      testProject.cleanup();
     }
   });
 
