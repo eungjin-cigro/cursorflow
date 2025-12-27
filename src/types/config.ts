@@ -49,6 +49,20 @@ export interface EnhancedLogConfig {
   raw?: boolean;
 }
 
+/**
+ * Hook 시스템 설정
+ */
+export interface HooksConfig {
+  /** Hook 정의 파일 경로 (e.g., './cursorflow.hooks.ts') */
+  file?: string;
+  /** Hook 실행 타임아웃 (ms, 기본: 30000) */
+  timeout?: number;
+  /** 에러 시 계속 진행 여부 (기본: false) */
+  continueOnError?: boolean;
+  /** 디버그 모드 */
+  debug?: boolean;
+}
+
 export interface CursorFlowConfig {
   tasksDir: string;
   /** New flows directory (replaces tasksDir in new architecture) */
@@ -83,5 +97,7 @@ export interface CursorFlowConfig {
   autoApproveMcps?: boolean;
   /** Enable browser automation (--browser flag). Required for web testing/scraping. */
   browser?: boolean;
+  /** Hook 시스템 설정 */
+  hooks?: HooksConfig;
 }
 

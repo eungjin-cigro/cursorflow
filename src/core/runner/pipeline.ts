@@ -24,6 +24,19 @@ import {
   clearPendingIntervention,
   InterventionRequest,
 } from '../intervention';
+import {
+  getHookManager,
+  HookPoint,
+  createBeforeTaskContext,
+  createAfterTaskContext,
+  createOnErrorContext,
+  createOnLaneEndContext,
+  FlowAbortError,
+  FlowRetryError,
+  TaskDefinition,
+  TaskResult as HookTaskResult,
+  DependencyResult,
+} from '../../hooks';
 
 /**
  * Validate task configuration
@@ -352,8 +365,103 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       }
     }
     
+    // =========================================================================
+    // Hook System: Prepare context options
+    // =========================================================================
+    const hookManager = getHookManager();
+    const taskStartTime = Date.now();
+    
+    // Build completed tasks list for hooks
+    const completedTasksForHooks: HookTaskResult[] = (state.completedTasks || []).map((name, idx) => ({
+      name,
+      status: 'success' as const,
+      duration: 0, // Not tracked historically
+    }));
+    
+    // Convert config.tasks to TaskDefinition format
+    const tasksAsDefinitions: TaskDefinition[] = config.tasks.map(t => ({
+      name: t.name,
+      prompt: t.prompt,
+      model: t.model,
+      timeout: t.timeout,
+      dependsOn: t.dependsOn,
+    }));
+    
+    const hookContextOptions = {
+      laneName,
+      runId: path.basename(path.dirname(runDir)),
+      taskIndex: i,
+      totalTasks: config.tasks.length,
+      task: {
+        name: task.name,
+        prompt: task.prompt,
+        model: task.model || config.model || 'sonnet-4.5',
+        dependsOn: task.dependsOn,
+      },
+      worktreeDir,
+      runDir,
+      taskBranch,
+      pipelineBranch,
+      tasksFile,
+      chatId,
+      tasks: tasksAsDefinitions,
+      completedTasks: completedTasksForHooks,
+      dependencyResults: [] as DependencyResult[], // TODO: populate from actual deps
+      taskStartTime,
+      laneStartTime: state.startTime || Date.now(),
+      agentSupervisor,
+    };
+    
+    // =========================================================================
+    // Hook: beforeTask
+    // =========================================================================
+    let currentTask = task;
+    
+    if (hookManager.hasHooks(HookPoint.BEFORE_TASK)) {
+      try {
+        const { context, flowController } = createBeforeTaskContext(hookContextOptions);
+        await hookManager.executeBeforeTask(context);
+        
+        // Check if prompt was modified
+        const modifiedPrompt = flowController.getModifiedPrompt();
+        if (modifiedPrompt) {
+          currentTask = { ...task, prompt: modifiedPrompt };
+          logger.info(`🔧 [Hook] Task prompt modified by beforeTask hook`);
+        }
+        
+        // Re-read tasks in case hooks modified them
+        hookContextOptions.tasks = config.tasks.map(t => ({
+          name: t.name,
+          prompt: t.prompt,
+          model: t.model,
+          timeout: t.timeout,
+          dependsOn: t.dependsOn,
+        }));
+      } catch (hookError: any) {
+        if (hookError instanceof FlowAbortError) {
+          state.status = 'failed';
+          state.error = hookError.message;
+          saveState(statePath, state);
+          logger.error(`[Hook] Flow aborted: ${hookError.message}`);
+          process.exit(1);
+        }
+        if (hookError instanceof FlowRetryError) {
+          // Retry with modified prompt if provided
+          if (hookError.modifiedPrompt) {
+            currentTask = { ...task, prompt: hookError.modifiedPrompt };
+          }
+          logger.info(`[Hook] Retry requested, continuing with ${hookError.modifiedPrompt ? 'modified' : 'original'} prompt`);
+        } else {
+          logger.warn(`[Hook] beforeTask hook error: ${hookError.message}`);
+        }
+      }
+    }
+    
+    // =========================================================================
+    // Execute Task
+    // =========================================================================
     const result = await runTask({
-      task,
+      task: currentTask,
       config,
       index: i,
       worktreeDir,
@@ -375,8 +483,74 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     }
     saveState(statePath, state);
     
+    // =========================================================================
+    // Hook: afterTask
+    // =========================================================================
+    if (hookManager.hasHooks(HookPoint.AFTER_TASK)) {
+      try {
+        // Update completed tasks for the context
+        hookContextOptions.completedTasks = (state.completedTasks || []).map((name) => ({
+          name,
+          status: 'success' as const,
+          duration: Date.now() - taskStartTime,
+        }));
+        
+        const afterTaskResult = {
+          status: (result.status === 'FINISHED' ? 'success' : 
+                   result.status === 'BLOCKED_DEPENDENCY' ? 'blocked' : 'error') as 'success' | 'error' | 'blocked',
+          exitCode: result.status === 'FINISHED' ? 0 : 1,
+          error: result.error,
+        };
+        
+        const { context } = createAfterTaskContext(hookContextOptions, afterTaskResult);
+        await hookManager.executeAfterTask(context);
+        
+        // Re-read tasks in case hooks modified them (injected new tasks)
+        try {
+          const updatedConfig = JSON.parse(fs.readFileSync(tasksFile, 'utf8')) as RunnerConfig;
+          if (updatedConfig.tasks && updatedConfig.tasks.length !== config.tasks.length) {
+            config.tasks = updatedConfig.tasks;
+            state.totalTasks = config.tasks.length;
+            saveState(statePath, state);
+            logger.info(`📋 [Hook] Task list updated by afterTask hook. New total: ${state.totalTasks}`);
+          }
+        } catch {
+          // Ignore file read errors
+        }
+      } catch (hookError: any) {
+        if (hookError instanceof FlowAbortError) {
+          state.status = 'failed';
+          state.error = hookError.message;
+          saveState(statePath, state);
+          logger.error(`[Hook] Flow aborted: ${hookError.message}`);
+          process.exit(1);
+        }
+        if (hookError instanceof FlowRetryError) {
+          // Decrement index to retry this task
+          i--;
+          logger.info(`[Hook] Retry requested for task "${task.name}"`);
+          continue;
+        }
+        logger.warn(`[Hook] afterTask hook error: ${hookError.message}`);
+      }
+    }
+    
     // Handle blocked or error
     if (result.status === 'BLOCKED_DEPENDENCY') {
+      // Execute onError hook for blocked state
+      if (hookManager.hasHooks(HookPoint.ON_ERROR)) {
+        try {
+          const { context } = createOnErrorContext(hookContextOptions, {
+            type: 'unknown',
+            message: 'Task blocked on dependency change',
+            retryable: false,
+          });
+          await hookManager.executeOnError(context);
+        } catch {
+          // Continue with normal error handling
+        }
+      }
+      
       state.status = 'failed';
       state.dependencyRequest = result.dependencyRequest || null;
       saveState(statePath, state);
@@ -393,6 +567,24 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     }
     
     if (result.status !== 'FINISHED') {
+      // Execute onError hook
+      if (hookManager.hasHooks(HookPoint.ON_ERROR)) {
+        try {
+          const { context } = createOnErrorContext(hookContextOptions, {
+            type: 'agent_error',
+            message: result.error || 'Unknown error',
+            retryable: true,
+          });
+          await hookManager.executeOnError(context);
+        } catch (hookError: any) {
+          if (hookError instanceof FlowRetryError) {
+            i--;
+            logger.info(`[Hook] Retry requested after error`);
+            continue;
+          }
+        }
+      }
+      
       state.status = 'failed';
       state.error = result.error || 'Unknown error';
       saveState(statePath, state);
@@ -456,6 +648,65 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     }
   } catch (e) {
     // Ignore
+  }
+  
+  // =========================================================================
+  // Hook: onLaneEnd
+  // =========================================================================
+  const hookManager = getHookManager();
+  if (hookManager.hasHooks(HookPoint.ON_LANE_END)) {
+    try {
+      const totalDuration = (state.endTime || Date.now()) - (state.startTime || Date.now());
+      const failedCount = results.filter(r => r.status !== 'FINISHED').length;
+      
+      const laneEndContextOptions = {
+        laneName,
+        runId: path.basename(path.dirname(runDir)),
+        taskIndex: config.tasks.length - 1,
+        totalTasks: config.tasks.length,
+        task: {
+          name: config.tasks[config.tasks.length - 1]?.name || 'unknown',
+          prompt: '',
+          model: config.model || 'sonnet-4.5',
+        },
+        worktreeDir,
+        runDir,
+        taskBranch: pipelineBranch,
+        pipelineBranch,
+        tasksFile,
+        chatId,
+        tasks: config.tasks.map(t => ({
+          name: t.name,
+          prompt: t.prompt,
+          model: t.model,
+          timeout: t.timeout,
+          dependsOn: t.dependsOn,
+        })),
+        completedTasks: (state.completedTasks || []).map(name => ({
+          name,
+          status: 'success' as const,
+          duration: 0,
+        })),
+        dependencyResults: [] as DependencyResult[],
+        taskStartTime: state.startTime || Date.now(),
+        laneStartTime: state.startTime || Date.now(),
+        agentSupervisor,
+      };
+      
+      const { context } = createOnLaneEndContext(laneEndContextOptions, {
+        status: 'completed',
+        completedTasks: results.length - failedCount,
+        failedTasks: failedCount,
+        totalDuration,
+      });
+      
+      // Execute async (don't block lane completion)
+      hookManager.executeOnLaneEnd(context).catch(err => {
+        logger.warn(`[Hook] onLaneEnd error: ${err.message}`);
+      });
+    } catch (hookError: any) {
+      logger.warn(`[Hook] onLaneEnd setup error: ${hookError.message}`);
+    }
   }
   
   logger.success('All tasks completed!');

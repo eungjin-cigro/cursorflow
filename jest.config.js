@@ -16,6 +16,7 @@ module.exports = {
         '**/tests/utils/**/*.test.ts',
         '**/tests/ui/**/*.test.ts',
         '**/tests/types/**/*.test.ts',
+        '**/tests/unit/**/*.test.ts',
       ],
       testPathIgnorePatterns: [
         '<rootDir>/node_modules/',

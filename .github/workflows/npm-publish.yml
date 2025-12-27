@@ -47,7 +47,7 @@ jobs:
 
       # 코드 보안 검사
       - name: Code Security Scan
-        uses: returntocorp/semgrep-action@v1
+        uses: semgrep/semgrep-action@v1
         with:
           config: p/security-audit
         continue-on-error: true
@@ -73,11 +73,19 @@ jobs:
       - name: Build project
         run: pnpm run build
 
-      - name: Run unit tests
-        run: pnpm test
+      - name: Configure Git
+        run: |
+          git config --global user.email "ci@cursorflow.test"
+          git config --global user.name "CursorFlow CI"
 
-      - name: Run comprehensive CLI tests
-        run: pnpm run test:quick
+      - name: Run unit tests
+        run: pnpm run test:unit
+
+      - name: Run contract tests
+        run: pnpm run test:contract
+
+      - name: Run smoke tests
+        run: pnpm run test:smoke
 
   publish:
     needs: [security-gate, test]  # 보안 검사와 테스트 모두 통과 필요
