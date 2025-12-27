@@ -1,0 +1,12 @@
+{
+  "description": "Agent requests dependency change",
+  "delay": 100,
+  "chunks": [
+    "Analyzing project dependencies...",
+    "Additional packages are required."
+  ],
+  "result": "DEPENDENCY_CHANGE_REQUIRED {\"reason\": \"Need to install lodash for utility functions\", \"packages\": [\"lodash\"], \"commands\": [\"npm install lodash\"]}",
+  "exitCode": 0,
+  "isError": false
+}
+

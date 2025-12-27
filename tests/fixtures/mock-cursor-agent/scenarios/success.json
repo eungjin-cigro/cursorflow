@@ -1,0 +1,14 @@
+{
+  "description": "Successful task completion",
+  "delay": 100,
+  "chunkInterval": 50,
+  "chunks": [
+    "Analyzing the task...",
+    "Making changes to the codebase...",
+    "Changes completed successfully."
+  ],
+  "result": "Task completed: All requested changes have been made to the codebase.",
+  "exitCode": 0,
+  "isError": false
+}
+

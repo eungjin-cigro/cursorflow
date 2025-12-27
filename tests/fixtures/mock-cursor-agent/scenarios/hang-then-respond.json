@@ -1,0 +1,13 @@
+{
+  "description": "Agent hangs initially then responds (for recovery testing)",
+  "initialHang": 5000,
+  "delay": 100,
+  "chunks": [
+    "Resumed after initial delay.",
+    "Processing complete."
+  ],
+  "result": "Task completed after recovery intervention.",
+  "exitCode": 0,
+  "isError": false
+}
+

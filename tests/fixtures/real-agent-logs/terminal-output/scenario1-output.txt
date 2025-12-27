@@ -1,0 +1,212 @@
+  console.log
+
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:326:13)
+
+  console.log
+    ═══════════════════════════════════════════════════════════════
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:327:13)
+
+  console.log
+      🚀 Starting Real E2E Tests with cursor-agent
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:328:13)
+
+  console.log
+         Version: 2025.12.17-996666f
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:329:13)
+
+  console.log
+    ═══════════════════════════════════════════════════════════════
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:330:13)
+
+  console.log
+
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:331:13)
+
+  console.log
+    
+    📁 Test repo: /tmp/cursorflow-real-e2e-ylmnJv/repo
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:336:13)
+
+  console.log
+    📋 Task file created, starting cursorflow run...
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:368:15)
+
+[90m[21:35:02][0m [36mℹ️ INFO[0m Installing missing or outdated Cursor IDE commands...
+[90m[21:35:02][0m [33m⚠️ WARN[0m It looks like you haven't run `cursorflow doctor` yet.
+[90m[21:35:02][0m [33m⚠️ WARN[0m Running doctor is highly recommended to catch environment issues early.
+   Run: cursorflow doctor
+
+[90m[21:35:02][0m [35m[MAIN][0m [36mℹ️ INFO[0m 🏗️ Initializing lane create-file: branch=cursorflow/run-mjoa9iiw-flp77/create-file
+
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[36m  🧭 Starting Orchestration[0m
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+[90m[21:35:02][0m [35m[MAIN][0m [36mℹ️ INFO[0m Tasks directory: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/tasks
+[90m[21:35:02][0m [35m[MAIN][0m [36mℹ️ INFO[0m Run directory: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/logs/runs/run-1766838902785
+[90m[21:35:02][0m [35m[MAIN][0m [36mℹ️ INFO[0m Lanes: 1
+[90m[21:35:02][0m [35m[MAIN][0m [36mℹ️ INFO[0m Lane started: create-file
+[90m[21:35:02][0m [36mℹ️ INFO[0m Validating task configuration...
+[90m[21:35:02][0m [32m✅ DONE[0m ✓ Configuration valid
+[90m[21:35:03][0m [36mℹ️ INFO[0m Checking Cursor authentication...
+[90m[21:35:04][0m [32m✅ DONE[0m ✓ Cursor authentication OK
+[90m[21:35:04][0m [36mℹ️ INFO[0m 📍 Base branch: master (current branch)
+[90m[21:35:04][0m [33m⚠️ WARN[0m State validation issues: Worktree directory not found: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/worktrees/cursorflow-run-mjoa9iiw-flp77-create-file, Branch not found: cursorflow/run-mjoa9iiw-flp77/create-file
+[90m[21:35:04][0m [36mℹ️ INFO[0m State was auto-repaired
+[21:35:04] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[21:35:04] [1-1-create-f] [36m  🚀 Starting Pipeline[0m
+[21:35:04] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[90m[21:35:04][0m [36mℹ️ INFO[0m Pipeline Branch: cursorflow/run-mjoa9iiw-flp77/create-file
+[90m[21:35:04][0m [36mℹ️ INFO[0m Worktree: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/worktrees/cursorflow-run-mjoa9iiw-flp77-create-file
+[90m[21:35:04][0m [36mℹ️ INFO[0m Tasks: 1
+[21:35:04] [1-1-create-f] HEAD is now at 0414714 Initial commit
+[21:35:04] [1-1-create-f] Preparing worktree (new branch 'cursorflow/run-mjoa9iiw-flp77/create-file')
+[90m[21:35:04][0m [36mℹ️ INFO[0m Changing directory to worktree: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/worktrees/cursorflow-run-mjoa9iiw-flp77-create-file
+[90m[21:35:04][0m [36mℹ️ INFO[0m Creating chat session...
+[90m[21:35:04][0m [36mℹ️ INFO[0m Created chat session: 3328a9dc-af45-4dd2-a679-184daf4304af
+[90m[21:35:04][0m [36mℹ️ INFO[0m Created checkpoint: cp-1766838904654-zn78a (task 0)
+[21:35:04] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[21:35:04] [1-1-create-f] [36m  [1/1] create-greeting[0m
+[21:35:04] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[90m[21:35:04][0m [36mℹ️ INFO[0m Model: sonnet-4.5
+[90m[21:35:04][0m [36mℹ️ INFO[0m Branch: cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting
+[90m[21:35:04][0m [36mℹ️ INFO[0m 🔄 Syncing cursorflow/run-mjoa9iiw-flp77/create-file with remote...
+[90m[21:35:04][0m [36mℹ️ INFO[0m 🌿 Forking task branch: cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting from cursorflow/run-mjoa9iiw-flp77/create-file
+[21:35:04] [1-1-create-f] Switched to a new branch 'cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting'
+[90m[21:35:04][0m [36mℹ️ INFO[0m Sending prompt to agent...
+[90m[21:35:04][0m [36mℹ️ INFO[0m Sending prompt to cursor-agent (timeout: 600s)...
+[90m[21:35:36][0m [35m[1-1-create-f][0m [32m✅ DONE[0m┌────────────────────────────────────────────────────────────────────────────────
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ I'll help you create the greeting file and commit it. Let me start by checking the current state of the repository.Good! I'm on the correct branch. Now I'll create the greeting.txt file with the required content.Perfect! Now let me verify the changes and commit them.Excellent! The file has been created with the correct content. Now I'll commit and push the changes.Perfect! Let me verify the final status and get the commit information.## ✅ Task Completed Successfully!
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ ### 📋 최종 요약
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ - **수정된 파일**: [greeting.txt]
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ - **작업 결과**: 
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │   - `greeting.txt` 파일을 프로젝트 루트에 생성
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │   - 파일 내용: "Hello from CursorFlow E2E Test!"
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │   - 변경 사항을 커밋하고 원격 브랜치에 푸시 완료
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ - **커밋 정보**: `9936ede feat: add greeting file`
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ ### 작업 세부사항
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 1. ✅ `greeting.txt` 파일 생성 (요구사항에 맞는 정확한 내용 포함)
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 2. ✅ Git에 변경사항 추가 및 커밋 (메시지: "feat: add greeting file")
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 3. ✅ 원격 브랜치로 푸시 완료
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 4. ✅ 다른 파일은 수정하지 않음
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 5. ✅ 의존성 변경 없음
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 
+[90m[21:35:36][0m [35m[1-1-create-f][0m        │ 모든 요구사항이 완료되었습니다! 🎉
+[90m[21:35:36][0m [35m[1-1-create-f][0m        └────────────────────────────────────────────────────────────────────────────────
+[21:35:36] [1-1-create-f] branch 'cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting' set up to track 'origin/cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting'.
+[21:35:36] [1-1-create-f] Everything up-to-date
+[90m[21:35:36][0m [36mℹ️ INFO[0m 📝 Task result saved: /tmp/cursorflow-real-e2e-ylmnJv/repo/_cursorflow/logs/runs/run-1766838902785/lanes/create-file/task-results/01-create-greeting.txt
+[90m[21:35:36][0m [36mℹ️ INFO[0m Merging cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting → cursorflow/run-mjoa9iiw-flp77/create-file
+[90m[21:35:36][0m [36mℹ️ INFO[0m 🔄 Switching to pipeline branch cursorflow/run-mjoa9iiw-flp77/create-file to integrate changes
+[21:35:36] [1-1-create-f] Switched to branch 'cursorflow/run-mjoa9iiw-flp77/create-file'
+[90m[21:35:36][0m [36mℹ️ INFO[0m 🔀 Merging task create-greeting (cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting) into cursorflow/run-mjoa9iiw-flp77/create-file
+[90m[21:35:36][0m [36mℹ️ INFO[0m Changed files:
+[21:35:36] [1-1-create-f] greeting.txt | 1 +
+[21:35:36] [1-1-create-f] 1 file changed, 1 insertion(+)
+[21:35:36] [1-1-create-f] To file:///tmp/cursorflow-real-e2e-ylmnJv/origin.git
+[21:35:36] [1-1-create-f] * [new branch]      cursorflow/run-mjoa9iiw-flp77/create-file -> cursorflow/run-mjoa9iiw-flp77/create-file
+[21:35:36] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[21:35:36] [1-1-create-f] [36m  🏁 Final Consolidation: create-file[0m
+[21:35:36] [1-1-create-f] [36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[90m[21:35:36][0m [36mℹ️ INFO[0m 🧹 Deleting last task branch: cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting
+[21:35:36] [1-1-create-f] Deleted branch cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting (was 9936ede).
+[90m[21:35:36][0m [36mℹ️ INFO[0m 🌿 Creating final flow branch: create-file
+[21:35:36] [1-1-create-f] Switched to a new branch 'create-file'
+[21:35:36] [1-1-create-f] branch 'create-file' set up to track 'origin/create-file'.
+[21:35:36] [1-1-create-f] To file:///tmp/cursorflow-real-e2e-ylmnJv/origin.git
+[21:35:36] [1-1-create-f] * [new branch]      create-file -> create-file
+[90m[21:35:36][0m [36mℹ️ INFO[0m 🗑️ Deleting local pipeline branch: cursorflow/run-mjoa9iiw-flp77/create-file
+[21:35:36] [1-1-create-f] Your branch is up to date with 'origin/create-file'.
+[21:35:36] [1-1-create-f] Already on 'create-file'
+[21:35:36] [1-1-create-f] Deleted branch cursorflow/run-mjoa9iiw-flp77/create-file (was 00cd429).
+[90m[21:35:36][0m [32m✅ DONE[0m ✓ Flow branch 'create-file' created. Remote pipeline branch preserved for dependencies.
+[90m[21:35:36][0m [32m✅ DONE[0m All tasks completed!
+
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[36m  📡 Lane Status[0m
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+- create-file: completed (2/1)
+
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[36m  📡 Lane Status[0m
+[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+- create-file: completed (2/1)
+[90m[21:35:36][0m [35m[MAIN][0m [32m✅ DONE[0m All lanes completed successfully!
+  console.log
+    
+    ⏱ Completed in 34s
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:376:15)
+
+  console.log
+    📊 Exit code: 0
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:377:15)
+
+  console.log
+    
+    📌 Git branches: [
+      '+ create-file',
+      'master',
+      'remotes/origin/create-file',
+      'remotes/origin/cursorflow/run-mjoa9iiw-flp77/create-file',
+      'remotes/origin/cursorflow/run-mjoa9iiw-flp77/create-file--01-create-greeting',
+      'remotes/origin/main'
+    ]
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:381:15)
+
+  console.log
+    📜 Git log: [
+      '00cd429 chore: merge task create-greeting into pipeline',
+      '9936ede feat: add greeting file',
+      '0414714 Initial commit'
+    ]
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:384:15)
+
+  console.log
+    📁 Logs directory created: true
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:395:15)
+
+  console.log
+    📄 greeting.txt exists: true
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:406:19)
+
+  console.log
+    📄 greeting.txt content: Hello from CursorFlow E2E Test!
+
+      at Object.<anonymous> (tests/e2e/real-e2e.test.ts:410:21)
+
+PASS e2e tests/e2e/real-e2e.test.ts (36.236 s)
+  Real E2E: Complete CursorFlow Workflow
+    Scenario 1: Single Lane - Create a File
+      ✓ should create a file using cursor-agent and commit to branch (33981 ms)
+    Scenario 2: Multiple Independent Lanes (Sequential)
+      ○ skipped should run two lanes sequentially with max-concurrent 1
+    Scenario 3: Lane with Dependency
+      ○ skipped should wait for base lane before running dependent lane
+    Scenario 4: Complete Workflow with Merge
+      ○ skipped should complete task and merge branch back to main
+
+Test Suites: 1 passed, 1 total
+Tests:       3 skipped, 1 passed, 4 total
+Snapshots:   0 total
+Time:        36.404 s
+Ran all test suites matching tests/e2e/real-e2e.test.ts with tests matching "Scenario 1".
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?

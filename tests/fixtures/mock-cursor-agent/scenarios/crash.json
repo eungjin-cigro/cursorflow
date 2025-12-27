@@ -1,0 +1,11 @@
+{
+  "description": "Agent crashes (for restart testing)",
+  "delay": 50,
+  "chunks": [
+    "Starting task..."
+  ],
+  "result": "",
+  "exitCode": 137,
+  "isError": true
+}
+

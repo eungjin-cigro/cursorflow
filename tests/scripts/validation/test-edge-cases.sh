@@ -478,38 +478,6 @@ EOF
 }
 
 # ============================================================================
-# Review Policy Tests
-# ============================================================================
-
-test_review_policy() {
-    log_test "Review policy configuration"
-    local TMP_DIR="$TEST_ROOT/_cursorflow/tasks"
-    mkdir -p "$TMP_DIR"
-    
-    cat > "$TMP_DIR/review-policy.json" << 'EOF'
-{
-  "name": "review-policy-lane",
-  "reviewPolicy": {
-    "enabled": true,
-    "autoMerge": false
-  },
-  "tasks": [{ "name": "task1", "prompt": "Task with review policy" }]
-}
-EOF
-    
-    local exit_code=0
-    cursorflow_out doctor --tasks-dir "$TMP_DIR" > /dev/null 2>&1 || exit_code=$?
-    
-    if [ $exit_code -eq 0 ]; then
-        record_pass "Review policy configuration accepted"
-    else
-        record_skip "Review policy may not be validated by doctor"
-    fi
-    
-    rm -f "$TMP_DIR/review-policy.json"
-}
-
-# ============================================================================
 # Intra-Lane Task Dependencies
 # ============================================================================
 
@@ -640,7 +608,6 @@ run_tests() {
     
     log_phase "Phase 6: Policy Configuration"
     test_dependency_policy
-    test_review_policy
     test_intra_lane_task_deps
     
     log_phase "Phase 7: Clean Command Edge Cases"

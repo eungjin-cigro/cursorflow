@@ -1,0 +1,28 @@
+{
+  "id": "cp-1766838430722-h4b2b",
+  "timestamp": 1766838430722,
+  "laneName": "test-lane",
+  "laneState": {
+    "label": "test-lane",
+    "status": "running",
+    "currentTaskIndex": 0,
+    "totalTasks": 1,
+    "worktreeDir": "/home/eugene/workbench/cursorflow/_cursorflow/worktrees/cursorflow-run-mjo9zcpg-sztt4-test-lane",
+    "pipelineBranch": "cursorflow/run-mjo9zcpg-sztt4/test-lane",
+    "startTime": 1766838428712,
+    "endTime": null,
+    "error": null,
+    "dependencyRequest": null,
+    "tasksFile": "/tmp/tmp.aX1DDos9xE/repo/_cursorflow/tasks/test-lane.json",
+    "updatedAt": 1766838430280,
+    "completedTasks": []
+  },
+  "gitState": {
+    "branch": "cursorflow/run-mjo9zcpg-sztt4/test-lane",
+    "commit": "69f15b0e2330b02cc058e78baa4b21bfb6954f58",
+    "uncommittedChanges": false,
+    "changedFiles": []
+  },
+  "taskIndex": 0,
+  "description": "Before task 1: create-file"
+}

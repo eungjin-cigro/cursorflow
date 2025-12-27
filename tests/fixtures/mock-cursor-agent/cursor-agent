@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+// Wrapper script to invoke the mock cursor-agent
+require('./index.js');
+

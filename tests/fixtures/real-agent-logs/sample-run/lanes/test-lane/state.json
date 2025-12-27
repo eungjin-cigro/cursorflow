@@ -1,0 +1,17 @@
+{
+  "label": "test-lane",
+  "status": "completed",
+  "currentTaskIndex": 1,
+  "totalTasks": 1,
+  "worktreeDir": "/home/eugene/workbench/cursorflow/_cursorflow/worktrees/cursorflow-run-mjo9zcpg-sztt4-test-lane",
+  "pipelineBranch": "cursorflow/run-mjo9zcpg-sztt4/test-lane",
+  "startTime": 1766838428712,
+  "endTime": 1766838468057,
+  "error": null,
+  "dependencyRequest": null,
+  "tasksFile": "/tmp/tmp.aX1DDos9xE/repo/_cursorflow/tasks/test-lane.json",
+  "updatedAt": 1766838430280,
+  "completedTasks": [
+    "create-file"
+  ]
+}

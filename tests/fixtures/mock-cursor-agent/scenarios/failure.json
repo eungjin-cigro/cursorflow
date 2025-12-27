@@ -1,0 +1,13 @@
+{
+  "description": "Task fails with error",
+  "delay": 100,
+  "chunks": [
+    "Starting task...",
+    "Error: Unable to complete the task."
+  ],
+  "result": "",
+  "exitCode": 1,
+  "isError": true,
+  "error": "Task failed: An unexpected error occurred"
+}
+

@@ -1,0 +1,9 @@
+{
+  "description": "Agent hangs without responding (for idle detection testing)",
+  "delay": 300000,
+  "chunks": [],
+  "result": "",
+  "exitCode": 0,
+  "isError": false
+}
+
