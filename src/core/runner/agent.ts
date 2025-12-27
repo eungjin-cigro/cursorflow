@@ -139,7 +139,7 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   signalDir?: string;
   timeout?: number;
   enableIntervention?: boolean;
-  outputFormat?: 'json' | 'plain' | 'stream-json';
+  outputFormat?: 'json' | 'stream-json';
   taskName?: string;
 }): Promise<AgentSendResult> {
   const timeoutMs = timeout || 10 * 60 * 1000; // 10 minutes default
@@ -157,7 +157,7 @@ async function cursorAgentSendRaw({ workspaceDir, chatId, prompt, model, signalD
   }
   
   if (outputFormat === 'json' || outputFormat === 'stream-json') {
-    args.push('--print', '--output-format', 'json');
+    args.push('--print', '--output-format', outputFormat);
   }
 
   // Ensure non-interactive execution with automatic approvals

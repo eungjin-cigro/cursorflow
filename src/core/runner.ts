@@ -87,7 +87,7 @@ if (require.main === module) {
   };
   
   // Add agent output format default
-  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'json';
+  config.agentOutputFormat = config.agentOutputFormat || globalConfig?.agentOutputFormat || 'stream-json';
   
   // Merge intervention and logging settings
   config.enableIntervention = config.enableIntervention ?? globalConfig?.enableIntervention ?? true;
