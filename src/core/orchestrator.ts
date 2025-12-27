@@ -171,6 +171,7 @@ async function handleDoctorDiagnostics(
       // Note: StallPhase and RecoveryStage have compatible numeric values (0-5)
       const recoveryState: LaneRecoveryState = {
         laneName,
+        runId,
         stage: stallState.phase as unknown as number,  // Both enums use 0-5
         lastActivityTime: stallState.lastRealActivityTime,
         lastBytesReceived: stallState.bytesSinceLastCheck,
@@ -280,13 +281,12 @@ export function spawnLane({
   };
   
   if (logConfig.enabled) {
-    // Helper to get dynamic lane label like [1-1-lanename10]
+    // Helper to get dynamic lane label like [1-1-refactor]
     const getDynamicLabel = () => {
       const laneNum = `${laneIndex + 1}`;
       const taskPart = `-${info.currentTaskIndex || 1}`;
-      const shortLaneName = laneName.substring(0, 10);
-      const combined = `SUB:${laneNum}${taskPart}-${shortLaneName}`.substring(0, 18).padEnd(18);
-      return `[${combined}]`;
+      const shortLaneName = laneName.substring(0, 8);
+      return `[${laneNum}${taskPart}-${shortLaneName}]`;
     };
 
     // Create callback for clean console output

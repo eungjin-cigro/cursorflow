@@ -84,6 +84,7 @@ export const DEFAULT_AUTO_RECOVERY_CONFIG: AutoRecoveryConfig = {
 /** State tracking for a single lane's recovery */
 export interface LaneRecoveryState {
   laneName: string;
+  runId: string;
   stage: RecoveryStage;
   lastActivityTime: number;
   lastBytesReceived: number;
@@ -242,10 +243,11 @@ export class AutoRecoveryManager {
   /**
    * Register a lane for recovery monitoring
    */
-  registerLane(laneName: string): void {
+  registerLane(laneName: string, runId: string): void {
     const now = Date.now();
     this.laneStates.set(laneName, {
       laneName,
+      runId,
       stage: RecoveryStage.NORMAL,
       lastActivityTime: now,
       lastBytesReceived: 0,
@@ -461,6 +463,7 @@ export class AutoRecoveryManager {
       logger.warn(message);
       
       events.emit('recovery.continue_signal', {
+        runId: state.runId,
         laneName,
         idleSeconds,
         signalCount: state.continueSignalsSent,
@@ -521,6 +524,7 @@ If you encountered a git error, resolve it and continue.`;
       logger.warn(message);
       
       events.emit('recovery.stronger_prompt', {
+        runId: state.runId,
         laneName,
         prompt: strongerPrompt,
       });
@@ -580,6 +584,7 @@ If you encountered a git error, resolve it and continue.`;
     logger.warn(message);
     
     events.emit('recovery.restart', {
+      runId: state.runId,
       laneName,
       restartCount: state.restartCount,
       maxRestarts: this.config.maxRestarts,
@@ -676,6 +681,7 @@ If you encountered a git error, resolve it and continue.`;
       logger.error(message);
 
       events.emit('recovery.diagnosed', {
+        runId: state.runId,
         laneName,
         diagnostic,
       });

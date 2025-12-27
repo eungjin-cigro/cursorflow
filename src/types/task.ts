@@ -26,7 +26,7 @@ export interface RunnerConfig {
   model?: string;
   dependencyPolicy: DependencyPolicy;
   /** Output format for cursor-agent (default: 'json') */
-  agentOutputFormat?: 'json' | 'plain' | 'stream-json';
+  agentOutputFormat?: 'json' | 'stream-json';
   /** Task execution timeout in milliseconds. Default: 600000 (10 minutes) */
   timeout?: number;
   /** 

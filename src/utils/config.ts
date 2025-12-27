@@ -212,7 +212,7 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Advanced
   worktreePrefix: 'cursorflow-',
   maxConcurrentLanes: 10,
-  agentOutputFormat: 'json', // 'json' | 'plain'
+  agentOutputFormat: 'stream-json', // 'json' | 'stream-json'
 
   // Webhook configuration
   // webhooks: [

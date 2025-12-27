@@ -134,13 +134,13 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Get lane-task label like [SUB:1-1-lanename]
+   * Get lane-task label like [1-1-refactor]
    */
   private getLaneTaskLabel(): string {
     const laneNum = (this.session.laneIndex ?? 0) + 1;
     const taskNum = (this.session.taskIndex ?? 0) + 1;
-    const shortLaneName = this.session.laneName.substring(0, 10);
-    return `SUB:${laneNum}-${taskNum}-${shortLaneName}`.substring(0, 18).padEnd(18);
+    const shortLaneName = this.session.laneName.substring(0, 8);
+    return `${laneNum}-${taskNum}-${shortLaneName}`;
   }
 
   /**
@@ -311,6 +311,17 @@ export class EnhancedLogManager {
             this.writeReadableMessage(msg);
             continue;
           }
+          // parseJsonToMessage returned null - create fallback message for known JSON
+          if (json.type) {
+            const fallbackMsg: ParsedMessage = {
+              type: 'info',
+              role: 'system',
+              content: `[${json.type}] ${json.subtype || ''} ${JSON.stringify(json).substring(0, 150)}...`,
+              timestamp: json.timestamp_ms || Date.now(),
+            };
+            this.writeReadableMessage(fallbackMsg);
+            continue;
+          }
         } catch {
           // Not valid JSON, fall through
         }
@@ -323,25 +334,33 @@ export class EnhancedLogManager {
         const label = this.getLaneTaskLabel();
         const ts = this.getShortTime();
         
-        let formattedLine: string;
+        // For file output, use clean line (no ANSI codes)
+        let fileFormattedLine: string;
         if (hasTimestamp) {
-          // If already has timestamp, just ensure label is present
-          formattedLine = cleanLine.includes(`[${label}]`) 
+          fileFormattedLine = cleanLine.includes(`[${label}]`) 
             ? cleanLine 
             : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
         } else {
-          formattedLine = `[${ts}] [${label}] ${cleanLine}`;
+          fileFormattedLine = `[${ts}] [${label}] ${cleanLine}`;
         }
         
-        this.writeToReadableLog(`${formattedLine}\n`);
+        this.writeToReadableLog(`${fileFormattedLine}\n`);
         
-        // Also output to console via callback for non-JSON lines
-        // Use 'raw' type to indicate this line is already formatted
+        // For console output, preserve ANSI colors from original line
         if (this.onParsedMessage) {
+          let consoleFormattedLine: string;
+          if (hasTimestamp) {
+            consoleFormattedLine = trimmed.includes(`[${label}]`) 
+              ? trimmed 
+              : trimmed.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
+          } else {
+            consoleFormattedLine = `[${ts}] [${label}] ${trimmed}`;
+          }
+          
           const rawMsg: ParsedMessage = {
             type: 'raw',
             role: 'system',
-            content: formattedLine,
+            content: consoleFormattedLine,
             timestamp: Date.now(),
           };
           this.onParsedMessage(rawMsg);
@@ -443,6 +462,15 @@ export class EnhancedLogManager {
         return null;
         
       default:
+        // Fallback: show unknown JSON types with basic formatting
+        if (type) {
+          return {
+            type: 'info',
+            role: 'system',
+            content: `[${type}] ${JSON.stringify(json).substring(0, 200)}`,
+            timestamp,
+          };
+        }
         return null;
     }
   }

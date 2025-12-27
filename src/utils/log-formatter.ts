@@ -45,17 +45,12 @@ export function formatMessageForConsole(
   const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
-  // Handle context (e.g. from logger.info) - max 18 chars inside brackets
-  // Format: [1-1-lanename1234] padded to fixed width 20 (including brackets)
-  let effectiveLaneLabel = laneLabel || (context ? `[${context.substring(0, 18).padEnd(18)}]` : '');
+  // Handle context (e.g. from logger.info) - keep labels compact
+  // Format: [1-1-refactor] without fixed width padding
+  let effectiveLaneLabel = laneLabel || (context ? `[${context.substring(0, 12)}]` : '');
   
-  // Smart truncation: ensure it always ends with ]
-  if (effectiveLaneLabel.length > 20) {
-    effectiveLaneLabel = effectiveLaneLabel.substring(0, 19) + ']';
-  }
-  
-  // Fixed width 20 chars for consistent alignment
-  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel.padEnd(20)}${COLORS.reset} ` : '';
+  // Compact label with color
+  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel}${COLORS.reset} ` : '';
   
   let typePrefix = '';
   let content = msg.content;

@@ -308,7 +308,7 @@ export async function cursorAgentSend(options: {
   signalDir?: string;
   timeout?: number;
   enableIntervention?: boolean;
-  outputFormat?: 'json' | 'plain' | 'stream-json';
+  outputFormat?: 'json' | 'stream-json';
   taskName?: string;
 }): Promise<AgentSendResult> {
   const laneName = options.signalDir ? path.basename(path.dirname(options.signalDir)) : 'agent';

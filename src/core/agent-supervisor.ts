@@ -12,7 +12,7 @@ export interface AgentPromptOptions {
   signalDir?: string;
   timeout?: number;
   enableIntervention?: boolean;
-  outputFormat?: 'json' | 'plain' | 'stream-json';
+  outputFormat?: 'json' | 'stream-json';
   taskName?: string;
 }
 
