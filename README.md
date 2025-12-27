@@ -390,6 +390,13 @@ module.exports = {
 
 ## 📖 Documentation
 
+### Core Guides
+- [📘 Module Guide](docs/MODULE_GUIDE.md) - Architecture and module structure
+- [🤖 cursor-agent Guide](docs/CURSOR_AGENT_GUIDE.md) - CLI usage and output parsing
+- [🧪 Test Architecture](docs/TEST_ARCHITECTURE.md) - Test layers and strategies
+- [🪝 Hook System Guide](docs/HOOKS_GUIDE.md) - Custom hooks and flow control
+
+### Command References
 - [📋 Prepare Command](commands/cursorflow-prepare.md) - Task generation with presets
 - [🏃 Run Command](commands/cursorflow-run.md) - Execution options
 - [🩺 Doctor Command](commands/cursorflow-doctor.md) - Validation details
