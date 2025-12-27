@@ -220,7 +220,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Git worktree-based orchestration
 - Parallel lane execution
-- AI code review integration
 - Detailed logging (conversation, git operations, events)
 - Dependency management
 - Lane monitoring
@@ -232,7 +231,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 - **Parallel Execution**: Multiple lanes running simultaneously
-- **Auto Review**: AI-based code review and feedback loop
 - **Detailed Logging**: Full conversation and operation logs
 - **Dependency Gate**: Automatic dependency change handling
 - **Lane Ports**: Unique dev server port per lane

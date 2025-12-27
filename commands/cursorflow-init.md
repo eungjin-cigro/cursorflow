@@ -98,10 +98,6 @@ module.exports = {
   // 태스크 타임아웃 (ms)
   timeout: 600000,
   
-  // AI 리뷰 활성화
-  enableReview: true,
-  reviewModel: 'sonnet-4.5-thinking',
-  
   // Flow/Task 디렉토리
   flowsDir: '_cursorflow/flows',
   tasksDir: '_cursorflow/tasks',  // legacy

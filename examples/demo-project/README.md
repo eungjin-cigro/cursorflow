@@ -8,7 +8,6 @@ This demo project shows how to use CursorFlow to orchestrate parallel AI tasks, 
 - Task creation and configuration
 - Git worktree management
 - LLM agent execution
-- AI code review
 - Real-time monitoring
 - Complete log capture
 
@@ -237,7 +236,7 @@ After running this demo:
 ## ⚠️ Notes
 
 - Real LLM API calls will be made
-- Small API usage will occur (~2-4 requests with review)
+- Small API usage will occur (~2-4 requests)
 - Internet connection required
 - Cursor authentication required
 

@@ -179,8 +179,6 @@ Within the `cursorflow monitor` dashboard:
   "branchPrefix": "feature/lane-1-",
   "timeout": 600000,
   "enableIntervention": true,
-  "enableReview": true,
-  "reviewModel": "sonnet-4.5-thinking",
   "tasks": [
     {
       "name": "setup",
@@ -205,7 +203,6 @@ Within the `cursorflow monitor` dashboard:
 | `timeout` | number | 600000 | Task timeout in milliseconds (10 min) |
 | `enableIntervention` | boolean | true | Enable stdin piping for intervention |
 | `model` | string | "sonnet-4.5" | AI model to use |
-| `enableReview` | boolean | true | Enable AI code review |
 
 ## 🔗 태스크 의존성 (dependsOn)
 
