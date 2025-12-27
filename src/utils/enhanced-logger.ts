@@ -116,6 +116,8 @@ export class EnhancedLogManager {
     // Ensure log directory exists
     fs.mkdirSync(logDir, { recursive: true });
     
+    // Subprocess (lane) logs live in the lane run directory to avoid nesting with main logs.
+    // Main process logs are written separately to a run-level file (see utils/logger.ts).
     // Set up log file paths (simplified)
     this.rawLogPath = getLaneLogPath(logDir, 'raw');
     this.readableLogPath = getLaneLogPath(logDir, 'readable');
@@ -132,13 +134,13 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Get lane-task label like [1-1-lanename10]
+   * Get lane-task label like [SUB:1-1-lanename]
    */
   private getLaneTaskLabel(): string {
     const laneNum = (this.session.laneIndex ?? 0) + 1;
     const taskNum = (this.session.taskIndex ?? 0) + 1;
     const shortLaneName = this.session.laneName.substring(0, 10);
-    return `${laneNum}-${taskNum}-${shortLaneName}`.substring(0, 18).padEnd(18);
+    return `SUB:${laneNum}-${taskNum}-${shortLaneName}`.substring(0, 18).padEnd(18);
   }
 
   /**

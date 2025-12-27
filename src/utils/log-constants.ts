@@ -15,6 +15,8 @@ export const COLORS = {
   white: '\x1b[37m',
 };
 
+export const MAIN_LOG_FILENAME = 'main-raw.log';
+
 export enum LogLevel {
   error = 0,
   warn = 1,
@@ -23,4 +25,3 @@ export enum LogLevel {
   progress = 2,
   debug = 3,
 }
-

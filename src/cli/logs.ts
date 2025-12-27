@@ -8,13 +8,14 @@ import * as logger from '../utils/logger';
 import { loadConfig, getLogsDir } from '../utils/config';
 import { safeJoin } from '../utils/path';
 import { 
+  readJsonLog, 
   exportLogs, 
-  stripAnsi
+  stripAnsi,
+  JsonLogEntry 
 } from '../utils/enhanced-logger';
 import { formatPotentialJsonMessage } from '../utils/log-formatter';
+import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 import { startLogViewer } from '../ui/log-viewer';
-import { getLaneLogPath } from '../services/logging/paths';
-import { parseRawLogLine } from '../services/logging/raw-log';
 
 interface LogsOptions {
   runDir?: string;
@@ -29,6 +30,7 @@ interface LogsOptions {
   level?: string;
   clean: boolean;
   raw: boolean;
+  readable: boolean;  // Show readable parsed log
   help: boolean;
 }
 
@@ -43,13 +45,13 @@ function printHelp(): void {
   console.log(`
 Usage: cursorflow logs [run-dir] [options]
 
-View and export lane logs.
+View and export logs.
 
 Options:
   [run-dir]              Run directory (default: latest)
   --run <id>             Specific run directory
-  --lane <name>          Filter to specific lane
-  --all, -a              View all lanes merged (sorted by timestamp)
+  --lane <name>          View a specific lane (subprocess) log
+  --all, -a              View all lane logs merged (sorted by timestamp)
   --format <fmt>         Output format: text, json, markdown, html (default: text)
   --output <path>        Write output to file instead of stdout
   --tail <n>             Show last n lines/entries (default: all)
@@ -57,14 +59,15 @@ Options:
   --interactive, -i      Open interactive log viewer
   --filter <pattern>     Filter entries by regex pattern
   --level <level>        Filter by log level: stdout, stderr, info, error, debug
-  --clean                Show clean terminal logs without ANSI codes (default)
+  --readable, -r         Show readable lane log (parsed AI output) (default for lanes)
+  --clean                Strip ANSI codes (default is raw for main logs)
   --raw                  Show raw terminal logs with ANSI codes
   --help, -h             Show help
 
 Examples:
-  cursorflow logs                              # View latest run logs summary
-  cursorflow logs --lane api-setup             # View clean terminal logs (default)
-  cursorflow logs --lane api-setup --raw       # View raw terminal logs
+  cursorflow logs                              # View latest run main log (raw)
+  cursorflow logs --lane api-setup             # View readable parsed log (default)
+  cursorflow logs --lane api-setup --clean     # View clean terminal logs
   cursorflow logs --all                        # View all lanes merged by time
   cursorflow logs --all --follow               # Follow all lanes in real-time
   cursorflow logs --all --format json          # Export all lanes as JSON
@@ -96,7 +99,8 @@ function parseArgs(args: string[]): LogsOptions {
   });
 
   const raw = args.includes('--raw');
-  const clean = args.includes('--clean') || !raw;
+  const clean = args.includes('--clean');
+  const readable = args.includes('--readable') || args.includes('-r');
 
   return {
     runDir,
@@ -111,6 +115,8 @@ function parseArgs(args: string[]): LogsOptions {
     level: levelIdx >= 0 ? args[levelIdx + 1] : undefined,
     raw,
     clean,
+    // Default to readable if no other format is specified
+    readable: readable || (!raw && !clean),
     help: args.includes('--help') || args.includes('-h'),
   };
 }
@@ -145,30 +151,6 @@ function listLanes(runDir: string): string[] {
     .filter(d => fs.statSync(safeJoin(lanesDir, d)).isDirectory());
 }
 
-interface RawLogEntry {
-  timestamp: Date;
-  level: string;
-  message: string;
-}
-
-function readRawLogEntries(logFile: string): RawLogEntry[] {
-  if (!fs.existsSync(logFile)) return [];
-
-  const content = fs.readFileSync(logFile, 'utf8');
-  const stat = fs.statSync(logFile);
-  const lines = content.split('\n').filter(line => line.trim());
-
-  return lines.map((line, index) => {
-    const fallback = new Date(stat.mtimeMs + index);
-    const parsed = parseRawLogLine(line, fallback);
-    return {
-      timestamp: parsed.timestamp,
-      level: parsed.level,
-      message: parsed.message,
-    };
-  });
-}
-
 /**
  * Read and display text logs
  */
@@ -176,7 +158,16 @@ function displayTextLogs(
   laneDir: string, 
   options: LogsOptions
 ): void {
-  const logFile = getLaneLogPath(laneDir, 'raw');
+  let logFile: string;
+  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
+  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+
+  if (options.raw) {
+    logFile = rawLog;
+  } else {
+    // Default to readable log (clean option also uses readable now)
+    logFile = readableLog;
+  }
   
   if (!fs.existsSync(logFile)) {
     console.log('No log file found.');
@@ -197,8 +188,8 @@ function displayTextLogs(
     lines = lines.slice(-options.tail);
   }
   
-  const shouldClean = options.clean && !options.raw;
-  if (shouldClean) {
+  // Clean ANSI if needed (for clean mode or default fallback)
+  if (!options.raw) {
     lines = lines.map(line => stripAnsi(line));
   }
   
@@ -206,14 +197,49 @@ function displayTextLogs(
 }
 
 /**
- * Read and display parsed logs
+ * Read and display main process logs
+ */
+function displayMainLogs(runDir: string, options: LogsOptions): void {
+  const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+  if (!fs.existsSync(logFile)) {
+    console.log('No main log file found.');
+    return;
+  }
+
+  let content = fs.readFileSync(logFile, 'utf8');
+  let lines = content.split('\n');
+
+  if (options.filter) {
+    const filterLower = options.filter.toLowerCase();
+    lines = lines.filter(line => line.toLowerCase().includes(filterLower));
+  }
+
+  if (options.tail && lines.length > options.tail) {
+    lines = lines.slice(-options.tail);
+  }
+
+  if (options.clean) {
+    lines = lines.map(line => stripAnsi(line));
+  }
+
+  console.log(lines.join('\n'));
+}
+
+/**
+ * Read and display JSON logs
  */
 function displayJsonLogs(
   laneDir: string, 
   options: LogsOptions
 ): void {
-  const logFile = getLaneLogPath(laneDir, 'raw');
-  let entries = readRawLogEntries(logFile);
+  const logFile = safeJoin(laneDir, 'terminal.jsonl');
+  
+  if (!fs.existsSync(logFile)) {
+    console.log('No JSON log file found.');
+    return;
+  }
+  
+  let entries = readJsonLog(logFile);
   
   // Apply level filter
   if (options.level) {
@@ -224,7 +250,8 @@ function displayJsonLogs(
   if (options.filter) {
     const filterLower = options.filter.toLowerCase();
     entries = entries.filter(e => 
-      (e.message || '').toLowerCase().includes(filterLower)
+      (e.message || '').toLowerCase().includes(filterLower) || 
+      (e.task && e.task.toLowerCase().includes(filterLower))
     );
   }
   
@@ -233,26 +260,18 @@ function displayJsonLogs(
     entries = entries.slice(-options.tail);
   }
   
-  if (entries.length === 0) {
-    console.log('No log entries found.');
-    return;
-  }
-
   if (options.format === 'json') {
-    console.log(JSON.stringify(entries.map(entry => ({
-      timestamp: entry.timestamp.toISOString(),
-      level: entry.level,
-      message: entry.message,
-    })), null, 2));
-    return;
-  }
-
-  for (const entry of entries) {
-    const level = entry.level || 'info';
-    const levelColor = getLevelColor(level);
-    const ts = entry.timestamp.toLocaleTimeString();
-    const formattedMsg = formatPotentialJsonMessage(entry.message);
-    console.log(`${levelColor}[${ts}] [${level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${formattedMsg}`);
+    console.log(JSON.stringify(entries, null, 2));
+  } else {
+    // Display as formatted text
+    for (const entry of entries) {
+      const level = entry.level || 'info';
+      const message = entry.message || '';
+      const levelColor = getLevelColor(level);
+      const ts = new Date(entry.timestamp).toLocaleTimeString();
+      const formattedMsg = formatPotentialJsonMessage(message);
+      console.log(`${levelColor}[${ts}] [${level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${formattedMsg}`);
+    }
   }
 }
 
@@ -299,10 +318,7 @@ function getLaneColor(laneName: string, laneIndex: number): string {
 /**
  * Extended JSON log entry with lane info
  */
-interface MergedLogEntry {
-  timestamp: Date;
-  level: string;
-  message: string;
+interface MergedLogEntry extends JsonLogEntry {
   laneName: string;
   laneColor: string;
 }
@@ -316,22 +332,27 @@ function readAllLaneLogs(runDir: string): MergedLogEntry[] {
   
   lanes.forEach((laneName, index) => {
     const laneDir = safeJoin(runDir, 'lanes', laneName);
-    const logPath = getLaneLogPath(laneDir, 'raw');
-    const entries = readRawLogEntries(logPath);
-    const laneColor = getLaneColor(laneName, index);
+    const jsonLogPath = safeJoin(laneDir, 'terminal.jsonl');
     
-    for (const entry of entries) {
-      allEntries.push({
-        ...entry,
-        laneName,
-        laneColor,
-      });
+    if (fs.existsSync(jsonLogPath)) {
+      const entries = readJsonLog(jsonLogPath);
+      const laneColor = getLaneColor(laneName, index);
+      
+      for (const entry of entries) {
+        allEntries.push({
+          ...entry,
+          laneName,
+          laneColor,
+        });
+      }
     }
   });
   
   // Sort by timestamp
   allEntries.sort((a, b) => {
-    return a.timestamp.getTime() - b.timestamp.getTime();
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    return timeA - timeB;
   });
   
   return allEntries;
@@ -391,7 +412,7 @@ function displayMergedLogs(runDir: string, options: LogsOptions): void {
   
   // Display entries
   for (const entry of entries) {
-    const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
+    const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
     const level = entry.level || 'info';
     const levelColor = getLevelColor(level);
     const laneColor = entry.laneColor;
@@ -451,12 +472,12 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
     
     for (const lane of lanes) {
       const laneDir = safeJoin(runDir, 'lanes', lane);
-      const logPath = getLaneLogPath(laneDir, 'raw');
+      const jsonLogPath = safeJoin(laneDir, 'terminal.jsonl');
       
       let fd: number | null = null;
       try {
         // Use fstat on open fd to avoid TOCTOU race condition
-        fd = fs.openSync(logPath, 'r');
+        fd = fs.openSync(jsonLogPath, 'r');
         const stats = fs.fstatSync(fd);
         if (stats.size > lastPositions[lane]!) {
           const buffer = Buffer.alloc(stats.size - lastPositions[lane]!);
@@ -465,15 +486,18 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
           const content = buffer.toString();
           const lines = content.split('\n').filter(l => l.trim());
           
-          lines.forEach((line, lineIndex) => {
-            const fallback = new Date(Date.now() + lineIndex);
-            const parsed = parseRawLogLine(line, fallback);
-            newEntries.push({
-              ...parsed,
-              laneName: lane,
-              laneColor: laneColors[lane]!,
-            });
-          });
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line) as JsonLogEntry;
+              newEntries.push({
+                ...entry,
+                laneName: lane,
+                laneColor: laneColors[lane]!,
+              });
+            } catch {
+              // Skip invalid lines
+            }
+          }
           
           lastPositions[lane] = stats.size;
         }
@@ -488,7 +512,9 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
     
     // Sort new entries by timestamp
     newEntries.sort((a, b) => {
-      return a.timestamp.getTime() - b.timestamp.getTime();
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      return timeA - timeB;
     });
     
     // Apply filters and display
@@ -503,12 +529,13 @@ function followAllLogs(runDir: string, options: LogsOptions): void {
       if (options.filter) {
         const filterLower = options.filter.toLowerCase();
         if (!message.toLowerCase().includes(filterLower) && 
+            !(entry.task && entry.task.toLowerCase().includes(filterLower)) && 
             !entry.laneName.toLowerCase().includes(filterLower)) {
           continue;
         }
       }
       
-      const ts = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
+      const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
       const levelColor = getLevelColor(level);
       const lanePad = entry.laneName.substring(0, 12).padEnd(12);
       const levelPad = level.toUpperCase().padEnd(6);
@@ -559,7 +586,7 @@ function exportMergedLogs(runDir: string, format: string, outputPath?: string): 
     default:
       // Text format
       for (const entry of entries) {
-        const ts = entry.timestamp.toISOString();
+        const ts = new Date(entry.timestamp).toISOString();
         const level = entry.level || 'info';
         const message = entry.message || '';
         output += `[${ts}] [${entry.laneName}] [${level.toUpperCase()}] ${message}\n`;
@@ -589,7 +616,7 @@ function exportMergedToMarkdown(entries: MergedLogEntry[], runDir: string): stri
   md += '|------|------|-------|--------|\n';
   
   for (const entry of entries) {
-    const ts = entry.timestamp.toLocaleTimeString();
+    const ts = new Date(entry.timestamp).toLocaleTimeString();
     const level = entry.level || 'info';
     // Escape markdown table special characters: pipe, backslash, and newlines
     const message = (entry.message || '')
@@ -648,7 +675,7 @@ function exportMergedToHtml(entries: MergedLogEntry[], runDir: string): string {
   html += `</div>\n`;
   
   for (const entry of entries) {
-    const ts = entry.timestamp.toLocaleTimeString();
+    const ts = new Date(entry.timestamp).toLocaleTimeString();
     const laneIndex = lanes.indexOf(entry.laneName);
     const color = colors[laneIndex % colors.length];
     const level = entry.level || 'info';
@@ -681,7 +708,16 @@ function escapeHtml(text: string): string {
  * Follow logs in real-time
  */
 function followLogs(laneDir: string, options: LogsOptions): void {
-  const logFile = getLaneLogPath(laneDir, 'raw');
+  let logFile: string;
+  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
+  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+
+  if (options.raw) {
+    logFile = rawLog;
+  } else {
+    // Default to readable log
+    logFile = readableLog;
+  }
   
   if (!fs.existsSync(logFile)) {
     console.log('Waiting for log file...');
@@ -717,8 +753,8 @@ function followLogs(laneDir: string, options: LogsOptions): void {
           content = lines.filter(line => line.toLowerCase().includes(filterLower)).join('\n');
         }
         
-        const shouldClean = options.clean && !options.raw;
-        if (shouldClean) {
+        // Clean ANSI if needed (unless raw mode)
+        if (!options.raw) {
           content = stripAnsi(content);
         }
         
@@ -746,6 +782,68 @@ function followLogs(laneDir: string, options: LogsOptions): void {
 }
 
 /**
+ * Follow main process log in real-time
+ */
+function followMainLogs(runDir: string, options: LogsOptions): void {
+  const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+
+  if (!fs.existsSync(logFile)) {
+    console.log('Waiting for main log file...');
+  }
+
+  let lastSize = 0;
+  try {
+    lastSize = fs.statSync(logFile).size;
+  } catch {
+    lastSize = 0;
+  }
+
+  console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
+
+  const checkInterval = setInterval(() => {
+    let fd: number | null = null;
+    try {
+      fd = fs.openSync(logFile, 'r');
+      const stats = fs.fstatSync(fd);
+      if (stats.size > lastSize) {
+        const buffer = Buffer.alloc(stats.size - lastSize);
+        fs.readSync(fd, buffer, 0, buffer.length, lastSize);
+
+        let content = buffer.toString();
+
+        if (options.filter) {
+          const filterLower = options.filter.toLowerCase();
+          const lines = content.split('\n');
+          content = lines.filter(line => line.toLowerCase().includes(filterLower)).join('\n');
+        }
+
+        if (options.clean) {
+          content = stripAnsi(content);
+        }
+
+        if (content.trim()) {
+          process.stdout.write(content);
+        }
+
+        lastSize = stats.size;
+      }
+    } catch {
+      // Ignore errors (file might be rotating)
+    } finally {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch { /* ignore */ }
+      }
+    }
+  }, 100);
+
+  process.on('SIGINT', () => {
+    clearInterval(checkInterval);
+    console.log('\n\nStopped following logs.');
+    process.exit(0);
+  });
+}
+
+/**
  * Display logs summary for all lanes
  */
 function displaySummary(runDir: string): void {
@@ -762,13 +860,19 @@ function displaySummary(runDir: string): void {
   
   for (const lane of lanes) {
     const laneDir = safeJoin(runDir, 'lanes', lane);
-    const rawLog = getLaneLogPath(laneDir, 'raw');
+    const rawLog = safeJoin(laneDir, 'terminal-raw.log');
+    const readableLog = safeJoin(laneDir, 'terminal-readable.log');
     
     console.log(`  ${logger.COLORS.green}📁 ${lane}${logger.COLORS.reset}`);
     
+    if (fs.existsSync(readableLog)) {
+      const stats = fs.statSync(readableLog);
+      console.log(`     └─ terminal-readable.log ${formatSize(stats.size)} ${logger.COLORS.yellow}(default)${logger.COLORS.reset}`);
+    }
+    
     if (fs.existsSync(rawLog)) {
       const stats = fs.statSync(rawLog);
-      console.log(`     └─ terminal-raw.log      ${formatSize(stats.size)} ${logger.COLORS.yellow}(default)${logger.COLORS.reset}`);
+      console.log(`     └─ terminal-raw.log      ${formatSize(stats.size)}`);
     }
     
     console.log('');
@@ -853,10 +957,30 @@ async function logs(args: string[]): Promise<void> {
     return;
   }
   
-  // If no lane specified, show summary
+  // If no lane specified, show main process log by default
   if (!options.lane) {
-    displaySummary(runDir);
-    console.log(`${logger.COLORS.gray}Use --lane <name> to view logs (default: clean raw log), --raw for ANSI output, or --all to view all lanes merged${logger.COLORS.reset}`);
+    if (options.follow) {
+      followMainLogs(runDir, options);
+      return;
+    }
+
+    if (options.output) {
+      const logFile = safeJoin(runDir, MAIN_LOG_FILENAME);
+      if (!fs.existsSync(logFile)) {
+        console.log('No main log file found.');
+        return;
+      }
+      let content = fs.readFileSync(logFile, 'utf8');
+      if (options.clean) {
+        content = stripAnsi(content);
+      }
+      fs.writeFileSync(options.output, content, 'utf8');
+      console.log(`Exported main log to: ${options.output}`);
+      return;
+    }
+
+    displayMainLogs(runDir, options);
+    console.log(`${logger.COLORS.gray}Use --lane <name> for lane logs, --all to merge lanes, or --clean to strip ANSI codes.${logger.COLORS.reset}`);
     return;
   }
   
