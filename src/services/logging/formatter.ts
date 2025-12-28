@@ -97,12 +97,16 @@ export function formatMessageForConsole(
   // Lane label: fixed 14 chars inside brackets [1-1-lanename  ]
   const labelContent = laneLabel.replace(/^\[|\]$/g, ''); // Remove existing brackets if any
   const truncatedLabel = labelContent.length > 14 ? labelContent.substring(0, 14) : labelContent;
-  const labelPrefix = truncatedLabel 
-    ? `${COLORS.magenta}[${truncatedLabel.padEnd(14)}]${COLORS.reset} ` 
-    : '';
-
+  
   // Determine if should use box format
   const useBox = !compact && showBorders && BOX_TYPES.has(msg.type);
+  const isImportant = BOX_TYPES.has(msg.type) || msg.type === 'warn' || msg.type === 'error' || msg.type === 'success';
+  
+  const labelColor = isImportant ? COLORS.magenta : COLORS.gray;
+  const labelPrefix = truncatedLabel 
+    ? `${labelColor}[${truncatedLabel.padEnd(14)}]${COLORS.reset} ` 
+    : '';
+
   const { typePrefix, formattedContent } = formatMessageContent(msg, !useBox);
 
   if (!typePrefix && !formattedContent) return '';

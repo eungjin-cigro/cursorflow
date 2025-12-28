@@ -17,6 +17,9 @@ import { ParsedMessage, stripAnsi } from './enhanced-logger';
 // Types that should use box format
 const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
 
+// Types that are considered "important" (keep their specific colors)
+const IMPORTANT_TYPES = new Set(['user', 'assistant', 'result', 'success', 'warn', 'error']);
+
 /**
  * Simplify paths by replacing the project root with ./
  */
@@ -71,12 +74,17 @@ export function formatMessageForConsole(
   const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
   const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
+  // Determine if this is an important message or should be grayed out
+  const isImportant = IMPORTANT_TYPES.has(msg.type);
+  const mainColor = isImportant ? '' : COLORS.gray;
+
   // Handle context (e.g. from logger.info) - keep labels compact
   // Format: [1-1-refactor] without fixed width padding
   let effectiveLaneLabel = laneLabel || (context ? `[${context.substring(0, 12)}]` : '');
   
-  // Compact label with color
-  const labelPrefix = effectiveLaneLabel ? `${COLORS.magenta}${effectiveLaneLabel}${COLORS.reset} ` : '';
+  // Compact label with color - use gray for unimportant messages
+  const labelColor = isImportant ? COLORS.magenta : COLORS.gray;
+  const labelPrefix = effectiveLaneLabel ? `${labelColor}${effectiveLaneLabel}${COLORS.reset} ` : '';
   
   let typePrefix = '';
   let content = msg.content;
@@ -183,6 +191,7 @@ export function formatMessageForConsole(
       break;
     case 'system':
       typePrefix = `${COLORS.gray}⚙️ SYS${COLORS.reset}`;
+      content = `${COLORS.gray}${content}${COLORS.reset}`;
       break;
     case 'thinking':
       // Thinking is always compact and gray
@@ -190,7 +199,8 @@ export function formatMessageForConsole(
       content = `${COLORS.gray}${content}${COLORS.reset}`;
       break;
     case 'info':
-      typePrefix = `${COLORS.cyan}ℹ️ INFO${COLORS.reset}`;
+      typePrefix = `${COLORS.gray}ℹ️ INFO${COLORS.reset}`;
+      content = `${COLORS.gray}${content}${COLORS.reset}`;
       break;
     case 'warn':
       typePrefix = `${COLORS.yellow}⚠️ WARN${COLORS.reset}`;
@@ -200,7 +210,8 @@ export function formatMessageForConsole(
       break;
     case 'raw':
       // Raw type means the content is already fully formatted - return as-is
-      return content;
+      // But if it's not important, we should at least try to dim it if it's not already colored
+      return isImportant ? content : `${COLORS.gray}${content}${COLORS.reset}`;
   }
   
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${content}`;
