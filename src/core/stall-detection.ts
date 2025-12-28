@@ -256,7 +256,7 @@ export class StallDetectionService {
   private config: StallDetectionConfig;
   private laneStates: Map<string, LaneStallState> = new Map();
   
-  private constructor(config: Partial<StallDetectionConfig> = {}) {
+  public constructor(config: Partial<StallDetectionConfig> = {}) {
     this.config = { ...DEFAULT_STALL_CONFIG, ...config };
   }
   
@@ -1095,5 +1095,12 @@ export function getStallService(config?: Partial<StallDetectionConfig>): StallDe
  */
 export function resetStallService(): void {
   StallDetectionService.resetInstance();
+}
+
+/**
+ * Stall 감지 서비스 팩토리 함수
+ */
+export function createStallDetectionService(flowId: string, config?: Partial<StallDetectionConfig>): StallDetectionService {
+  return new StallDetectionService(config);
 }
 
