@@ -18,6 +18,32 @@ import { ParsedMessage, stripAnsi } from './enhanced-logger';
 const BOX_TYPES = new Set(['user', 'assistant', 'system', 'result']);
 
 /**
+ * Simplify paths by replacing the project root with ./
+ */
+function simplifyPath(p: string): string {
+  if (typeof p !== 'string') return p;
+  
+  // Standardize slashes
+  const pathStr = p.replace(/\\/g, '/');
+  
+  // Handle common "workbench" pattern if mentioned by user
+  // User wants everything before the project name (after workbench/) to be ./
+  // Example: /home/eugene/workbench/project-name/... -> ./project-name/...
+  const workbenchIndex = pathStr.indexOf('/workbench/');
+  if (workbenchIndex !== -1) {
+    return './' + pathStr.substring(workbenchIndex + '/workbench/'.length);
+  }
+  
+  // Try current working directory
+  const cwd = process.cwd().replace(/\\/g, '/');
+  if (pathStr.startsWith(cwd)) {
+    return './' + pathStr.substring(cwd.length).replace(/^[/\\]+/, '');
+  }
+  
+  return p;
+}
+
+/**
  * Simplify tool names (ShellToolCall → Shell, etc.)
  */
 function simplifyToolName(name: string): string {
@@ -76,9 +102,9 @@ export function formatMessageForConsole(
     }
   }
   
-  // For thinking: collapse multiple newlines into single space
+  // For thinking: don't collapse anymore, but maybe trim
   if (msg.type === 'thinking') {
-    content = content.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
+    content = content.trim();
   }
   
   switch (msg.type) {
@@ -91,45 +117,65 @@ export function formatMessageForConsole(
       if (!useBox) content = content.replace(/\n/g, ' ').substring(0, 100) + (content.length > 100 ? '...' : '');
       break;
     case 'tool':
-      // Tool calls are always compact and gray
-      typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
+      // Tool calls are dynamic based on the tool name
       const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
       if (toolMatch) {
         const [, rawName, args] = toolMatch;
         const name = simplifyToolName(rawName!);
+        
+        // Map tool names to 4-char labels and emojis
+        const toolInfo: Record<string, { label: string; emoji: string; color: string }> = {
+          'read_file': { label: 'READ', emoji: '📖', color: COLORS.gray },
+          'search_replace': { label: 'EDIT', emoji: '📝', color: COLORS.gray },
+          'edit': { label: 'EDIT', emoji: '📝', color: COLORS.gray },
+          'write': { label: 'WRIT', emoji: '💾', color: COLORS.gray },
+          'run_terminal_cmd': { label: 'SHLL', emoji: '💻', color: COLORS.gray },
+          'shell': { label: 'SHLL', emoji: '💻', color: COLORS.gray },
+          'grep': { label: 'GREP', emoji: '🔍', color: COLORS.gray },
+          'codebase_search': { label: 'SRCH', emoji: '🔎', color: COLORS.gray },
+          'list_dir': { label: 'LIST', emoji: '📂', color: COLORS.gray },
+          'glob_file_search': { label: 'GLOB', emoji: '🌐', color: COLORS.gray },
+        };
+        
+        const info = toolInfo[rawName!] || toolInfo[name] || { label: 'TOOL', emoji: '🔧', color: COLORS.gray };
+        typePrefix = `${info.color}${info.emoji} ${info.label}${COLORS.reset}`;
+        
         try {
           const parsedArgs = JSON.parse(args!);
           let argStr = '';
           if (rawName === 'read_file' && parsedArgs.target_file) {
-            argStr = parsedArgs.target_file;
+            argStr = simplifyPath(parsedArgs.target_file);
           } else if (rawName === 'run_terminal_cmd' && parsedArgs.command) {
             argStr = parsedArgs.command;
           } else if (rawName === 'write' && parsedArgs.file_path) {
-            argStr = parsedArgs.file_path;
+            argStr = simplifyPath(parsedArgs.file_path);
           } else if (rawName === 'search_replace' && parsedArgs.file_path) {
-            argStr = parsedArgs.file_path;
+            argStr = simplifyPath(parsedArgs.file_path);
           } else {
             const keys = Object.keys(parsedArgs);
             if (keys.length > 0) {
-              argStr = String(parsedArgs[keys[0]]).substring(0, 50);
+              argStr = simplifyPath(String(parsedArgs[keys[0]]));
             }
           }
-          content = `${COLORS.gray}${name}${COLORS.reset}(${COLORS.gray}${argStr}${COLORS.reset})`;
+          // Now content is just the arguments, formatted cleanly
+          content = `${COLORS.gray}${argStr}${COLORS.reset}`;
         } catch {
-          content = `${COLORS.gray}${name}${COLORS.reset}: ${args}`;
+          content = `${COLORS.gray}${args}${COLORS.reset}`;
         }
+      } else {
+        typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
       }
       break;
     case 'tool_result':
-      // Tool results are always compact and gray
-      typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
+      // Skip standard tool results if they just say OK
       const resMatch = content.match(/\[Tool Result: ([^\]]+)\]/);
       if (resMatch) {
-        const simpleName = simplifyToolName(resMatch[1]!);
-        content = `${COLORS.gray}${simpleName} OK${COLORS.reset}`;
-      } else {
-        content = `${COLORS.gray}result${COLORS.reset}`;
+        // If it's a standard result, we return empty to skip it
+        return '';
       }
+      // If it has actual content (rare in this format), show it
+      typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
+      content = `${COLORS.gray}${content}${COLORS.reset}`;
       break;
     case 'result':
     case 'success':
@@ -141,7 +187,7 @@ export function formatMessageForConsole(
     case 'thinking':
       // Thinking is always compact and gray
       typePrefix = `${COLORS.gray}🤔 THNK${COLORS.reset}`;
-      content = `${COLORS.gray}${content.substring(0, 100)}${content.length > 100 ? '...' : ''}${COLORS.reset}`;
+      content = `${COLORS.gray}${content}${COLORS.reset}`;
       break;
     case 'info':
       typePrefix = `${COLORS.cyan}ℹ️ INFO${COLORS.reset}`;
@@ -199,7 +245,27 @@ export function formatMessageForConsole(
 
   // Compact format (single line)
   if (!useBox) {
-    return `${tsPrefix}${labelPrefix}${typePrefix.padEnd(12)} ${content}`;
+    const strippedType = stripAnsi(typePrefix);
+    let typeWidth = 0;
+    for (let i = 0; i < strippedType.length; i++) {
+      const code = strippedType.charCodeAt(i);
+      if (code >= 0xD800 && code <= 0xDBFF) { typeWidth += 2; i++; }
+      else if (code === 0xFE0F) continue;
+      else if (code >= 0x2000 && code <= 0x32FF) typeWidth += 2;
+      else typeWidth += 1;
+    }
+    
+    const paddedType = typePrefix + ' '.repeat(Math.max(0, 10 - typeWidth));
+    const fullPrefix = `${tsPrefix}${labelPrefix}${paddedType} `;
+    
+    // For multi-line non-box content (like thinking), indent subsequent lines
+    const lines = content.split('\n');
+    if (lines.length > 1) {
+      const indent = ' '.repeat(stripAnsi(tsPrefix + labelPrefix).length + 11);
+      return lines.map((line, i) => i === 0 ? `${fullPrefix}${line}` : `${indent}${line}`).join('\n');
+    }
+    
+    return `${fullPrefix}${content}`;
   }
 
   // Multi-line box format (only for user, assistant, system, result)
@@ -207,9 +273,29 @@ export function formatMessageForConsole(
   const lines = content.split('\n');
   const fullPrefix = `${tsPrefix}${labelPrefix}`;
   const strippedPrefix = stripAnsi(typePrefix);
-  // Count emojis (they take 2 terminal columns but 1-2 chars in string)
-  const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
-  const visualWidth = strippedPrefix.length + emojiCount; // emoji adds 1 extra width
+  
+  // Calculate visual width more accurately
+  // Most emojis we use are 2 columns wide. 
+  // If they are represented as surrogate pairs (length 2), strippedPrefix.length already includes 2.
+  // If they are represented as single characters (length 1), we need to add 1.
+  // The variation selector \uFE0F (length 1) doesn't add any visual width.
+  let visualWidth = 0;
+  for (let i = 0; i < strippedPrefix.length; i++) {
+    const code = strippedPrefix.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      // Surrogate pair - high surrogate
+      visualWidth += 2;
+      i++; // Skip low surrogate
+    } else if (code === 0xFE0F) {
+      // Variation selector - no width
+      continue;
+    } else if (code >= 0x2000 && code <= 0x32FF) {
+      // BMP wide characters (like ✅, ❌, etc.)
+      visualWidth += 2;
+    } else {
+      visualWidth += 1;
+    }
+  }
   
   const boxWidth = 80;
   const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;

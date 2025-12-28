@@ -276,6 +276,11 @@ export class EnhancedLogManager {
       includeTimestamp: false, // We'll add our own short timestamp
     });
     
+    // If formatted message is empty (e.g. tool_result OK that we want to skip), don't write anything
+    if (!formatted || formatted.trim() === '') {
+      return;
+    }
+    
     // Strip ANSI codes and add short timestamp for file output
     const clean = stripAnsi(formatted);
     const ts = this.getShortTime();
@@ -313,6 +318,12 @@ export class EnhancedLogManager {
           }
           // parseJsonToMessage returned null - create fallback message for known JSON
           if (json.type) {
+            // Skip noisy events that we don't want to show in the readable log
+            if (json.type === 'thinking' || json.type === 'call' || 
+               (json.type === 'tool_call' && !json.tool_call)) {
+              continue;
+            }
+            
             const fallbackMsg: ParsedMessage = {
               type: 'info',
               role: 'system',

@@ -691,6 +691,14 @@ class InteractiveMonitor {
         disabledReason: 'Lane not running',
       },
       {
+        id: 'resume',
+        label: 'Resume Lane',
+        icon: '▶️',
+        action: () => this.resumeLane(lane),
+        disabled: isRunning || isCompleted,
+        disabledReason: isRunning ? 'Lane already running' : 'Lane already completed',
+      },
+      {
         id: 'stop',
         label: 'Stop Lane',
         icon: '🔴',
@@ -716,6 +724,8 @@ class InteractiveMonitor {
   
   private getFlowActions(flow: FlowInfo): ActionItem[] {
     const isCurrent = flow.runDir === this.runDir;
+    const isAlive = flow.isAlive;
+    const isCompleted = flow.summary.completed === flow.summary.total && flow.summary.total > 0;
     
     return [
       {
@@ -725,6 +735,14 @@ class InteractiveMonitor {
         action: () => this.switchToFlow(flow),
         disabled: isCurrent,
         disabledReason: 'Already viewing this flow',
+      },
+      {
+        id: 'resume',
+        label: 'Resume Flow',
+        icon: '▶️',
+        action: () => this.resumeFlow(flow),
+        disabled: isAlive || isCompleted,
+        disabledReason: isAlive ? 'Flow is already running' : 'Flow is already completed',
       },
       {
         id: 'delete',
@@ -872,6 +890,45 @@ class InteractiveMonitor {
     }
     this.state.actionMenuVisible = false;
     this.render();
+  }
+  
+  private resumeFlow(flow: FlowInfo) {
+    this.runResumeCommand(['--all', '--run-dir', flow.runDir]);
+  }
+
+  private resumeLane(lane: LaneInfo) {
+    this.runResumeCommand([lane.name, '--run-dir', this.runDir]);
+  }
+
+  private runResumeCommand(args: string[]) {
+    try {
+      const { spawn } = require('child_process');
+      
+      // Determine the script to run
+      // In production, it's dist/cli/index.js. In dev, it's src/cli/index.ts.
+      let entryPoint = path.resolve(__dirname, 'index.js');
+      if (!fs.existsSync(entryPoint)) {
+        entryPoint = path.resolve(__dirname, 'index.ts');
+      }
+
+      const spawnArgs = [entryPoint, 'resume', ...args, '--skip-doctor'];
+      
+      // If it's a .ts file, we need ts-node or similar (assuming it's available)
+      const nodeArgs = entryPoint.endsWith('.ts') ? ['-r', 'ts-node/register'] : [];
+
+      const child = spawn(process.execPath, [...nodeArgs, ...spawnArgs], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, NODE_OPTIONS: '' }
+      });
+      
+      child.unref();
+      
+      const target = args[0] === '--all' ? 'flow' : `lane ${args[0]}`;
+      this.showNotification(`Resume started for ${target}`, 'success');
+    } catch (error: any) {
+      this.showNotification(`Failed to spawn resume: ${error.message}`, 'error');
+    }
   }
   
   private switchToFlow(flow: FlowInfo) {

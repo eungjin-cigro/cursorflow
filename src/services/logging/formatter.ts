@@ -25,6 +25,27 @@ const BOX_TYPES = new Set(['user', 'assistant', 'result']);
 const GRAY_TYPES = new Set(['tool', 'tool_result', 'thinking', 'system', 'debug', 'stdout', 'raw', 'info']);
 
 /**
+ * Simplify paths by replacing the project root with ./
+ */
+function simplifyPath(p: string): string {
+  if (typeof p !== 'string') return p;
+  
+  const pathStr = p.replace(/\\/g, '/');
+  
+  const workbenchIndex = pathStr.indexOf('/workbench/');
+  if (workbenchIndex !== -1) {
+    return './' + pathStr.substring(workbenchIndex + '/workbench/'.length);
+  }
+  
+  const cwd = process.cwd().replace(/\\/g, '/');
+  if (pathStr.startsWith(cwd)) {
+    return './' + pathStr.substring(cwd.length).replace(/^[/\\]+/, '');
+  }
+  
+  return p;
+}
+
+/**
  * Strip ANSI escape sequences from text
  */
 export function stripAnsi(text: string): string {
@@ -84,20 +105,54 @@ export function formatMessageForConsole(
   const useBox = !compact && showBorders && BOX_TYPES.has(msg.type);
   const { typePrefix, formattedContent } = formatMessageContent(msg, !useBox);
 
+  if (!typePrefix && !formattedContent) return '';
   if (!typePrefix) return `${tsPrefix}${labelPrefix}${formattedContent}`;
 
   if (!useBox) {
-    // Compact format: type prefix is already formatted with proper spacing
-    return `${tsPrefix}${labelPrefix}${typePrefix} ${formattedContent}`;
+    const strippedType = stripAnsi(typePrefix);
+    let typeWidth = 0;
+    for (let i = 0; i < strippedType.length; i++) {
+      const code = strippedType.charCodeAt(i);
+      if (code >= 0xD800 && code <= 0xDBFF) { typeWidth += 2; i++; }
+      else if (code === 0xFE0F) continue;
+      else if (code >= 0x2000 && code <= 0x32FF) typeWidth += 2;
+      else typeWidth += 1;
+    }
+    
+    const paddedType = typePrefix + ' '.repeat(Math.max(0, 10 - typeWidth));
+    const fullPrefixWithPaddedType = `${tsPrefix}${labelPrefix}${paddedType} `;
+    
+    // For multi-line non-box content (like thinking), indent subsequent lines
+    const lines = formattedContent.split('\n');
+    if (lines.length > 1) {
+      // Fixed width indent: [HH:MM:SS] (11) + [label] (17) + type (10) + space (1)
+      const indent = ' '.repeat(stripAnsi(tsPrefix + labelPrefix).length + 11);
+      return lines.map((line, i) => i === 0 ? `${fullPrefixWithPaddedType}${line}` : `${indent}${line}`).join('\n');
+    }
+    
+    return `${fullPrefixWithPaddedType}${formattedContent}`;
   }
 
   // Multi-line box format (only for user, assistant, result)
   const lines = formattedContent.split('\n');
   const fullPrefix = `${tsPrefix}${labelPrefix}`;
   const strippedPrefix = stripAnsi(typePrefix);
-  // Count emojis (they take 2 terminal columns but 1-2 chars in string)
-  const emojiCount = (strippedPrefix.match(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{23E9}-\u{23F3}]|[\u{23F8}-\u{23FA}]|✅|❌|⚙️|ℹ️|⚠️|🔧|📄|🤔|🧑|🤖/gu) || []).length;
-  const visualWidth = strippedPrefix.length + emojiCount;
+  
+  // Calculate visual width more accurately
+  let visualWidth = 0;
+  for (let i = 0; i < strippedPrefix.length; i++) {
+    const code = strippedPrefix.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      visualWidth += 2;
+      i++;
+    } else if (code === 0xFE0F) {
+      continue;
+    } else if (code >= 0x2000 && code <= 0x32FF) {
+      visualWidth += 2;
+    } else {
+      visualWidth += 1;
+    }
+  }
   
   const boxWidth = 60;
   const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
@@ -116,9 +171,9 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
   let typePrefix = '';
   let formattedContent = msg.content;
 
-  // For thinking: collapse multiple newlines
+  // For thinking: don't collapse anymore
   if (msg.type === 'thinking') {
-    formattedContent = formattedContent.replace(/\n\s*\n/g, ' ').replace(/\n/g, ' ').trim();
+    formattedContent = formattedContent.trim();
   }
 
   // Determine if this type should be gray (less important)
@@ -136,21 +191,42 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       break;
       
     case 'tool':
-      // Tool calls are always gray (less important)
-      typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
-      formattedContent = formatToolCall(formattedContent);
+      // Tool calls are dynamic based on the tool name
+      const toolMatch = formattedContent.match(/\[Tool: ([^\]]+)\] (.*)/);
+      if (toolMatch) {
+        const [, rawName, args] = toolMatch;
+        const name = simplifyToolName(rawName!);
+        
+        const toolInfo: Record<string, { label: string; emoji: string; color: string }> = {
+          'read_file': { label: 'READ', emoji: '📖', color: COLORS.gray },
+          'search_replace': { label: 'EDIT', emoji: '📝', color: COLORS.gray },
+          'edit': { label: 'EDIT', emoji: '📝', color: COLORS.gray },
+          'write': { label: 'WRIT', emoji: '💾', color: COLORS.gray },
+          'run_terminal_cmd': { label: 'SHLL', emoji: '💻', color: COLORS.gray },
+          'shell': { label: 'SHLL', emoji: '💻', color: COLORS.gray },
+          'grep': { label: 'GREP', emoji: '🔍', color: COLORS.gray },
+          'codebase_search': { label: 'SRCH', emoji: '🔎', color: COLORS.gray },
+          'list_dir': { label: 'LIST', emoji: '📂', color: COLORS.gray },
+          'glob_file_search': { label: 'GLOB', emoji: '🌐', color: COLORS.gray },
+        };
+        
+        const info = toolInfo[rawName!] || toolInfo[name] || { label: 'TOOL', emoji: '🔧', color: COLORS.gray };
+        typePrefix = `${info.color}${info.emoji} ${info.label}${COLORS.reset}`;
+        formattedContent = formatToolCall(formattedContent, true); // true means just args
+      } else {
+        typePrefix = `${COLORS.gray}🔧 TOOL${COLORS.reset}`;
+        formattedContent = formatToolCall(formattedContent);
+      }
       break;
       
     case 'tool_result':
-      // Tool results are always gray (less important)
-      typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
+      // Skip standard tool results if they just say OK
       const resMatch = formattedContent.match(/\[Tool Result: ([^\]]+)\]/);
       if (resMatch) {
-        const simpleName = simplifyToolName(resMatch[1]!);
-        formattedContent = `${COLORS.gray}${simpleName} OK${COLORS.reset}`;
-      } else {
-        formattedContent = `${COLORS.gray}OK${COLORS.reset}`;
+        return { typePrefix: '', formattedContent: '' };
       }
+      typePrefix = `${COLORS.gray}📄 RESL${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
       break;
       
     case 'result':
@@ -166,7 +242,7 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
     case 'thinking':
       // Thinking is always gray and compact (less important)
       typePrefix = `${COLORS.gray}🤔 THNK${COLORS.reset}`;
-      formattedContent = `${COLORS.gray}${truncate(formattedContent, 100)}${COLORS.reset}`;
+      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
       break;
       
     case 'info':
@@ -214,7 +290,7 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
   return { typePrefix, formattedContent };
 }
 
-function formatToolCall(content: string): string {
+function formatToolCall(content: string, justArgs: boolean = false): string {
   const toolMatch = content.match(/\[Tool: ([^\]]+)\] (.*)/);
   if (!toolMatch) return content;
 
@@ -226,22 +302,24 @@ function formatToolCall(content: string): string {
     let argStr = '';
     
     if (rawName === 'read_file' && parsedArgs.target_file) {
-      argStr = parsedArgs.target_file;
+      argStr = simplifyPath(parsedArgs.target_file);
     } else if (rawName === 'run_terminal_cmd' && parsedArgs.command) {
       argStr = parsedArgs.command;
     } else if (rawName === 'write' && parsedArgs.file_path) {
-      argStr = parsedArgs.file_path;
+      argStr = simplifyPath(parsedArgs.file_path);
     } else if (rawName === 'search_replace' && parsedArgs.file_path) {
-      argStr = parsedArgs.file_path;
+      argStr = simplifyPath(parsedArgs.file_path);
     } else {
       const keys = Object.keys(parsedArgs);
       if (keys.length > 0) {
-        argStr = String(parsedArgs[keys[0]]).substring(0, 50);
+        argStr = simplifyPath(String(parsedArgs[keys[0]]));
       }
     }
     
+    if (justArgs) return `${COLORS.gray}${argStr}${COLORS.reset}`;
     return `${COLORS.gray}${name}${COLORS.reset}(${COLORS.gray}${argStr}${COLORS.reset})`;
   } catch {
+    if (justArgs) return `${COLORS.gray}${args}${COLORS.reset}`;
     return `${COLORS.gray}${name}${COLORS.reset}: ${args}`;
   }
 }
