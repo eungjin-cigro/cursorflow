@@ -200,6 +200,7 @@ module.exports = {
   defaultModel: 'auto',
   // Skip Git remote checks for testing
   skipRemoteCheck: true,
+  agentOutputFormat: 'stream-json',
 };
 `;
   fs.writeFileSync(path.join(repoDir, 'cursorflow.config.js'), configContent, 'utf8');

@@ -59,6 +59,21 @@ function simplifyToolName(name: string): string {
 }
 
 /**
+ * Get color associated with a message type
+ */
+function getTypeColor(type: string): string {
+  switch (type) {
+    case 'user': return COLORS.cyan;
+    case 'assistant':
+    case 'result':
+    case 'success': return COLORS.green;
+    case 'warn': return COLORS.yellow;
+    case 'error': return COLORS.red;
+    default: return COLORS.gray;
+  }
+}
+
+/**
  * Format a single parsed message into a human-readable string (compact or multi-line)
  */
 export function formatMessageForConsole(
@@ -71,19 +86,20 @@ export function formatMessageForConsole(
   } = {}
 ): string {
   const { includeTimestamp = true, laneLabel = '', compact = false, context = '' } = options;
-  const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
-  const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
   
   // Determine if this is an important message or should be grayed out
   const isImportant = IMPORTANT_TYPES.has(msg.type);
-  const mainColor = isImportant ? '' : COLORS.gray;
-
+  
+  // Timestamp always gray for consistency
+  const ts = includeTimestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '';
+  const tsPrefix = ts ? `${COLORS.gray}[${ts}]${COLORS.reset} ` : '';
+  
   // Handle context (e.g. from logger.info) - keep labels compact
   // Format: [1-1-refactor] without fixed width padding
   let effectiveLaneLabel = laneLabel || (context ? `[${context.substring(0, 12)}]` : '');
   
-  // Compact label with color - use gray for unimportant messages
-  const labelColor = isImportant ? COLORS.magenta : COLORS.gray;
+  // Lane label always magenta for visibility
+  const labelColor = COLORS.magenta;
   const labelPrefix = effectiveLaneLabel ? `${labelColor}${effectiveLaneLabel}${COLORS.reset} ` : '';
   
   let typePrefix = '';
