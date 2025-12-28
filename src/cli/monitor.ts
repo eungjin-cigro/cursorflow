@@ -672,6 +672,7 @@ class InteractiveMonitor {
   private getLaneActions(lane: LaneInfo): ActionItem[] {
     const status = this.getLaneStatus(lane.path, lane.name);
     const isRunning = status.status === 'running';
+    const isCompleted = status.status === 'completed' || status.status === 'success';
     
     return [
       {
