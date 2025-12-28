@@ -325,10 +325,12 @@ export function formatMessageForConsole(
   }
   
   const boxWidth = 80;
-  const header = `${typePrefix}┌${'─'.repeat(boxWidth)}`;
+  // Add a space between the type prefix and the box
+  const header = `${typePrefix} ┌${'─'.repeat(boxWidth)}`;
   let result = `${fullPrefix}${header}\n`;
   
-  const indent = ' '.repeat(visualWidth);
+  // Indent should match visual width + 1 (for the space we added)
+  const indent = ' '.repeat(visualWidth + 1);
   for (const line of lines) {
     result += `${fullPrefix}${indent}│ ${line}\n`;
   }
