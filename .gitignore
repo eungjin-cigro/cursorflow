@@ -54,8 +54,6 @@ _comprehensive_test/
 # Test projects
 test-projects/
 
-# Private deployment docs (for maintainer only)
-docs/
 *.tgz
 _test_*
 

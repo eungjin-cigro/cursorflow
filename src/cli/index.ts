@@ -19,8 +19,6 @@ const COMMANDS: Record<string, CommandFn> = {
   new: require('./new'),
   add: require('./add'),
   config: require('./config'),
-  // Legacy prepare command (deprecated)
-  prepare: require('./prepare'),
   run: require('./run'),
   monitor: require('./monitor'),
   clean: require('./clean'),
@@ -32,7 +30,6 @@ const COMMANDS: Record<string, CommandFn> = {
   tasks: require('./tasks'),
   stop: require('./stop'),
   setup: require('./setup-commands').main,
-  'setup-commands': require('./setup-commands').main,
 };
 
 function printHelp(): void {
@@ -64,9 +61,6 @@ function printHelp(): void {
   \x1b[33mclean\x1b[0m <type> [options]       Clean branches/worktrees/logs/tasks
   \x1b[33msignal\x1b[0m <lane> <msg>          Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]             List available AI models
-
-\x1b[1mLEGACY\x1b[0m
-  \x1b[33mprepare\x1b[0m <feature> [opts]     (deprecated) Use 'new' + 'add' instead
 
 \x1b[1mQUICK START\x1b[0m
   $ \x1b[32mcursorflow new MyFeature --lanes "backend,frontend"\x1b[0m
