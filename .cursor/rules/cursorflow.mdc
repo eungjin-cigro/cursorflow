@@ -1,0 +1,173 @@
+---
+description: CursorFlow 프로젝트 전역 규칙 - 병렬 AI 에이전트 오케스트레이션 시스템
+globs:
+alwaysApply: true
+---
+
+# CursorFlow Repository Rules
+
+## Project Context
+CursorFlow is a parallel AI agent orchestration system built on Git worktrees. It enables running multiple AI-driven development "lanes" concurrently.
+
+## 📚 핵심 문서 (Essential References)
+
+코드 작업 전 반드시 참조해야 하는 핵심 문서들입니다. **중요 기능이 추가될 때마다 반드시 업데이트 해야 합니다.**
+
+| 문서 | 경로 | 내용 |
+|---|---|---|
+| **Architecture** | `docs/ARCHITECTURE.md` | **[필독]** 핵심 아키텍처 원칙, 격리/조율/복구 메커니즘, C4 기반 설명 |
+| **ADR Index** | `docs/ADR/README.md` | 주요 설계 결정 기록 (Architecture Decision Records) |
+| **Module Guide** | `docs/MODULE_GUIDE.md` | 모듈 구조, 핵심 컴포넌트 역할, 상호작용 다이어그램, 이벤트 시스템 |
+| **cursor-agent Guide** | `docs/CURSOR_AGENT_GUIDE.md` | cursor-agent CLI 사용법, 출력 형식(text/json/stream-json), tool_call 파싱 |
+| **Test Architecture** | `docs/TEST_ARCHITECTURE.md` | 테스트 레이어(Unit/Integration/E2E/Smoke), 유즈케이스 매핑 |
+| **Hook System Guide** | `docs/HOOKS_GUIDE.md` | Hook 시스템 사용법, Hook Points, FlowController API |
+
+## 🏗️ 아키텍처 설계 및 결정 (Architectural Decisions)
+
+AI 에이전트(당신)는 프로젝트의 구조를 변경하거나 중요한 기술적 결정을 내릴 때 다음 절차를 따라야 합니다:
+
+1. **기존 설계 검토**: 작업을 시작하기 전 `docs/ARCHITECTURE.md`와 `docs/ADR/`를 읽고 프로젝트의 설계 철학을 이해하십시오.
+2. **ADR 작성**: 아키텍처 수준의 결정(새로운 통신 패턴 도입, 핵심 엔진 로직 변경 등)을 내릴 경우, 반드시 `docs/ADR/`에 새로운 ADR을 작성하십시오.
+3. **Architecture 문서 업데이트**: 아키텍처 수준의 변경이 발생하면 `docs/ARCHITECTURE.md`의 다이어그램과 설명을 즉시 업데이트하십시오.
+4. **일관성 유지**: 기존 아키텍처 패턴(Git 워크트리 격리, 이벤트 기반 조율 등)과 일치하지 않는 변경을 제안할 때는 명확한 근거를 ADR에 제시하십시오.
+
+### CI/CD 워크플로우 문서
+| 워크플로우 | 경로 | 내용 |
+|------------|------|------|
+| **CI** | `.github/workflows/ci.yml` | PR/Push 테스트 파이프라인 (unit → contract → integration → smoke) |
+| **Security** | `.github/workflows/security.yml` | 보안 스캔 (npm audit, Semgrep, Snyk, Trivy) |
+| **NPM Publish** | `.github/workflows/npm-publish.yml` | 태그 기반 NPM 배포 워크플로우 |
+
+### Module Guide 핵심 요약
+- **Core Layer**: `orchestrator.ts`(중앙 관리자), `lane-state-machine.ts`(상태 머신), `git-lifecycle-manager.ts`(Git 생명주기)
+- **Runner Layer**: `pipeline.ts`, `task.ts`, `agent.ts` - 개별 Lane 내 Task 순차 실행
+- **Services**: `logging/`, `process/` - 인프라 기능
+- **Utils**: `git.ts`, `state.ts`, `events.ts`, `event-registry.ts` - 공통 헬퍼
+
+### cursor-agent 주요 사용 패턴
+```bash
+# CursorFlow에서 사용하는 기본 패턴
+cursor-agent --print --output-format stream-json --force --approve-mcps "프롬프트"
+
+# 세션 재개
+cursor-agent --print --output-format stream-json --resume <chat-id> "프롬프트"
+```
+
+### 테스트 실행 명령어
+```bash
+pnpm run test:unit          # 단위 테스트 (~10초)
+pnpm run test:contract      # Contract 테스트 (~20초)
+pnpm run test:integration   # 통합 테스트 (~60초)
+pnpm run test:smoke         # 스모크 테스트 (~2분)
+pnpm run test:e2e:real      # Real E2E (cursor-agent 필요, ~3-5분)
+pnpm run test:verify        # 빌드 + 유닛 + 스모크
+pnpm run test:ci            # CI 전체 테스트 순차 실행
+```
+
+
+
+## General Principles
+- **Safety First**: Never execute commands that could lead to data loss without confirmation.
+- **Parallelism**: Respect the Git worktree-based architecture.
+- **Traceability**: All operations should be logged or committed with clear messages.
+- **Incremental Commits**: 기능 하나가 구현될 때마다 즉시 커밋하세요. 작은 단위의 커밋이 디버깅과 롤백을 용이하게 합니다.
+    - 하나의 기능/수정 = 하나의 커밋
+    - 커밋 전 `npm run build`로 빌드 확인
+    - semantic commit message 사용 (e.g., `feat:`, `fix:`, `refactor:`)
+
+## Tech Stack & Code Style
+- **Language**: TypeScript (strict mode).
+- **Runtime**: Node.js (>= 18.0.0).
+- **Test Framework**: Jest.
+- **Style Guide**:
+    - Use async/await for asynchronous operations.
+    - Prefer functional programming patterns where appropriate.
+    - Use semantic commit messages (e.g., `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`).
+    - Ensure all public APIs are documented in JSDoc.
+
+## NPM Deployment Best Practices
+- **Release Flow**: Always use the provided release script for versioning and tagging.
+    - Command: `./scripts/release.sh [patch|minor|major]`
+    - This script handles:
+        1. **Git Status Check**: Ensures the working directory is clean.
+        2. **Branch Check**: Verifies that you are on the `main` branch.
+        3. **Version Bump**: Updates `package.json` version using `npm version`.
+        4. **CHANGELOG**: Prompts to update `CHANGELOG.md` before committing.
+        5. **Tagging**: Creates a git tag (e.g., `v0.1.3`) for the release.
+        6. **GitHub Push**: Pushes the commit and tag to trigger the GitHub Actions deployment workflow.
+
+### ⚠️ 배포 전 필수 테스트 (Pre-Release Testing)
+**배포 전에 반드시 CI와 동일한 테스트를 로컬에서 실행하세요:**
+```bash
+# CI와 동일한 테스트 순서
+pnpm run build              # 1. 빌드
+pnpm run test:unit          # 2. 단위 테스트
+pnpm run test:contract      # 3. Contract 테스트
+pnpm run test:integration   # 4. 통합 테스트
+pnpm run test:smoke         # 5. 스모크 테스트
+
+# 또는 한번에 실행 (권장)
+pnpm run test:ci            # 위 모든 테스트 순차 실행
+```
+**모든 테스트가 통과해야만 버전 태그를 푸시하세요!**
+
+- **Pre-publish Checks**: The `prepublishOnly` script (`npm run build && npm run validate`) runs automatically. Never skip these checks as they ensure the package is functional and secure.
+- **Validation**: Run `npm run validate` (which executes `npm pack --dry-run`) to verify the file list in the package bundle before initiating a release.
+- **Deployment**: Actual publishing to NPM is handled by GitHub Actions upon pushing a new tag. Monitor the progress at the GitHub Actions tab.
+
+## Security & Compliance
+- **Security Gate**: Always run the local security gate before major changes or PRs.
+    - Command: `npm run security:check` (runs `scripts/local-security-gate.sh`).
+- **Included Checks**:
+    - `npm audit`: Checks for high-severity dependency vulnerabilities.
+    - `semgrep`: Static analysis for security patterns (similar to CodeQL).
+    - `Secret Scan`: Checks for hardcoded API keys, tokens, or passwords.
+    - `AI Security Analysis`: (Optional) AI-powered code security review (requires `OPENAI_API_KEY`).
+- **Cloud Security**: For GitHub Actions, ensure `NPM_TOKEN`, `SNYK_TOKEN`, and `OPENAI_API_KEY` are configured.
+- **Secrets Management**: Never commit `.env` files or hardcoded credentials. Use environment variables.
+- **Package Integrity**: Use `npm run validate` to verify the package structure and ensure no sensitive files are included in the bundle.
+
+## Testing & Quality Assurance
+- **Unit Tests**: Run `npm test` frequently during development.
+- **Test Projects**: Use the `test-projects/demo-project` for integration testing.
+- **Scripts**: Use `./test-cursorflow.sh [setup|run|watch|clean]` to verify orchestrator behavior in a real-world scenario.
+
+## Cursor IDE Integration
+- **Custom Commands**: Support and maintain the custom slash commands:
+    - `/cursorflow-init`: Initialize a project.
+    - `/cursorflow-prepare`: Prepare tasks.
+    - `/cursorflow-run`: Run orchestration.
+    - `/cursorflow-monitor`: Monitor runs.
+    - `/cursorflow-clean`: Clean resources.
+    - `/cursorflow-resume`: Resume a lane.
+    - `/cursorflow-doctor`: Verify environment and tasks.
+    - `/cursorflow-signal`: Intervene in a running lane.
+    - `/cursorflow-review`: Configure or check reviews.
+
+## 📝 문서 업데이트 가이드라인 (Document Update Guidelines)
+
+코드 변경 시 관련 문서를 반드시 업데이트해야 합니다.
+
+### 어떤 변경이 문서 업데이트를 필요로 하는가?
+
+| 코드 변경 | 업데이트할 문서 |
+|-----------|----------------|
+| 새로운 모듈/컴포넌트 추가 | `docs/MODULE_GUIDE.md` |
+| cursor-agent 연동 변경 | `docs/CURSOR_AGENT_GUIDE.md` |
+| 테스트 구조 변경 | `docs/TEST_ARCHITECTURE.md` |
+| Hook API 변경 | `docs/HOOKS_GUIDE.md` |
+| CLI 커맨드 추가/변경 | `README.md` |
+| CI/CD 워크플로우 변경 | `.github/workflows/*.yml` 주석 및 README |
+| 설정 옵션 변경 | `README.md`, 해당 가이드 문서 |
+
+### 문서 작성 원칙
+1. **코드와 동기화**: 문서가 현재 코드 동작을 정확히 반영해야 함
+2. **예시 포함**: 가능한 경우 실행 가능한 코드 예시 포함
+3. **한글/영어 일관성**: 기존 문서 언어 스타일 따르기
+4. **버전 정보**: 필요시 버전별 동작 차이 명시
+
+### 커밋 시 문서 체크리스트
+- [ ] 새로운 기능에 대한 문서가 추가되었는가?
+- [ ] 변경된 API/옵션에 대한 문서가 업데이트되었는가?
+- [ ] 예시 코드가 실제로 동작하는가?
+- [ ] 관련 Cursor rules가 업데이트되었는가?

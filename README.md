@@ -391,6 +391,7 @@ module.exports = {
 ## 📖 Documentation
 
 ### Core Guides
+- [🏛️ Architecture](docs/ARCHITECTURE.md) - Core principles, isolation, and recovery mechanisms
 - [📘 Module Guide](docs/MODULE_GUIDE.md) - Architecture and module structure
 - [🤖 cursor-agent Guide](docs/CURSOR_AGENT_GUIDE.md) - CLI usage and output parsing
 - [🧪 Test Architecture](docs/TEST_ARCHITECTURE.md) - Test layers and strategies
