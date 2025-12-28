@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2025-12-28
+
+### Added
+- **Logging**: Introduced tool-specific labels (READ, EDIT, SHLL, etc.) and emojis for better visibility.
+- **Logging**: Added path simplification (absolute path to relative `./`) in tool execution logs.
+
+### Improved
+- **Logging**: Enhanced log color consistency by dimming unimportant system and info logs.
+- **Logging**: Improved multi-line thinking message formatting with proper indentation.
+
+### Fixed
+- **Logging**: Fixed box alignment issues for USER and SYS messages by accurately calculating terminal visual width for emojis.
+- **Logging**: Filtered out redundant or empty agent events from readable logs.
+
 ## [0.1.37] - 2025-12-26
 
 ### Fixed
