@@ -58,9 +58,9 @@ describe('Log Formatter', () => {
         const result = formatMessageForConsole(msg, { includeTimestamp: false, compact: true });
         
         console.log('TOOL: ' + result);
-        // Should show Shell, not ShellToolCall
+        // Should show TOOL label, not ShellToolCall
         expect(stripAnsi(result)).not.toContain('ShellToolCall');
-        expect(stripAnsi(result)).toContain('Shell');
+        expect(stripAnsi(result)).toContain('TOOL');
       });
 
       it('should format run_terminal_cmd as shell', () => {
@@ -68,7 +68,8 @@ describe('Log Formatter', () => {
         const result = formatMessageForConsole(msg, { includeTimestamp: false, compact: true });
         
         console.log('TOOL run_terminal_cmd: ' + result);
-        expect(stripAnsi(result)).toContain('shell');
+        // Should show SHLL label for shell commands
+        expect(stripAnsi(result)).toContain('SHLL');
       });
 
       it('should format read_file tool call', () => {
@@ -76,7 +77,8 @@ describe('Log Formatter', () => {
         const result = formatMessageForConsole(msg, { includeTimestamp: false, compact: true });
         
         console.log('TOOL read_file: ' + result);
-        expect(result).toContain('read_file');
+        // Should show READ label and the path
+        expect(stripAnsi(result)).toContain('READ');
       });
 
       it('should be gray/dim for tool messages', () => {
@@ -89,11 +91,22 @@ describe('Log Formatter', () => {
     });
 
     describe('Tool result messages', () => {
-      it('should format tool result with gray color', () => {
+      it('should skip standard tool result messages', () => {
+        // Standard [Tool Result: x] messages are skipped by the formatter
         const msg = baseMessage('tool_result', '[Tool Result: read_file]');
         const result = formatMessageForConsole(msg, { includeTimestamp: false, compact: true });
         
-        expect(result).toContain('RESL');
+        // Standard tool results return empty string (skipped)
+        expect(result).toBe('');
+        console.log('TOOL_RESULT (skipped): ' + result);
+      });
+      
+      it('should format custom tool result with RESL label', () => {
+        // Non-standard tool results are shown with RESL label
+        const msg = baseMessage('tool_result', 'Custom result content');
+        const result = formatMessageForConsole(msg, { includeTimestamp: false, compact: true });
+        
+        expect(stripAnsi(result)).toContain('RESL');
         console.log('TOOL_RESULT: ' + result);
       });
     });

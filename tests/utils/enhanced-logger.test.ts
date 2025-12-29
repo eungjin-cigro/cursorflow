@@ -5,14 +5,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { 
-  stripAnsi, 
-  formatTimestamp, 
   createLogManager,
   readJsonLog,
   exportLogs,
   DEFAULT_LOG_CONFIG,
   JsonLogEntry,
 } from '../../src/utils/enhanced-logger';
+import { stripAnsi, formatTimestampISO } from '../../src/services/logging/formatter';
 
 describe('Enhanced Logger', () => {
   const testDir = path.join(__dirname, 'test-logs');
@@ -65,26 +64,26 @@ describe('Enhanced Logger', () => {
     });
   });
 
-  describe('formatTimestamp', () => {
+  describe('formatTimestampISO', () => {
     it('should format as ISO', () => {
-      const result = formatTimestamp('iso');
+      const result = formatTimestampISO('iso');
       expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
 
     it('should format as short time', () => {
-      const result = formatTimestamp('short');
+      const result = formatTimestampISO('short');
       expect(result).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     });
 
     it('should format as relative with start time', () => {
       const startTime = Date.now() - 65000; // 65 seconds ago
-      const result = formatTimestamp('relative', startTime);
+      const result = formatTimestampISO('relative', startTime);
       expect(result).toMatch(/^\+1m\d+s$/);
     });
 
     it('should format relative hours correctly', () => {
       const startTime = Date.now() - (2 * 60 * 60 * 1000 + 30 * 60 * 1000); // 2h 30m ago
-      const result = formatTimestamp('relative', startTime);
+      const result = formatTimestampISO('relative', startTime);
       expect(result).toMatch(/^\+2h30m/);
     });
   });
@@ -228,6 +227,5 @@ describe('Enhanced Logger', () => {
       expect(DEFAULT_LOG_CONFIG.timestampFormat).toBe('iso');
     });
   });
-});
 });
 
