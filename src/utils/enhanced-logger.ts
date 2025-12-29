@@ -83,6 +83,10 @@ export class EnhancedLogManager {
    */
   private initLogFiles(): void {
     if (this.config.writeJsonLog) {
+      // Ensure parent directory exists before opening file
+      const logDir = path.dirname(this.jsonlLogPath);
+      fs.mkdirSync(logDir, { recursive: true });
+      
       this.rotateIfNeeded(this.jsonlLogPath);
       this.jsonlLogFd = fs.openSync(this.jsonlLogPath, 'a');
     }
