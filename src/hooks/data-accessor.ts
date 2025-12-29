@@ -333,9 +333,9 @@ export class HookDataAccessorImpl implements HookDataAccessor {
       }
       
       try {
-        // Try multiple possible log file locations
+        // Try multiple possible log file locations, preferring terminal.jsonl
         const possiblePaths = [
-          safeJoin(this.options.runDir, 'terminal-raw.log'),
+          safeJoin(this.options.runDir, 'terminal.jsonl'),
           safeJoin(this.options.runDir, 'terminal.log'),
           safeJoin(this.options.runDir, 'agent-output.log'),
         ];

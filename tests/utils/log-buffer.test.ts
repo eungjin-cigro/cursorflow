@@ -23,19 +23,13 @@ describe('LogBufferService', () => {
   });
 
   /**
-   * Write a log entry in terminal-readable.log format
-   * Format: [HH:MM:SS] [lane-label] emoji TYPE message
+   * Write a log entry in terminal.jsonl format
    */
   const writeLogEntry = (laneDir: string, entry: JsonLogEntry) => {
     if (!fs.existsSync(laneDir)) {
       fs.mkdirSync(laneDir, { recursive: true });
     }
-    // Format timestamp
-    const date = new Date(entry.timestamp);
-    const ts = date.toLocaleTimeString('en-US', { hour12: false });
-    // Format as readable log line
-    const line = `[${ts}] ℹ️ INFO ${entry.message}\n`;
-    fs.appendFileSync(path.join(laneDir, 'terminal-readable.log'), line);
+    fs.appendFileSync(path.join(laneDir, 'terminal.jsonl'), JSON.stringify(entry) + '\n');
   };
 
   beforeEach(() => {

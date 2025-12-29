@@ -94,11 +94,11 @@ describe('Enhanced Logger', () => {
       const manager = createLogManager(testDir, 'test-lane');
       
       const paths = manager.getLogPaths();
-      expect(paths.clean).toContain('terminal-readable.log');
+      expect(paths.jsonl).toContain('terminal.jsonl');
       
       manager.close();
       
-      expect(fs.existsSync(paths.clean)).toBe(true);
+      expect(fs.existsSync(paths.jsonl)).toBe(true);
     });
 
     it('should write stdout data', () => {
@@ -107,7 +107,7 @@ describe('Enhanced Logger', () => {
       manager.writeStdout('Hello World\n');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
       expect(content).toContain('Hello World');
     });
 
@@ -117,54 +117,41 @@ describe('Enhanced Logger', () => {
       manager.writeStderr('Error occurred\n');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
       expect(content).toContain('Error occurred');
     });
 
-    it('should strip ANSI codes in clean log', () => {
+    it('should strip ANSI codes in log content', () => {
       const manager = createLogManager(testDir, 'test-lane', { stripAnsi: true });
       
       manager.writeStdout('\x1b[32mColored text\x1b[0m\n');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
       expect(content).toContain('Colored text');
       expect(content).not.toContain('\x1b[32m');
     });
 
-    it('should keep ANSI codes in raw log', () => {
+    it('should add timestamps to entries', () => {
       const manager = createLogManager(testDir, 'test-lane', { 
-        stripAnsi: true, 
-        keepRawLogs: true 
-      });
-      
-      manager.writeStdout('\x1b[32mColored text\x1b[0m\n');
-      manager.close();
-      
-      const rawContent = fs.readFileSync(path.join(testDir, 'terminal-raw.log'), 'utf8');
-      expect(rawContent).toContain('\x1b[32m');
-    });
-
-    it('should add timestamps to lines', () => {
-      const manager = createLogManager(testDir, 'test-lane', { 
-        addTimestamps: true,
-        timestampFormat: 'iso'
+        writeJsonLog: true,
       });
       
       manager.writeStdout('Timestamped line\n');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
-      // Should contain short time pattern [HH:MM:SS]
-      expect(content).toMatch(/\[\d{2}:\d{2}:\d{2}/);
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
+      const entry = JSON.parse(content.split('\n').filter(l => l.includes('Timestamped line'))[0]);
+      expect(entry.timestamp).toBeDefined();
+      expect(entry.timestamp_iso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
 
-    it('should write session header', () => {
+    it('should write session start entry', () => {
       const manager = createLogManager(testDir, 'test-lane');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
-      expect(content).toContain('CursorFlow Session Log');
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
+      expect(content).toContain('Session started');
       expect(content).toContain('test-lane');
     });
 
@@ -175,17 +162,24 @@ describe('Enhanced Logger', () => {
       manager.writeStdout('Working on task\n');
       manager.close();
       
-      const content = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
+      const content = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
       expect(content).toContain('Task: implement');
-      expect(content).toContain('Model: claude-3.5-sonnet');
+      expect(content).toContain('claude-3.5-sonnet');
     });
   });
 
   describe('readJsonLog', () => {
     it('should read JSON log file', () => {
-      // Note: readJsonLog is currently a stub returning [] for legacy compatibility
-      const result = readJsonLog('any-path');
-      expect(result).toEqual([]);
+      const logPath = path.join(testDir, 'test.jsonl');
+      const entries = [
+        { timestamp: Date.now(), content: 'Line 1' },
+        { timestamp: Date.now() + 100, content: 'Line 2' }
+      ];
+      fs.writeFileSync(logPath, entries.map(e => JSON.stringify(e)).join('\n'));
+      
+      const result = readJsonLog(logPath);
+      expect(result.length).toBe(2);
+      expect(result[0].content).toBe('Line 1');
     });
   });
 
@@ -204,10 +198,11 @@ describe('Enhanced Logger', () => {
       expect(output).toContain('Error line');
     });
 
-    it('should export as JSON (simplified)', () => {
-      // Note: exportLogs currently returns readable log content regardless of format
+    it('should export as JSON', () => {
       const output = exportLogs(testDir, 'json');
-      expect(output).toContain('Line 1');
+      const parsed = JSON.parse(output);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.some((l: any) => l.content === 'Line 1')).toBe(true);
     });
 
     it('should export as markdown (simplified)', () => {
@@ -229,13 +224,10 @@ describe('Enhanced Logger', () => {
     it('should have sensible defaults', () => {
       expect(DEFAULT_LOG_CONFIG.enabled).toBe(true);
       expect(DEFAULT_LOG_CONFIG.stripAnsi).toBe(true);
-      expect(DEFAULT_LOG_CONFIG.addTimestamps).toBe(true);
-      expect(DEFAULT_LOG_CONFIG.maxFileSize).toBe(50 * 1024 * 1024);
-      expect(DEFAULT_LOG_CONFIG.maxFiles).toBe(5);
-      expect(DEFAULT_LOG_CONFIG.keepRawLogs).toBe(true);
-      expect(DEFAULT_LOG_CONFIG.writeJsonLog).toBe(false);
+      expect(DEFAULT_LOG_CONFIG.writeJsonLog).toBe(true);
       expect(DEFAULT_LOG_CONFIG.timestampFormat).toBe('iso');
     });
   });
+});
 });
 

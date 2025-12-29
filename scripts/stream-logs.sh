@@ -57,7 +57,7 @@ trap 'kill $(jobs -p) 2>/dev/null' EXIT
 for lane_dir in "${LATEST_RUN}/lanes"/*; do
     if [ -d "$lane_dir" ]; then
         lane_name=$(basename "$lane_dir")
-        log_file="${lane_dir}/terminal-readable.log"
+        log_file="${lane_dir}/terminal.jsonl"
         color=${COLORS[$color_idx]}
         
         # Start streaming in background

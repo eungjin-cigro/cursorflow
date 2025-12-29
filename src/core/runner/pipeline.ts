@@ -156,7 +156,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   // ALWAYS use current branch as base - ignore config.baseBranch
   // This ensures dependency structure is maintained in the worktree
   const currentBranch = git.getCurrentBranch(repoRoot);
-  logger.info(`📍 Base branch: ${currentBranch} (current branch)`);
+  logger.info(`📍 Base branch: ${currentBranch} (current branch)`, { context: 'git' });
   
   // Load existing state if resuming
   const statePath = safeJoin(runDir, 'state.json');
@@ -207,8 +207,8 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
     logger.section(`🔁 Resuming Pipeline from task ${startIndex + 1}`);
   }
   
-  logger.info(`Pipeline Branch: ${pipelineBranch}`);
-  logger.info(`Worktree: ${worktreeDir}`);
+  logger.info(`Pipeline Branch: ${pipelineBranch}`, { context: 'git' });
+  logger.info(`Worktree: ${worktreeDir}`, { context: 'git' });
   logger.info(`Tasks: ${config.tasks.length}`);
   
   const gitCoordinator = new GitPipelineCoordinator();

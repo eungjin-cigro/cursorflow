@@ -83,37 +83,7 @@ describe('Enhanced Logging E2E', () => {
       }
 
       // Check that log files were created
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal-raw.log'))).toBe(true);
-    });
-
-    it('should not create raw logs when keepRawLogs is false', async () => {
-      const laneRunDir = path.join(lanesDir, 'no-raw-logs-test');
-      fs.mkdirSync(laneRunDir, { recursive: true });
-
-      const result = spawnLane({
-        laneName: 'no-raw-logs-test',
-        tasksFile: path.join(tasksDir, 'test-lane.json'),
-        laneRunDir,
-        executor: 'cursor-agent',
-        startIndex: 0,
-        enhancedLogConfig: {
-          enabled: true,
-          keepRawLogs: false,
-          writeJsonLog: true,
-        },
-      });
-
-      result.child.kill('SIGTERM');
-      await waitChild(result.child);
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      if (result.logManager) {
-        result.logManager.close();
-      }
-
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal-raw.log'))).toBe(false);
+      expect(fs.existsSync(path.join(laneRunDir, 'terminal.jsonl'))).toBe(true);
     });
 
     it('should fall back to simple logging when enhanced logging is disabled', async () => {
@@ -135,20 +105,20 @@ describe('Enhanced Logging E2E', () => {
       await waitChild(result.child);
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Simple logging creates terminal-readable.log
-      expect(fs.existsSync(path.join(laneRunDir, 'terminal-readable.log'))).toBe(true);
-      // No JSON or raw logs when disabled
+      // Simple logging now creates terminal.jsonl
+      expect(fs.existsSync(path.join(laneRunDir, 'terminal.jsonl'))).toBe(true);
+      // No logManager when disabled
       expect(result.logManager).toBeUndefined();
     });
   });
 
   describe('Log Content', () => {
-    it('should include session header with lane info', async () => {
-      const laneRunDir = path.join(lanesDir, 'session-header-test');
+    it('should include session start entry with lane info', async () => {
+      const laneRunDir = path.join(lanesDir, 'session-entry-test');
       fs.mkdirSync(laneRunDir, { recursive: true });
 
       const result = spawnLane({
-        laneName: 'session-header-test',
+        laneName: 'session-entry-test',
         tasksFile: path.join(tasksDir, 'test-lane.json'),
         laneRunDir,
         executor: 'cursor-agent',
@@ -166,10 +136,10 @@ describe('Enhanced Logging E2E', () => {
         result.logManager.close();
       }
 
-      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal-readable.log'), 'utf8');
+      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal.jsonl'), 'utf8');
       
-      expect(logContent).toContain('CursorFlow Session Log');
-      expect(logContent).toContain('session-header-test');
+      expect(logContent).toContain('Session started');
+      expect(logContent).toContain('session-entry-test');
     });
 
     it('should write log entries with proper structure', async () => {
@@ -195,8 +165,8 @@ describe('Enhanced Logging E2E', () => {
         result.logManager.close();
       }
 
-      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal-readable.log'), 'utf8');
-      expect(logContent).toContain('CursorFlow Session Log');
+      const logContent = fs.readFileSync(path.join(laneRunDir, 'terminal.jsonl'), 'utf8');
+      expect(logContent).toContain('Session started');
       expect(logContent).toContain('log-structure-test');
     });
   });

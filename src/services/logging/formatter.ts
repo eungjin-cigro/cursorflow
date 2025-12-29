@@ -81,6 +81,23 @@ export interface FormatOptions {
 }
 
 /**
+ * Get color associated with a message type
+ */
+function getTypeColor(type: string): string {
+  switch (type) {
+    case 'user': return COLORS.cyan;
+    case 'assistant':
+    case 'result':
+    case 'success': return COLORS.green;
+    case 'warn': return COLORS.yellow;
+    case 'error': return COLORS.red;
+    case 'system': return COLORS.white;
+    case 'git': return COLORS.magenta;
+    default: return COLORS.gray;
+  }
+}
+
+/**
  * Format a parsed message for console display
  */
 export function formatMessageForConsole(
@@ -89,6 +106,11 @@ export function formatMessageForConsole(
 ): string {
   const { includeTimestamp = true, laneLabel = '', compact = false, showBorders = true } = options;
   
+  // Determine if should use box format
+  const useBox = !compact && showBorders && BOX_TYPES.has(msg.type);
+  const isImportant = BOX_TYPES.has(msg.type) || msg.type === 'warn' || msg.type === 'error' || msg.type === 'success';
+  const baseColor = getTypeColor(msg.type);
+
   const ts = includeTimestamp 
     ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour12: false }) 
     : '';
@@ -97,10 +119,6 @@ export function formatMessageForConsole(
   // Lane label: fixed 14 chars inside brackets [1-1-lanename  ]
   const labelContent = laneLabel.replace(/^\[|\]$/g, ''); // Remove existing brackets if any
   const truncatedLabel = labelContent.length > 14 ? labelContent.substring(0, 14) : labelContent;
-  
-  // Determine if should use box format
-  const useBox = !compact && showBorders && BOX_TYPES.has(msg.type);
-  const isImportant = BOX_TYPES.has(msg.type) || msg.type === 'warn' || msg.type === 'error' || msg.type === 'success';
   
   const labelColor = isImportant ? COLORS.magenta : COLORS.gray;
   const labelPrefix = truncatedLabel 
@@ -238,9 +256,9 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       break;
       
     case 'system':
-      // System messages are gray (less important)
-      typePrefix = `${COLORS.gray}⚙️  SYS${COLORS.reset}`;
-      formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
+      // System messages are white and match the length of others
+      typePrefix = `${COLORS.white}⚙️ SYST${COLORS.reset}`;
+      formattedContent = `${COLORS.white}${formattedContent}${COLORS.reset}`;
       break;
       
     case 'thinking':
@@ -251,18 +269,18 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       
     case 'info':
       // Info messages are gray (less important)
-      typePrefix = `${COLORS.gray}ℹ️  INFO${COLORS.reset}`;
+      typePrefix = `${COLORS.gray}ℹ️ INFO${COLORS.reset}`;
       formattedContent = `${COLORS.gray}${formattedContent}${COLORS.reset}`;
       break;
       
     case 'warn':
       // Warnings are yellow (important)
-      typePrefix = `${COLORS.yellow}⚠️  WARN${COLORS.reset}`;
+      typePrefix = `${COLORS.yellow}⚠️ WARN${COLORS.reset}`;
       break;
       
     case 'error':
       // Errors are red (important)
-      typePrefix = `${COLORS.red}❌ ERR${COLORS.reset}`;
+      typePrefix = `${COLORS.red}❌ ERR ${COLORS.reset}`;
       break;
       
     case 'success':
@@ -279,6 +297,11 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
       typePrefix = `${COLORS.blue}🔄 PROG${COLORS.reset}`;
       break;
       
+    case 'git':
+      typePrefix = `${COLORS.magenta}🌳 GIT ${COLORS.reset}`;
+      formattedContent = `${COLORS.magenta}${formattedContent}${COLORS.reset}`;
+      break;
+      
     case 'stdout':
     case 'raw':
       // Raw output is gray (less important)
@@ -292,6 +315,66 @@ function formatMessageContent(msg: ParsedMessage, forceCompact: boolean): { type
   }
 
   return { typePrefix, formattedContent };
+}
+
+/**
+ * Detect and format a message that might be a raw JSON string from cursor-agent
+ */
+export function formatPotentialJsonMessage(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return message;
+  }
+  
+  try {
+    const json = JSON.parse(trimmed);
+    if (!json.type) return message;
+    
+    // Convert JSON to a ParsedMessage-like structure for formatting
+    let content: string;
+    let type: string;
+    
+    if (json.type === 'thinking' && json.text) {
+      content = json.text;
+      type = 'thinking';
+    } else if (json.type === 'assistant' && json.message?.content) {
+      content = json.message.content
+        .filter((c: any) => c.type === 'text')
+        .map((c: any) => c.text)
+        .join('');
+      type = 'assistant';
+    } else if (json.type === 'user' && json.message?.content) {
+      content = json.message.content
+        .filter((c: any) => c.type === 'text')
+        .map((c: any) => c.text)
+        .join('');
+      type = 'user';
+    } else if (json.type === 'tool_call' && json.subtype === 'started') {
+      const rawToolName = Object.keys(json.tool_call)[0] || 'unknown';
+      const args = json.tool_call[rawToolName]?.args || {};
+      content = `[Tool: ${rawToolName}] ${JSON.stringify(args)}`;
+      type = 'tool';
+    } else if (json.type === 'tool_call' && json.subtype === 'completed') {
+      const rawToolName = Object.keys(json.tool_call)[0] || 'unknown';
+      content = `[Tool Result: ${rawToolName}]`;
+      type = 'tool_result';
+    } else if (json.type === 'result') {
+      content = json.result || 'Task completed';
+      type = 'result';
+    } else {
+      return message;
+    }
+    
+    return formatMessageForConsole({
+      type: type as any,
+      role: type,
+      content,
+      timestamp: json.timestamp_ms || Date.now()
+    }, { includeTimestamp: false, compact: true });
+    
+  } catch {
+    return message;
+  }
 }
 
 function formatToolCall(content: string, justArgs: boolean = false): string {
@@ -363,7 +446,7 @@ function getTypeInfo(type: MessageType): { label: string; color: string } {
     tool: { label: 'TOOL  ', color: COLORS.yellow },
     tool_result: { label: 'RESULT', color: COLORS.gray },
     result: { label: 'DONE  ', color: COLORS.green },
-    system: { label: 'SYSTEM', color: COLORS.gray },
+    system: { label: 'SYST  ', color: COLORS.white },
     thinking: { label: 'THINK ', color: COLORS.gray },
     success: { label: 'OK    ', color: COLORS.green },
     info: { label: 'INFO  ', color: COLORS.cyan },
@@ -374,6 +457,8 @@ function getTypeInfo(type: MessageType): { label: string; color: string } {
     stdout: { label: 'STDOUT', color: COLORS.white },
     stderr: { label: 'STDERR', color: COLORS.red },
     raw: { label: 'RAW   ', color: COLORS.white },
+    session: { label: 'SESN  ', color: COLORS.cyan },
+    git: { label: 'GIT   ', color: COLORS.magenta },
   };
   
   return typeMap[type] || { label: type.toUpperCase().padEnd(6), color: COLORS.white };

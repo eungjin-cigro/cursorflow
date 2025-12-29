@@ -1410,55 +1410,15 @@ class InteractiveMonitor {
   }
   
   private getTerminalLines(lanePath: string, maxLines: number): string[] {
-    const { dim, reset, cyan, green, yellow, red, gray } = UI.COLORS;
+    const { dim, reset } = UI.COLORS;
     
-    // Choose log source based on format setting
-    if (this.state.readableFormat) {
-      // Try JSONL first for structured readable format
-      const jsonlPath = safeJoin(lanePath, 'terminal.jsonl');
-      if (fs.existsSync(jsonlPath)) {
-        return this.getJsonlLogLines(jsonlPath, maxLines);
-      }
+    // Use terminal.jsonl as the only source for structured readable format
+    const jsonlPath = safeJoin(lanePath, 'terminal.jsonl');
+    if (fs.existsSync(jsonlPath)) {
+      return this.getJsonlLogLines(jsonlPath, maxLines);
     }
     
-    // Fallback to raw terminal log
-    const logPath = safeJoin(lanePath, 'terminal-readable.log');
-    if (!fs.existsSync(logPath)) {
-      return [`${dim}(No output yet)${reset}`];
-    }
-    
-    try {
-      const content = fs.readFileSync(logPath, 'utf8');
-      const allLines = content.split('\n');
-      const totalLines = allLines.length;
-      
-      // Calculate visible range (from end, accounting for scroll offset)
-      const end = Math.max(0, totalLines - this.state.terminalScrollOffset);
-      const start = Math.max(0, end - maxLines);
-      const visibleLines = allLines.slice(start, end);
-      
-      // Format lines with syntax highlighting
-      return visibleLines.map(line => {
-        if (line.includes('[HUMAN INTERVENTION]') || line.includes('Injecting intervention:')) {
-          return `${yellow}${line}${reset}`;
-        }
-        if (line.includes('=== Task:') || line.includes('Starting task:')) {
-          return `${green}${line}${reset}`;
-        }
-        if (line.includes('Executing cursor-agent') || line.includes('cursor-agent-v')) {
-          return `${cyan}${line}${reset}`;
-        }
-        if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-          return `${red}${line}${reset}`;
-        }
-        if (line.toLowerCase().includes('success') || line.toLowerCase().includes('completed')) {
-          return `${green}${line}${reset}`;
-        }
-        return line;
-      });
-    } catch {
-      return [`${dim}(Error reading log)${reset}`];
-    }
+    return [`${dim}(No output yet)${reset}`];
   }
   
   /**

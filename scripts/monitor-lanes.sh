@@ -45,7 +45,7 @@ show_summary() {
     for lane_dir in "${LATEST_RUN}/lanes"/*; do
         if [ -d "$lane_dir" ]; then
             lane_name=$(basename "$lane_dir")
-            log_file="${lane_dir}/terminal-readable.log"
+            log_file="${lane_dir}/terminal.jsonl"
             
             # Extract status if possible (last line of log often contains status info)
             if [ -f "$log_file" ]; then
@@ -54,13 +54,13 @@ show_summary() {
                 
                 # Check for completion or errors
                 STATUS="${BLUE}RUNNING${NC}"
-                if grep -q "✅ Pipeline completed" "$log_file" 2>/dev/null; then
+                if grep -q "Pipeline completed" "$log_file" 2>/dev/null; then
                      STATUS="${GREEN}SUCCESS${NC}"
-                elif grep -q "❌ Pipeline failed" "$log_file" 2>/dev/null; then
+                elif grep -q "Pipeline failed" "$log_file" 2>/dev/null; then
                      STATUS="${RED}ERROR${NC}"
-                elif grep -q "❌ Task failed" "$log_file" 2>/dev/null; then
+                elif grep -q "Task failed" "$log_file" 2>/dev/null; then
                      STATUS="${RED}ERROR${NC}"
-                elif grep -q "✅ ✓ Configuration valid" "$log_file" 2>/dev/null; then
+                elif grep -q "Configuration valid" "$log_file" 2>/dev/null; then
                      STATUS="${BLUE}ACTIVE${NC}"
                 fi
                 

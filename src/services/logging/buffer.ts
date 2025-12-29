@@ -109,14 +109,16 @@ export class LogBufferService extends EventEmitter {
     const newEntries: BufferedLogEntryType[] = [];
 
     for (const laneName of this.lanes) {
-      const readablePath = path.join(lanesDir, laneName, 'terminal-readable.log');
+      const jsonlPath = path.join(lanesDir, laneName, 'terminal.jsonl');
 
       let fd: number | null = null;
       try {
+        if (!fs.existsSync(jsonlPath)) continue;
+
         // Read file content atomically to avoid TOCTOU race condition
-        const lastPos = this.filePositions.get(readablePath) || 0;
-        fd = fs.openSync(readablePath, 'r');
-        const stat = fs.fstatSync(fd); // Use fstat on open fd to avoid race
+        const lastPos = this.filePositions.get(jsonlPath) || 0;
+        fd = fs.openSync(jsonlPath, 'r');
+        const stat = fs.fstatSync(fd); 
         
         if (stat.size > lastPos) {
           const buffer = Buffer.alloc(stat.size - lastPos);
@@ -126,11 +128,16 @@ export class LogBufferService extends EventEmitter {
           const lines = newContent.split('\n').filter(line => line.trim());
 
           for (const line of lines) {
-            const processed = this.processReadableLine(line, laneName);
-            if (processed) newEntries.push(processed);
+            try {
+              const entry = JSON.parse(line);
+              const processed = this.processJsonEntry(entry, laneName);
+              if (processed) newEntries.push(processed);
+            } catch {
+              // Skip invalid JSON
+            }
           }
 
-          this.filePositions.set(readablePath, stat.size);
+          this.filePositions.set(jsonlPath, stat.size);
         }
       } catch { /* File in use, skip */ }
       finally {
@@ -154,11 +161,11 @@ export class LogBufferService extends EventEmitter {
     }
   }
 
-  private processReadableLine(line: string, laneName: string): BufferedLogEntryType | null {
-    const cleaned = stripAnsi(line).trim();
-    if (!cleaned) return null;
-
-    const { timestamp, message, level, type } = this.parseReadableMessage(cleaned);
+  private processJsonEntry(entry: any, laneName: string): BufferedLogEntryType | null {
+    const timestamp = new Date(entry.timestamp || Date.now());
+    const level = entry.level || 'info';
+    const type = entry.type || 'stdout';
+    const message = entry.content || entry.message || '';
     const importance = this.inferImportance(type, level);
 
     return {
@@ -170,63 +177,8 @@ export class LogBufferService extends EventEmitter {
       message: this.truncateMessage(message),
       importance,
       laneColor: this.laneColorMap.get(laneName) || COLORS.white,
-      raw: {
-        timestamp: timestamp.toISOString(),
-        level: level as JsonLogEntry['level'],
-        lane: laneName,
-        message,
-      },
+      raw: entry,
     };
-  }
-
-  private parseReadableMessage(line: string): {
-    timestamp: Date;
-    message: string;
-    level: string;
-    type: MessageType | string;
-  } {
-    let remaining = line;
-    let timestamp = new Date();
-
-    const isoMatch = remaining.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*/);
-    if (isoMatch) {
-      timestamp = new Date(isoMatch[1]!);
-      remaining = remaining.slice(isoMatch[0].length);
-    } else {
-      const timeMatch = remaining.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
-      if (timeMatch) {
-        const [hours, minutes, seconds] = timeMatch[1]!.split(':').map(Number);
-        const now = new Date();
-        now.setHours(hours || 0, minutes || 0, seconds || 0, 0);
-        timestamp = now;
-        remaining = remaining.slice(timeMatch[0].length);
-      }
-    }
-
-    const labelMatch = remaining.match(/^\[[^\]]+\]\s*/);
-    if (labelMatch) {
-      remaining = remaining.slice(labelMatch[0].length);
-    }
-
-    const upper = remaining.toUpperCase();
-    let level = 'info';
-    let type: MessageType | string = 'stdout';
-
-    if (remaining.includes('❌') || upper.includes('ERR') || upper.includes('ERROR')) {
-      level = 'error';
-      type = 'error';
-    } else if (remaining.includes('⚠️') || upper.includes('WARN')) {
-      level = 'warn';
-      type = 'warn';
-    } else if (remaining.includes('🔍') || upper.includes('DEBUG')) {
-      level = 'debug';
-      type = 'debug';
-    } else if (remaining.includes('ℹ️') || upper.includes('INFO')) {
-      level = 'info';
-      type = 'info';
-    }
-
-    return { timestamp, message: remaining, level, type };
   }
 
   private inferImportance(type: string, level: string): LogImportance {

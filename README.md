@@ -313,13 +313,11 @@ Logs use the format `[{n}-{t}-{lanename}]`:
 Example: `[1-2-backend]` = Lane 1, Task 2, lane "backend"
 
 ### Features
-- **ANSI Stripping**: Clean logs without terminal escape codes
-- **Timestamps**: Automatic timestamps on each line (ISO, relative, or short format)
+- **ANSI Stripping**: Logs content without terminal escape codes
+- **Timestamps**: Automatic timestamps on each line (ISO format)
 - **Log Rotation**: Automatic rotation when files exceed size limits
-- **Multiple Formats**: 
-  - `terminal.log` - Clean, readable logs
-  - `terminal-raw.log` - Raw logs with ANSI codes
-  - `terminal.jsonl` - Structured JSON for programmatic access
+- **Unified Format**: 
+  - `terminal.jsonl` - Structured JSON for programmatic access and human-readable display via `cursorflow logs` or `monitor`.
 
 ### Usage
 
@@ -327,7 +325,7 @@ Example: `[1-2-backend]` = Lane 1, Task 2, lane "backend"
 # View logs summary for latest run
 cursorflow logs
 
-# View specific lane logs
+# View specific lane logs (automatically formatted from JSONL)
 cursorflow logs --lane api-setup
 
 # View ALL lanes merged (unified timeline)
@@ -377,12 +375,10 @@ module.exports = {
   // ... other config ...
   enhancedLogging: {
     enabled: true,           // Enable enhanced logging
-    stripAnsi: true,         // Strip ANSI codes for clean logs
-    addTimestamps: true,     // Add timestamps to each line
+    stripAnsi: true,         // Strip ANSI codes
     maxFileSize: 52428800,   // 50MB max before rotation
     maxFiles: 5,             // Keep 5 rotated files
-    keepRawLogs: true,       // Keep raw logs separately
-    writeJsonLog: true,      // Generate JSON logs
+    writeJsonLog: true,      // Generate JSON logs (main format)
     timestampFormat: 'iso',  // 'iso' | 'relative' | 'short'
   },
 };

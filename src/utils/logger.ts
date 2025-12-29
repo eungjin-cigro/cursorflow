@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { COLORS, LogLevel } from './log-constants';
-import { formatMessageForConsole } from './log-formatter';
+import { formatMessageForConsole } from '../services/logging/formatter';
 
 export { COLORS, LogLevel };
 
@@ -92,14 +92,29 @@ function logInternal(
     return;
   }
 
+  // If context is 'git', use the specialized 'git' message type for better coloring
+  const effectiveType = options.context === 'git' ? 'git' : type;
+
+  // If running in a lane, output JSON for the orchestrator to capture and format
+  if (process.env.CURSORFLOW_LANE === 'true') {
+    const jsonMsg = {
+      type: effectiveType,
+      content: message,
+      timestamp_ms: Date.now(),
+      context: options.context ?? defaultContext ?? undefined,
+    };
+    console.log(JSON.stringify(jsonMsg));
+    return;
+  }
+
   const formatted = formatMessageForConsole({
-    type: type as any,
+    type: effectiveType as any,
     role: 'system',
     content: message,
     timestamp: Date.now(),
   }, {
     includeTimestamp: !options.noTimestamp,
-    context: options.context ?? defaultContext ?? undefined,
+    laneLabel: options.context ?? defaultContext ?? undefined,
     compact: !options.box
   });
 

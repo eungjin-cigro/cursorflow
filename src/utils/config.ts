@@ -76,7 +76,7 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     // Advanced
     worktreePrefix: 'cursorflow-',
     maxConcurrentLanes: 10,
-    agentOutputFormat: 'json',
+    agentOutputFormat: 'stream-json',
     
     // Webhooks
     webhooks: [],
@@ -85,10 +85,8 @@ export function loadConfig(projectRoot: string | null = null): CursorFlowConfig 
     enhancedLogging: {
       enabled: true,
       stripAnsi: true,
-      addTimestamps: true,
       maxFileSize: 50 * 1024 * 1024, // 50MB
       maxFiles: 5,
-      keepRawLogs: true,
       writeJsonLog: true,
       timestampFormat: 'iso',
     },
@@ -231,11 +229,9 @@ export function createDefaultConfig(projectRoot: string, force = false): string 
   // Enhanced logging configuration
   enhancedLogging: {
     enabled: true,           // Enable enhanced logging features
-    stripAnsi: true,         // Strip ANSI codes for clean logs
-    addTimestamps: true,     // Add timestamps to each line
+    stripAnsi: true,         // Strip ANSI codes
     maxFileSize: 52428800,   // 50MB max file size before rotation
     maxFiles: 5,             // Number of rotated files to keep
-    keepRawLogs: true,       // Keep raw logs with ANSI codes
     writeJsonLog: true,      // Write structured JSON logs
     timestampFormat: 'iso',  // 'iso' | 'relative' | 'short'
   },

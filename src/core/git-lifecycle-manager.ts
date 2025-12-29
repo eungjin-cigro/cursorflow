@@ -977,9 +977,9 @@ export class GitLifecycleManager {
    */
   private log(message: string): void {
     if (this.verbose) {
-      logger.debug(`[GitLifecycle] ${message}`);
+      logger.debug(`[GitLifecycle] ${message}`, { context: 'git' });
     } else {
-      logger.info(`[GitLifecycle] ${message}`);
+      logger.info(`[GitLifecycle] ${message}`, { context: 'git' });
     }
   }
   

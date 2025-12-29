@@ -27,6 +27,8 @@ export type MessageType =
   | 'progress'
   | 'stdout' 
   | 'stderr'
+  | 'session'
+  | 'git'
   | 'raw';  // Pre-formatted output that should be printed as-is
 
 export interface ParsedMessage {

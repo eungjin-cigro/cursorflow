@@ -26,11 +26,10 @@ import {
   EnhancedLogManager, 
   createLogManager, 
   DEFAULT_LOG_CONFIG,
-  ParsedMessage,
-  stripAnsi
+  ParsedMessage
 } from '../utils/enhanced-logger';
 import { MAIN_LOG_FILENAME } from '../utils/log-constants';
-import { formatMessageForConsole } from '../utils/log-formatter';
+import { formatMessageForConsole, stripAnsi } from '../services/logging/formatter';
 import { FailureType, analyzeFailure as analyzeFailureFromPolicy } from './failure-policy';
 import { 
   savePOF,
@@ -293,6 +292,7 @@ export function spawnLane({
   // Build environment for child process
   const childEnv = {
     ...process.env,
+    CURSORFLOW_LANE: 'true',
   };
   
   if (logConfig.enabled) {
@@ -392,7 +392,7 @@ export function spawnLane({
     return { child, logPath, logManager, info };
   } else {
     // Fallback to simple file logging
-    logPath = getLaneLogPath(laneRunDir, 'raw');
+    logPath = getLaneLogPath(laneRunDir, 'jsonl');
     const logFd = fs.openSync(logPath, 'a');
     
     child = spawn('node', args, {
@@ -519,12 +519,12 @@ async function resolveAllDependencies(
   const worktreeDir = state?.worktreeDir || safeJoin(runRoot, 'resolution-worktree');
 
   if (!fs.existsSync(worktreeDir)) {
-    logger.info(`🏗️ Creating resolution worktree at ${worktreeDir}`);
+    logger.info(`🏗️ Creating resolution worktree at ${worktreeDir}`, { context: 'git' });
     git.createWorktree(worktreeDir, pipelineBranch, { baseBranch: git.getCurrentBranch() });
   }
 
   // 3. Resolve on pipeline branch
-  logger.info(`🔄 Resolving dependencies on branch ${pipelineBranch}`);
+  logger.info(`🔄 Resolving dependencies on branch ${pipelineBranch}`, { context: 'git' });
   git.runGit(['checkout', pipelineBranch], { cwd: worktreeDir });
   
   for (const cmd of uniqueCommands) {
@@ -566,7 +566,7 @@ async function resolveAllDependencies(
     if (task) {
       const lanePipelineBranch = `${pipelineBranch}/${lane.name}`;
       const taskBranch = `${lanePipelineBranch}--${String(currentIdx + 1).padStart(2, '0')}-${task.name}`;
-      logger.info(`Syncing lane ${lane.name} branch ${taskBranch}`);
+      logger.info(`Syncing lane ${lane.name} branch ${taskBranch}`, { context: 'git' });
       
       try {
         // If task branch doesn't exist yet, it will be created from pipelineBranch when the lane starts

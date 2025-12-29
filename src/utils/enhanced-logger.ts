@@ -1,15 +1,11 @@
 /**
- * Enhanced Logger - Simplified terminal output capture
- * 
- * Features:
- * - Raw log: Original output as-is
- * - Readable log: Formatted with formatMessageForConsole style
+ * Enhanced Logger - Simplified JSONL terminal output capture
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { EnhancedLogConfig, ParsedMessage, LogSession } from '../types';
-import { formatMessageForConsole } from './log-formatter';
+import { formatMessageForConsole, stripAnsi } from '../services/logging/formatter';
 import { safeJoin } from './path';
 import { getLaneLogPath } from '../services/logging/paths';
 
@@ -30,80 +26,22 @@ export interface JsonLogEntry {
 export const DEFAULT_LOG_CONFIG: EnhancedLogConfig = {
   enabled: true,
   stripAnsi: true,
-  addTimestamps: true,
   maxFileSize: 50 * 1024 * 1024, // 50MB
   maxFiles: 5,
-  keepRawLogs: true,
-  keepAbsoluteRawLogs: false,
-  raw: false,
-  writeJsonLog: false, // Disabled by default now
+  writeJsonLog: true,
   timestampFormat: 'iso',
 };
 
 /**
- * ANSI escape sequence regex pattern
- */
-const ANSI_REGEX = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-const EXTENDED_ANSI_REGEX = /(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B[PX^_][^\x1B]*\x1B\\|\x1B.)/g;
-
-/**
- * Strip ANSI escape sequences from text
- */
-export function stripAnsi(text: string): string {
-  return text
-    .replace(EXTENDED_ANSI_REGEX, '')
-    .replace(ANSI_REGEX, '')
-    .replace(/\r[^\n]/g, '\n')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-}
-
-/**
- * Format timestamp
- */
-export function formatTimestamp(format: 'iso' | 'relative' | 'short', startTime?: number): string {
-  const now = Date.now();
-  
-  switch (format) {
-    case 'iso':
-      return new Date(now).toISOString();
-    case 'relative':
-      if (startTime) {
-        const elapsed = now - startTime;
-        const seconds = Math.floor(elapsed / 1000);
-        const minutes = Math.floor(seconds / 60);
-        const hours = Math.floor(minutes / 60);
-        
-        if (hours > 0) {
-          return `+${hours}h${minutes % 60}m${seconds % 60}s`;
-        } else if (minutes > 0) {
-          return `+${minutes}m${seconds % 60}s`;
-        } else {
-          return `+${seconds}s`;
-        }
-      }
-      return new Date(now).toISOString();
-    case 'short':
-      return new Date(now).toLocaleTimeString('en-US', { hour12: false });
-    default:
-      return new Date(now).toISOString();
-  }
-}
-
-/**
- * Simplified Log Manager - Only raw and readable logs
+ * Enhanced Log Manager - JSONL format only
  */
 export class EnhancedLogManager {
   private config: EnhancedLogConfig;
   private session: LogSession;
   private logDir: string;
   
-  private rawLogPath: string;
-  private readableLogPath: string;
-  
-  private rawLogFd: number | null = null;
-  private readableLogFd: number | null = null;
-  
-  private rawLogSize: number = 0;
+  private jsonlLogPath: string;
+  private jsonlLogFd: number | null = null;
   
   private onParsedMessage?: (msg: ParsedMessage) => void;
 
@@ -117,10 +55,7 @@ export class EnhancedLogManager {
     fs.mkdirSync(logDir, { recursive: true });
     
     // Subprocess (lane) logs live in the lane run directory to avoid nesting with main logs.
-    // Main process logs are written separately to a run-level file (see utils/logger.ts).
-    // Set up log file paths (simplified)
-    this.rawLogPath = getLaneLogPath(logDir, 'raw');
-    this.readableLogPath = getLaneLogPath(logDir, 'readable');
+    this.jsonlLogPath = getLaneLogPath(logDir, 'jsonl');
     
     // Initialize log files
     this.initLogFiles();
@@ -147,47 +82,33 @@ export class EnhancedLogManager {
    * Initialize log files and write session headers
    */
   private initLogFiles(): void {
-    // Check and rotate if necessary
-    if (this.config.keepRawLogs) {
-      this.rotateIfNeeded(this.rawLogPath);
-      this.rawLogFd = fs.openSync(this.rawLogPath, 'a');
+    if (this.config.writeJsonLog) {
+      this.rotateIfNeeded(this.jsonlLogPath);
+      this.jsonlLogFd = fs.openSync(this.jsonlLogPath, 'a');
     }
     
-    this.rotateIfNeeded(this.readableLogPath);
-    this.readableLogFd = fs.openSync(this.readableLogPath, 'a');
-    
-    // Get initial file size for raw log if enabled
-    if (this.rawLogFd !== null) {
-      try {
-        this.rawLogSize = fs.statSync(this.rawLogPath).size;
-      } catch {
-        this.rawLogSize = 0;
-      }
-    }
-    
-    // Write session header
-    this.writeSessionHeader();
+    // Write session start to JSON log
+    this.writeSessionStart();
   }
 
   /**
-   * Write session header to logs
+   * Write session start to JSON log
    */
-  private writeSessionHeader(): void {
-    const header = `
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  CursorFlow Session Log                                                       ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║  Session ID:  ${this.session.id.padEnd(62)}║
-║  Lane:        ${this.session.laneName.padEnd(62)}║
-║  Task:        ${(this.session.taskName || '-').padEnd(62)}║
-║  Model:       ${(this.session.model || 'default').padEnd(62)}║
-║  Started:     ${new Date(this.session.startTime).toISOString().padEnd(62)}║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-`;
-    
-    this.writeToRawLog(header);
-    this.writeToReadableLog(header);
+  private writeSessionStart(): void {
+    if (this.config.writeJsonLog) {
+      this.writeToJsonLog({
+        type: 'session',
+        role: 'system',
+        content: 'Session started',
+        timestamp: this.session.startTime,
+        metadata: {
+          sessionId: this.session.id,
+          laneName: this.session.laneName,
+          taskName: this.session.taskName,
+          model: this.session.model,
+        }
+      });
+    }
   }
 
   /**
@@ -234,58 +155,37 @@ export class EnhancedLogManager {
   }
 
   /**
-   * Write to raw log with size tracking
+   * Write to JSONL log
    */
-  private writeToRawLog(data: string | Buffer): void {
-    if (this.rawLogFd === null) return;
-    
-    const buffer = typeof data === 'string' ? Buffer.from(data) : data;
-    fs.writeSync(this.rawLogFd, buffer);
-    this.rawLogSize += buffer.length;
-    
-    // Check if rotation needed
-    if (this.rawLogSize >= this.config.maxFileSize) {
-      fs.closeSync(this.rawLogFd);
-      this.rotateLog(this.rawLogPath);
-      this.rawLogFd = fs.openSync(this.rawLogPath, 'a');
-      this.rawLogSize = 0;
-    }
-  }
-
-  /**
-   * Write to readable log
-   */
-  private writeToReadableLog(data: string): void {
-    if (this.readableLogFd === null) return;
+  private writeToJsonLog(msg: ParsedMessage): void {
+    if (this.jsonlLogFd === null) return;
     
     try {
-      fs.writeSync(this.readableLogFd, data);
+      // Add lane and task context to JSON log
+      const entry = {
+        ...msg,
+        lane: this.session.laneName,
+        task: this.session.taskName,
+        laneIndex: this.session.laneIndex,
+        taskIndex: this.session.taskIndex,
+        timestamp_iso: new Date(msg.timestamp).toISOString(),
+      };
+      
+      fs.writeSync(this.jsonlLogFd, JSON.stringify(entry) + '\n');
     } catch {
       // Ignore write errors
     }
   }
 
   /**
-   * Write a parsed message to the readable log using formatMessageForConsole style
+   * Write a parsed message to the JSON log and console
    */
   public writeReadableMessage(msg: ParsedMessage): void {
-    // Use formatMessageForConsole for consistent formatting
-    // Use short lane-task label like [1-1-lanename10]
-    const formatted = formatMessageForConsole(msg, {
-      laneLabel: `[${this.getLaneTaskLabel()}]`,
-      includeTimestamp: false, // We'll add our own short timestamp
-    });
-    
-    // If formatted message is empty (e.g. tool_result OK that we want to skip), don't write anything
-    if (!formatted || formatted.trim() === '') {
-      return;
+    // Write to JSON log
+    if (this.config.writeJsonLog) {
+      this.writeToJsonLog(msg);
     }
-    
-    // Strip ANSI codes and add short timestamp for file output
-    const clean = stripAnsi(formatted);
-    const ts = this.getShortTime();
-    this.writeToReadableLog(`[${ts}] ${clean}\n`);
-    
+
     // Callback for console output
     if (this.onParsedMessage) {
       this.onParsedMessage(msg);
@@ -297,12 +197,8 @@ export class EnhancedLogManager {
    */
   public writeStdout(data: Buffer | string): void {
     const text = data.toString();
-    
-    // Write raw log (original data)
-    this.writeToRawLog(data);
-    
-    // Parse JSON output and write to readable log
     const lines = text.split('\n');
+    
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -318,7 +214,7 @@ export class EnhancedLogManager {
           }
           // parseJsonToMessage returned null - create fallback message for known JSON
           if (json.type) {
-            // Skip noisy events that we don't want to show in the readable log
+            // Skip noisy events that we don't want to show
             if (json.type === 'thinking' || json.type === 'call' || 
                (json.type === 'tool_call' && !json.tool_call)) {
               continue;
@@ -338,43 +234,31 @@ export class EnhancedLogManager {
         }
       }
       
-      // Non-JSON line - write as-is with short timestamp and lane-task label
+      // Non-JSON line
       const cleanLine = stripAnsi(trimmed);
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
-        const label = this.getLaneTaskLabel();
-        const ts = this.getShortTime();
+        // Detect if this looks like Git output
+        const isGit = this.isGitOutput(cleanLine);
+        const type = isGit ? 'git' : 'stdout';
         
-        // For file output, use clean line (no ANSI codes)
-        let fileFormattedLine: string;
-        if (hasTimestamp) {
-          fileFormattedLine = cleanLine.includes(`[${label}]`) 
-            ? cleanLine 
-            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
-        } else {
-          fileFormattedLine = `[${ts}] [${label}] ${cleanLine}`;
-        }
-        
-        this.writeToReadableLog(`${fileFormattedLine}\n`);
-        
-        // For console output, preserve ANSI colors from original line
+        // Output to console
         if (this.onParsedMessage) {
-          let consoleFormattedLine: string;
-          if (hasTimestamp) {
-            consoleFormattedLine = trimmed.includes(`[${label}]`) 
-              ? trimmed 
-              : trimmed.replace(/^(\[[^\]]+\])/, `$1 [${label}]`);
-          } else {
-            consoleFormattedLine = `[${ts}] [${label}] ${trimmed}`;
-          }
-          
-          const rawMsg: ParsedMessage = {
-            type: 'raw',
+          this.onParsedMessage({
+            type,
             role: 'system',
-            content: consoleFormattedLine,
+            content: trimmed,
             timestamp: Date.now(),
-          };
-          this.onParsedMessage(rawMsg);
+          });
+        }
+
+        // Write to JSON log
+        if (this.config.writeJsonLog) {
+          this.writeToJsonLog({
+            type,
+            role: 'system',
+            content: cleanLine,
+            timestamp: Date.now(),
+          });
         }
       }
     }
@@ -388,14 +272,33 @@ export class EnhancedLogManager {
     const timestamp = json.timestamp_ms || Date.now();
     
     switch (type) {
+      case 'info':
+      case 'warn':
+      case 'error':
+      case 'success':
+      case 'debug':
+      case 'progress':
       case 'system':
-        return {
-          type: 'system',
-          role: 'system',
-          content: `Model: ${json.model || 'unknown'}, Mode: ${json.permissionMode || 'default'}`,
-          timestamp,
-        };
-        
+      case 'git':
+        // Handle internal logger JSON or cursor-agent system events
+        if (json.content && typeof json.content === 'string') {
+          return {
+            type: type as any,
+            role: 'system',
+            content: json.content,
+            timestamp,
+          };
+        }
+        if (type === 'system') {
+          return {
+            type: 'system',
+            role: 'system',
+            content: `Model: ${json.model || 'unknown'}, Mode: ${json.permissionMode || 'default'}`,
+            timestamp,
+          };
+        }
+        return null;
+
       case 'user':
         if (json.message?.content) {
           const textContent = json.message.content
@@ -491,49 +394,71 @@ export class EnhancedLogManager {
    */
   public writeStderr(data: Buffer | string): void {
     const text = data.toString();
-    
-    // Write raw log
-    this.writeToRawLog(data);
-    
-    // Write to readable log - treat stderr same as stdout
-    // Git and many tools use stderr for non-error output
     const lines = text.split('\n');
     for (const line of lines) {
       const cleanLine = stripAnsi(line).trim();
       if (cleanLine && !this.isNoiseLog(cleanLine)) {
-        const hasTimestamp = /^\[(\d{4}-\d{2}-\d{2}T|\d{2}:\d{2}:\d{2})\]/.test(cleanLine);
-        const label = this.getLaneTaskLabel();
-        const ts = this.getShortTime();
-        
-        // Determine if this is actually an error message
         const isError = this.isErrorLine(cleanLine);
-        const prefix = isError ? '❌ ERR' : '';
+        const isGit = this.isGitOutput(cleanLine);
+        const type = isError ? 'stderr' : (isGit ? 'git' : 'stderr');
         
-        let formattedLine: string;
-        if (hasTimestamp) {
-          formattedLine = cleanLine.includes(`[${label}]`) 
-            ? cleanLine 
-            : cleanLine.replace(/^(\[[^\]]+\])/, `$1 [${label}]${prefix ? ' ' + prefix : ''}`);
-        } else {
-          formattedLine = prefix 
-            ? `[${ts}] [${label}] ${prefix} ${cleanLine}`
-            : `[${ts}] [${label}] ${cleanLine}`;
+        // Write to JSON log
+        if (this.config.writeJsonLog) {
+          this.writeToJsonLog({
+            type,
+            role: 'system',
+            content: cleanLine,
+            timestamp: Date.now(),
+            metadata: { isError, isGit }
+          });
         }
-        
-        this.writeToReadableLog(`${formattedLine}\n`);
         
         // Output to console
         if (this.onParsedMessage) {
-          const rawMsg: ParsedMessage = {
-            type: 'raw',
+          this.onParsedMessage({
+            type,
             role: 'system',
-            content: formattedLine,
+            content: line.trim(),
             timestamp: Date.now(),
-          };
-          this.onParsedMessage(rawMsg);
+          });
         }
       }
     }
+  }
+
+  /**
+   * Check if a line is likely Git output
+   */
+  private isGitOutput(text: string): boolean {
+    const gitPatterns = [
+      /^Running: git /i,
+      /^git version /i,
+      /^On branch /i,
+      /^Your branch is /i,
+      /^Changes to be committed:/i,
+      /^Changes not staged for commit:/i,
+      /^Untracked files:/i,
+      /^\s*\((use "git |use --|use -)/i,
+      /^\s*modified:\s+/i,
+      /^\s*new file:\s+/i,
+      /^\s*deleted:\s+/i,
+      /^\s*renamed:\s+/i,
+      /^Switched to branch /i,
+      /^Switched to a new branch /i,
+      /^Merge made by the /i,
+      /^Everything up-to-date/i,
+      /^Already up to date/i,
+      /^branch '.*' set up to track remote branch '.*' from 'origin'/i,
+      /^Counting objects: /i,
+      /^Compressing objects: /i,
+      /^Writing objects: /i,
+      /^Total \d+ \(delta \d+\)/i,
+      /^remote: Resolving deltas:/i,
+      /^To .*\.git/i,
+      /^[a-f0-9]{7,40}\.\.[a-f0-9]{7,40}\s+.*->\s+.*/i,
+    ];
+    
+    return gitPatterns.some(p => p.test(text));
   }
 
   /**
@@ -561,24 +486,43 @@ export class EnhancedLogManager {
    * Write a custom log entry
    */
   public log(level: 'info' | 'error' | 'debug', message: string, metadata?: Record<string, any>): void {
-    const ts = this.getShortTime();
-    const label = this.getLaneTaskLabel();
-    const emoji = level === 'error' ? '❌' : level === 'info' ? 'ℹ️' : '🔍';
-    const line = `[${ts}] [${label}] ${emoji} ${level.toUpperCase()} ${message}\n`;
-    
-    this.writeToRawLog(line);
-    this.writeToReadableLog(line);
+    const isGit = metadata?.context === 'git';
+    const type = isGit ? 'git' : (level as any);
+
+    if (this.config.writeJsonLog) {
+      this.writeToJsonLog({
+        type,
+        role: 'system',
+        content: message,
+        timestamp: Date.now(),
+        metadata
+      });
+    }
+
+    if (this.onParsedMessage) {
+      this.onParsedMessage({
+        type,
+        role: 'system',
+        content: message,
+        timestamp: Date.now(),
+        metadata
+      });
+    }
   }
 
   /**
    * Add a section marker
    */
   public section(title: string): void {
-    const divider = '═'.repeat(78);
-    const line = `\n${divider}\n  ${title}\n${divider}\n`;
-    
-    this.writeToRawLog(line);
-    this.writeToReadableLog(line);
+    if (this.config.writeJsonLog) {
+      this.writeToJsonLog({
+        type: 'info',
+        role: 'system',
+        content: `--- ${title} ---`,
+        timestamp: Date.now(),
+        metadata: { isSection: true }
+      });
+    }
   }
 
   /**
@@ -616,11 +560,10 @@ export class EnhancedLogManager {
   /**
    * Get paths to all log files
    */
-  public getLogPaths(): { clean: string; raw: string; readable: string } {
+  public getLogPaths(): { jsonl: string; clean: string } {
     return {
-      clean: this.readableLogPath, // For backward compatibility
-      raw: this.rawLogPath,
-      readable: this.readableLogPath,
+      jsonl: this.jsonlLogPath,
+      clean: this.jsonlLogPath, // Backward compatibility
     };
   }
 
@@ -628,7 +571,7 @@ export class EnhancedLogManager {
    * Create file descriptors for process stdio redirection
    */
   public getFileDescriptors(): { stdout: number; stderr: number } {
-    const fd = this.rawLogFd!;
+    const fd = this.jsonlLogFd!;
     return { stdout: fd, stderr: fd };
   }
 
@@ -636,31 +579,23 @@ export class EnhancedLogManager {
    * Close all log files
    */
   public close(): void {
-    // Write session end marker
-    const endMarker = `
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  Session Ended: ${new Date().toISOString().padEnd(60)}║
-║  Duration: ${this.formatDuration(Date.now() - this.session.startTime).padEnd(65)}║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-`;
-    
-    if (this.rawLogFd !== null) {
+    if (this.jsonlLogFd !== null) {
       try {
-        fs.writeSync(this.rawLogFd, endMarker);
-        fs.fsyncSync(this.rawLogFd);
-        fs.closeSync(this.rawLogFd);
+        if (this.config.writeJsonLog) {
+          this.writeToJsonLog({
+            type: 'session',
+            role: 'system',
+            content: 'Session ended',
+            timestamp: Date.now(),
+            metadata: {
+              duration: Date.now() - this.session.startTime,
+            }
+          });
+        }
+        fs.fsyncSync(this.jsonlLogFd);
+        fs.closeSync(this.jsonlLogFd);
       } catch {}
-      this.rawLogFd = null;
-    }
-    
-    if (this.readableLogFd !== null) {
-      try {
-        fs.writeSync(this.readableLogFd, endMarker);
-        fs.fsyncSync(this.readableLogFd);
-        fs.closeSync(this.readableLogFd);
-      } catch {}
-      this.readableLogFd = null;
+      this.jsonlLogFd = null;
     }
   }
 
@@ -669,39 +604,21 @@ export class EnhancedLogManager {
    */
   public getLastError(): string | null {
     try {
-      if (!fs.existsSync(this.readableLogPath)) return null;
-      const content = fs.readFileSync(this.readableLogPath, 'utf8');
-      const lines = content.split('\n').filter(l => 
-        l.includes('❌') || 
-        l.includes('[ERROR]') || 
-        l.includes('error:') || 
-        l.includes('Fatal') ||
-        l.includes('fail')
-      );
-      if (lines.length === 0) {
-        const allLines = content.split('\n').filter(l => l.trim());
-        return allLines.slice(-5).join('\n');
+      if (!fs.existsSync(this.jsonlLogPath)) return null;
+      const content = fs.readFileSync(this.jsonlLogPath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const entry = JSON.parse(lines[i]!);
+          if (entry.type === 'error' || entry.type === 'stderr' && entry.metadata?.isError) {
+            return entry.content;
+          }
+        } catch {}
       }
-      return lines[lines.length - 1]!.trim();
+      return null;
     } catch {
       return null;
     }
-  }
-
-  /**
-   * Format duration for display
-   */
-  private formatDuration(ms: number): string {
-    const seconds = Math.floor((ms / 1000) % 60);
-    const minutes = Math.floor((ms / (1000 * 60)) % 60);
-    const hours = Math.floor(ms / (1000 * 60 * 60));
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${seconds}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds}s`;
-    }
-    return `${seconds}s`;
   }
 }
 
@@ -727,26 +644,43 @@ export function createLogManager(
 }
 
 /**
- * Read and parse JSON log file (legacy compatibility - returns empty array)
+ * Read and parse JSON log file
  */
-export function readJsonLog(logPath: string): JsonLogEntry[] {
-  return [];
+export function readJsonLog(logPath: string): any[] {
+  try {
+    if (!fs.existsSync(logPath)) return [];
+    const content = fs.readFileSync(logPath, 'utf8');
+    return content.split('\n')
+      .filter(l => l.trim())
+      .map(l => {
+        try { return JSON.parse(l); } catch { return null; }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
- * Export logs (legacy compatibility)
+ * Export logs
  */
 export function exportLogs(
   laneRunDir: string,
   format: 'text' | 'json' | 'markdown' | 'html',
   outputPath?: string
 ): string {
-  const logPath = getLaneLogPath(laneRunDir, 'raw');
+  const logPath = getLaneLogPath(laneRunDir, 'jsonl');
   
   let output = '';
-  
   if (fs.existsSync(logPath)) {
-    output = fs.readFileSync(logPath, 'utf8');
+    if (format === 'json') {
+      const logs = readJsonLog(logPath);
+      output = JSON.stringify(logs, null, 2);
+    } else {
+      // Basic text conversion for other formats
+      const logs = readJsonLog(logPath);
+      output = logs.map(l => `[${l.timestamp_iso}] [${l.type}] ${l.content}`).join('\n');
+    }
   }
   
   if (outputPath) {

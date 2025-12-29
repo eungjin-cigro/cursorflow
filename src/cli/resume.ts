@@ -17,7 +17,7 @@ import {
   createLogManager, 
   ParsedMessage
 } from '../utils/enhanced-logger';
-import { formatMessageForConsole } from '../utils/log-formatter';
+import { formatMessageForConsole } from '../services/logging/formatter';
 import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 
 interface ResumeOptions {

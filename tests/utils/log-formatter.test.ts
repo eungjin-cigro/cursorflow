@@ -2,7 +2,7 @@
  * Log Formatter Tests - Verify log output consistency
  */
 
-import { formatMessageForConsole, formatPotentialJsonMessage } from '../../src/utils/log-formatter';
+import { formatMessageForConsole, formatPotentialJsonMessage } from '../../src/services/logging/formatter';
 import { ParsedMessage } from '../../src/utils/enhanced-logger';
 
 // Helper to strip ANSI codes for comparison

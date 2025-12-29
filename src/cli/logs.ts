@@ -10,10 +10,9 @@ import { safeJoin } from '../utils/path';
 import { 
   readJsonLog, 
   exportLogs, 
-  stripAnsi,
   JsonLogEntry 
 } from '../utils/enhanced-logger';
-import { formatPotentialJsonMessage } from '../utils/log-formatter';
+import { formatMessageForConsole, formatPotentialJsonMessage, stripAnsi } from '../services/logging/formatter';
 import { MAIN_LOG_FILENAME } from '../utils/log-constants';
 import { startLogViewer } from '../ui/log-viewer';
 
@@ -152,32 +151,33 @@ function listLanes(runDir: string): string[] {
 }
 
 /**
- * Read and display text logs
+ * Read and display text logs (converted from JSONL)
  */
 function displayTextLogs(
   laneDir: string, 
   options: LogsOptions
 ): void {
-  let logFile: string;
-  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
-  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-
-  if (options.raw) {
-    logFile = rawLog;
-  } else {
-    // Default to readable log (clean option also uses readable now)
-    logFile = readableLog;
-  }
+  const logFile = safeJoin(laneDir, 'terminal.jsonl');
   
   if (!fs.existsSync(logFile)) {
     console.log('No log file found.');
     return;
   }
   
-  let content = fs.readFileSync(logFile, 'utf8');
-  let lines = content.split('\n');
+  const entries = readJsonLog(logFile);
+  let lines = entries.map(entry => {
+    const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
+    const level = entry.level || 'info';
+    const content = entry.content || entry.message || '';
+    
+    if (options.raw) {
+      // In "raw" mode for JSONL, we show a basic text representation
+      return `[${ts}] [${level.toUpperCase()}] ${content}`;
+    }
+    return `[${ts}] [${level.toUpperCase()}] ${stripAnsi(content)}`;
+  });
   
-  // Apply filter (case-insensitive string match to avoid ReDoS)
+  // Apply filter
   if (options.filter) {
     const filterLower = options.filter.toLowerCase();
     lines = lines.filter(line => line.toLowerCase().includes(filterLower));
@@ -186,11 +186,6 @@ function displayTextLogs(
   // Apply tail
   if (options.tail && lines.length > options.tail) {
     lines = lines.slice(-options.tail);
-  }
-  
-  // Clean ANSI if needed (for clean mode or default fallback)
-  if (!options.raw) {
-    lines = lines.map(line => stripAnsi(line));
   }
   
   console.log(lines.join('\n'));
@@ -708,16 +703,7 @@ function escapeHtml(text: string): string {
  * Follow logs in real-time
  */
 function followLogs(laneDir: string, options: LogsOptions): void {
-  let logFile: string;
-  const readableLog = safeJoin(laneDir, 'terminal-readable.log');
-  const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-
-  if (options.raw) {
-    logFile = rawLog;
-  } else {
-    // Default to readable log
-    logFile = readableLog;
-  }
+  const logFile = safeJoin(laneDir, 'terminal.jsonl');
   
   if (!fs.existsSync(logFile)) {
     console.log('Waiting for log file...');
@@ -725,17 +711,14 @@ function followLogs(laneDir: string, options: LogsOptions): void {
   
   let lastSize = 0;
   try {
-    // Use statSync directly to avoid TOCTOU race condition
     lastSize = fs.statSync(logFile).size;
   } catch {
-    // File doesn't exist yet or other error - start from 0
     lastSize = 0;
   }
   
   console.log(`${logger.COLORS.cyan}Following ${logFile}... (Ctrl+C to stop)${logger.COLORS.reset}\n`);
   
   const checkInterval = setInterval(() => {
-    // Use fstat on open fd to avoid TOCTOU race condition
     let fd: number | null = null;
     try {
       fd = fs.openSync(logFile, 'r');
@@ -744,28 +727,37 @@ function followLogs(laneDir: string, options: LogsOptions): void {
         const buffer = Buffer.alloc(stats.size - lastSize);
         fs.readSync(fd, buffer, 0, buffer.length, lastSize);
         
-        let content = buffer.toString();
+        const content = buffer.toString();
+        const lines = content.split('\n').filter(l => l.trim());
         
-        // Apply filter (case-insensitive string match to avoid ReDoS)
-        if (options.filter) {
-          const filterLower = options.filter.toLowerCase();
-          const lines = content.split('\n');
-          content = lines.filter(line => line.toLowerCase().includes(filterLower)).join('\n');
-        }
-        
-        // Clean ANSI if needed (unless raw mode)
-        if (!options.raw) {
-          content = stripAnsi(content);
-        }
-        
-        if (content.trim()) {
-          process.stdout.write(content);
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            const ts = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
+            const level = entry.level || 'info';
+            const levelColor = getLevelColor(level);
+            const message = entry.content || entry.message || '';
+            
+            // Apply level filter
+            if (options.level && level !== options.level) continue;
+            
+            // Apply filter
+            if (options.filter) {
+              const filterLower = options.filter.toLowerCase();
+              if (!message.toLowerCase().includes(filterLower)) continue;
+            }
+            
+            const displayMsg = options.raw ? message : stripAnsi(message);
+            console.log(`${logger.COLORS.gray}[${ts}]${logger.COLORS.reset} ${levelColor}[${level.toUpperCase().padEnd(6)}]${logger.COLORS.reset} ${displayMsg}`);
+          } catch {
+            // Skip invalid JSON
+          }
         }
         
         lastSize = stats.size;
       }
     } catch {
-      // Ignore errors (file might be rotating)
+      // Ignore errors
     } finally {
       if (fd !== null) {
         try { fs.closeSync(fd); } catch { /* ignore */ }
@@ -860,19 +852,13 @@ function displaySummary(runDir: string): void {
   
   for (const lane of lanes) {
     const laneDir = safeJoin(runDir, 'lanes', lane);
-    const rawLog = safeJoin(laneDir, 'terminal-raw.log');
-    const readableLog = safeJoin(laneDir, 'terminal-readable.log');
+    const jsonlLog = safeJoin(laneDir, 'terminal.jsonl');
     
     console.log(`  ${logger.COLORS.green}📁 ${lane}${logger.COLORS.reset}`);
     
-    if (fs.existsSync(readableLog)) {
-      const stats = fs.statSync(readableLog);
-      console.log(`     └─ terminal-readable.log ${formatSize(stats.size)} ${logger.COLORS.yellow}(default)${logger.COLORS.reset}`);
-    }
-    
-    if (fs.existsSync(rawLog)) {
-      const stats = fs.statSync(rawLog);
-      console.log(`     └─ terminal-raw.log      ${formatSize(stats.size)}`);
+    if (fs.existsSync(jsonlLog)) {
+      const stats = fs.statSync(jsonlLog);
+      console.log(`     └─ terminal.jsonl ${formatSize(stats.size)} ${logger.COLORS.yellow}(unified)${logger.COLORS.reset}`);
     }
     
     console.log('');

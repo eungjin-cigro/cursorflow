@@ -11,7 +11,7 @@ async function testThinkingLogs() {
 
   console.log('--- Initializing Log Manager ---');
   const manager = createLogManager(testDir, 'test-lane-thinking', {
-    keepRawLogs: true
+    writeJsonLog: true
   });
 
   manager.setTask('repro-thinking-task', 'sonnet-4.5-thinking');
@@ -31,9 +31,9 @@ async function testThinkingLogs() {
 
   manager.close();
 
-  console.log('\n--- Verifying terminal-readable.log ---');
-  const readableLog = fs.readFileSync(path.join(testDir, 'terminal-readable.log'), 'utf8');
-  console.log(readableLog);
+  console.log('\n--- Verifying terminal.jsonl ---');
+  const jsonlLog = fs.readFileSync(path.join(testDir, 'terminal.jsonl'), 'utf8');
+  console.log(jsonlLog);
 }
 
 testThinkingLogs().catch(console.error);

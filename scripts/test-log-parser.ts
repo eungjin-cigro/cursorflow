@@ -70,15 +70,13 @@ async function main() {
   console.log('  📦 Test 2: StreamingMessageParser (JSONL Parsing)');
   console.log('━'.repeat(80) + '\n');
 
-  const rawLogPath = path.join(FIXTURES_DIR, 'lanes/test-lane/terminal-raw.log');
-  if (fs.existsSync(rawLogPath)) {
-    const rawLog = fs.readFileSync(rawLogPath, 'utf8');
-    const lines = rawLog.split('\n');
-    const jsonLines = lines.filter(l => l.trim().startsWith('{') && l.trim().endsWith('}'));
+  const jsonlLogPath = path.join(FIXTURES_DIR, 'lanes/test-lane/terminal.jsonl');
+  if (fs.existsSync(jsonlLogPath)) {
+    const jsonlLog = fs.readFileSync(jsonlLogPath, 'utf8');
+    const lines = jsonlLog.split('\n').filter(l => l.trim());
     
-    console.log(`📄 Raw log: ${rawLogPath}`);
+    console.log(`📄 JSONL log: ${jsonlLogPath}`);
     console.log(`   Total lines: ${lines.length}`);
-    console.log(`   JSON lines: ${jsonLines.length}`);
     
     // Parse with StreamingMessageParser
     const parsedMessages: ParsedMessage[] = [];
@@ -86,7 +84,7 @@ async function main() {
       parsedMessages.push(msg);
     });
     
-    for (const line of jsonLines) {
+    for (const line of lines) {
       parser.parseLine(line);
     }
     parser.flush();
@@ -117,43 +115,11 @@ async function main() {
       console.log(stripAnsi(formatted).substring(0, 100));
     }
   } else {
-    console.log('⚠️ Raw log not found at:', rawLogPath);
+    console.log('⚠️ JSONL log not found at:', jsonlLogPath);
   }
 
   // ===========================================================================
-  // Test 3: Compare with actual readable log
-  // ===========================================================================
-  console.log('\n' + '━'.repeat(80));
-  console.log('  🔍 Test 3: Compare Parser Output with Actual Log');
-  console.log('━'.repeat(80) + '\n');
-
-  const readableLogPath = path.join(FIXTURES_DIR, 'lanes/test-lane/terminal-readable.log');
-  if (fs.existsSync(readableLogPath)) {
-    const readableLog = fs.readFileSync(readableLogPath, 'utf8');
-    const readableLines = readableLog.split('\n');
-    
-    // Find agent message lines
-    const agentLines = readableLines.filter(line => 
-      line.includes('⚙️ SYS') || 
-      line.includes('🧑 USER') || 
-      line.includes('🤖 ASST') || 
-      line.includes('🔧 TOOL') || 
-      line.includes('📄 RESL')
-    );
-    
-    console.log(`📄 Readable log: ${readableLogPath}`);
-    console.log(`   Total lines: ${readableLines.length}`);
-    console.log(`   Agent message lines: ${agentLines.length}`);
-    
-    console.log(`\n📝 Actual terminal output (first 15 agent messages):`);
-    console.log('-'.repeat(60));
-    for (const line of agentLines.slice(0, 15)) {
-      console.log(stripAnsi(line).substring(0, 100));
-    }
-  }
-
-  // ===========================================================================
-  // Summary
+  // Test 3: Summary
   // ===========================================================================
   console.log('\n' + '='.repeat(80));
   console.log('✅ Log Parser Test Complete');

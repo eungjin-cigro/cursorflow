@@ -174,8 +174,8 @@ describe('HookDataAccessor', () => {
       expect(output).toBe('');
     });
     
-    it('should read terminal-raw.log', async () => {
-      const logPath = path.join(tempDir, 'terminal-raw.log');
+    it('should read terminal.jsonl', async () => {
+      const logPath = path.join(tempDir, 'terminal.jsonl');
       fs.writeFileSync(logPath, 'Line 1\nLine 2\nLine 3');
       
       const accessor = createDataAccessor(options);
@@ -185,7 +185,7 @@ describe('HookDataAccessor', () => {
     });
     
     it('should parse tool calls from JSONL output', async () => {
-      const logPath = path.join(tempDir, 'terminal-raw.log');
+      const logPath = path.join(tempDir, 'terminal.jsonl');
       const logs = [
         'Regular log line',
         JSON.stringify({ type: 'tool_call', name: 'read_file', parameters: { path: 'test.ts' }, timestamp: '2024-01-01T00:00:00Z' }),
@@ -204,7 +204,7 @@ describe('HookDataAccessor', () => {
     });
     
     it('should extract errors from logs', async () => {
-      const logPath = path.join(tempDir, 'terminal-raw.log');
+      const logPath = path.join(tempDir, 'terminal.jsonl');
       fs.writeFileSync(logPath, 'Normal line\nError: Something failed\nWarning: Check this\nAnother normal line');
       
       const accessor = createDataAccessor(options);

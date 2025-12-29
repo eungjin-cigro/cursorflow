@@ -1,10 +1,7 @@
 import * as path from 'path';
 
 export const LOG_FILE_NAMES = {
-  clean: 'terminal.log',
-  raw: 'terminal-raw.log',
   jsonl: 'terminal.jsonl',
-  readable: 'terminal-readable.log',
 } as const;
 
 export type LogFileType = keyof typeof LOG_FILE_NAMES;

@@ -21,11 +21,8 @@ export interface EnhancedLogConfig {
   /** Enable enhanced logging features (default: true) */
   enabled: boolean;
   
-  /** Strip ANSI escape codes from clean logs (default: true) */
+  /** Strip ANSI escape codes from logs (default: true) */
   stripAnsi: boolean;
-  
-  /** Add timestamps to each line (default: true) */
-  addTimestamps: boolean;
   
   /** Maximum size in bytes before rotation (default: 50MB) */
   maxFileSize: number;
@@ -33,20 +30,11 @@ export interface EnhancedLogConfig {
   /** Number of rotated files to keep (default: 5) */
   maxFiles: number;
   
-  /** Write raw output with ANSI codes to separate file (default: true) */
-  keepRawLogs: boolean;
-  
-  /** Keep absolute raw logs without any processing */
-  keepAbsoluteRawLogs?: boolean;
-  
   /** Write structured JSON log entries (default: true) */
   writeJsonLog: boolean;
   
   /** Timestamp format: 'iso' | 'relative' | 'short' (default: 'iso') */
   timestampFormat: 'iso' | 'relative' | 'short';
-  
-  /** Raw output mode */
-  raw?: boolean;
 }
 
 /**
