@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2025-12-30
+
+### Added
+- **Flow Auto-Completion**: Automatic merging of all successful lane branches into a unified `feature/{flow}-integrated` branch.
+- **Cleanup Automation**: Automatic deletion of temporary lane branches and worktrees after successful integration.
+- **Manual Completion CLI**: New `cursorflow complete <flow>` command for manual flow integration and recovery.
+- **Flow Meta Tracking**: Enhanced `flow.meta.json` with integration status, target branch, and error reporting.
+
+### Changed
+- **Event System**: Refactored `CursorFlowEvents` to better handle `runId` and completion events.
+- **Interactive Dashboard**: Updated UI to reflect completion and integration states.
+- **Architecture**: Added ADR-0006 and updated high-level workflow diagrams.
+
+## [0.2.5] - 2025-12-28
+- Internal release with logging and hook improvements.
+
+## [0.2.4] - 2025-12-28
+- Internal release with build fixes and monitor UI updates.
+
+## [0.2.3] - 2025-12-28
+- Chore: bump version to v0.2.3.
+
+
 ## [0.1.37] - 2025-12-26
 
 ### Fixed
