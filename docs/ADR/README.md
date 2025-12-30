@@ -24,4 +24,5 @@ ADR(Architecture Decision Record)은 소프트웨어 아키텍처의 중요한 �
 | 번호 | 제목 | 날짜 | 상태 |
 |---|---|---|---|
 | 0001 | ADR 시스템 도입 | 2025-12-28 | Accepted |
+| 0006 | Flow 완료 시 자동 통합 및 정리 | 2025-12-28 | Accepted |
 

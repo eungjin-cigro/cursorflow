@@ -6,6 +6,49 @@ This document explores the architectural complexities of CursorFlow, focusing on
 
 ---
 
+## 0. High-level Core Workflow
+
+The Orchestrator manages the lifecycle of multiple parallel Lanes. It handles scheduling, dependency resolution, stall detection, and overall coordination.
+
+```mermaid
+graph TD
+    Start(cursorflow run) --> Preflight[1. Preflight Checks]
+    Preflight -- "Blockers Found" --> Exit(Exit with Error)
+    Preflight -- "OK" --> InitRun[2. Initialize Run Context]
+    
+    subgraph "Main Loop"
+        InitRun --> Spawn[3. Spawn Lane Runners]
+        Spawn --> Monitor[4. Monitor & Loop]
+        Monitor --> CheckStatus{Any Change?}
+        
+        CheckStatus -- "Task Done" --> UpdateState[Update state.json]
+        CheckStatus -- "Lane Exit" --> ExitHandler[Handle Exit Code]
+        CheckStatus -- "Stall" --> StallAction[Trigger Recovery Action]
+        CheckStatus -- "No Change" --> Poll[Wait/Poll]
+        
+        ExitHandler -- "Code 0" --> Complete[Mark Completed]
+        ExitHandler -- "Code 2" --> Blocked[Mark Blocked]
+        ExitHandler -- "Error/Killed" --> Failed[Mark Failed / Retry]
+        
+        Blocked -- "Auto-Resolve?" --> Resolve[5. Dependency Resolution]
+        Resolve --> Spawn
+        
+        StallAction -- "SIGTERM" --> ExitHandler
+        
+        UpdateState --> Spawn
+        Poll --> Monitor
+    end
+    
+    ExitHandler -- "All Done" --> Finalize[6. Finalize Flow]
+    Finalize --> AutoComplete{Auto-Complete?}
+    AutoComplete -- "Yes" --> Integrate[7. Merge All Branches]
+    Integrate --> Cleanup[8. Cleanup Resources]
+    Cleanup --> Done(Flow Completed)
+    AutoComplete -- "No" --> Done
+```
+
+---
+
 ## 1. Git-isolated Parallel Workflow
 
 ### Architectural Problem
@@ -20,32 +63,33 @@ CursorFlow uses **Git Worktrees** via the `GitLifecycleManager`. Each "Lane" is 
 - **Shared History**: All worktrees share the same `.git` directory, allowing for seamless cross-branching and merging.
 - **Automated Lifecycle & Change Management**: The `GitLifecycleManager` handles the setup (`ensureWorktree`), task-specific branching (`checkoutBranch`), and the multi-step finalization.
     - **Uncommitted Changes**: Before merging or finishing a task, the system automatically detects uncommitted changes (`git status`). If found, it performs an atomic `git add -A` and `git commit` to ensure no work is lost.
-    - **Conflict Prevention**: By ensuring all changes are committed in the task-specific branch before merging into the pipeline branch, the system maintains a clean audit trail and prevents "dirty working tree" errors during branch switching.
+### Runner Internal Process
 
-### Workflow Diagram
+Inside each Lane Runner (child process), tasks are executed sequentially with atomic checkpoints and git operations.
 
 ```mermaid
-flowchart TD
-    subgraph "Main Repository"
-        BaseBranch["main / target branch"]
+graph TD
+    Start(Runner Process Start) --> InitGit[1. Init Git Worktree]
+    InitGit --> MergeDeps[2. Merge Dependencies]
+    
+    subgraph "Task Loop"
+        MergeDeps --> NextTask{Has Next Task?}
+        NextTask -- "Yes" --> Checkpoint[3. Create Checkpoint]
+        Checkpoint --> RunAgent[4. Execute cursor-agent]
+        RunAgent --> AgentExit{Exit Code?}
+        
+        AgentExit -- "0 (Success)" --> Commit[5. Commit Changes]
+        Commit --> FinalizeTask[6. Update Progress]
+        FinalizeTask --> NextTask
+        
+        AgentExit -- "2 (Blocked)" --> RequestDep[7. Request Dependency]
+        RequestDep --> BlockExit(Exit Code 2)
+        
+        AgentExit -- "Other (Error)" --> ErrorExit(Exit Code 1)
     end
-
-    subgraph "Lane A Worktree"
-        A_Branch["lane-A branch"]
-        A_Files["Physical Files"]
-    end
-
-    subgraph "Lane B Worktree"
-        B_Branch["lane-B branch"]
-        B_Files["Physical Files"]
-    end
-
-    MainRepo -->|"git worktree add"| Lane_A
-    MainRepo -->|"git worktree add"| Lane_B
-    A_Files -->|"finalizeWork()"| A_Branch
-    B_Files -->|"finalizeWork()"| B_Branch
-    A_Branch -->|"mergeToTarget()"| BaseBranch
-    B_Branch -->|"mergeToTarget()"| BaseBranch
+    
+    NextTask -- "No" --> Finish[8. Final Merge & Cleanup]
+    Finish --> SuccessExit(Exit Code 0)
 ```
 
 ---
@@ -81,6 +125,60 @@ sequenceDiagram
     R->>SM: transition(COMPLETED)
     SM->>ER: emit(LANE_COMPLETED)
     ER-->>O: notify(LANE_COMPLETED)
+```
+
+### Primary State Machine
+
+The Lane lifecycle is governed by a state machine that ensures valid transitions and persistence to `state.json`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Register Lane
+    
+    PENDING --> INITIALIZING: START
+    INITIALIZING --> RUNNING: INITIALIZED
+    INITIALIZING --> FAILED: FAILURE
+    
+    state RUNNING {
+        [*] --> RUN_TASK
+        RUN_TASK --> WAITING: WAIT_DEPENDENCY
+        WAITING --> RUN_TASK: DEPENDENCY_RESOLVED
+        
+        RUN_TASK --> PAUSED: PAUSE
+        PAUSED --> RUN_TASK: RESUME
+    }
+    
+    RUNNING --> RECOVERING: RECOVERY_START
+    RECOVERING --> RUNNING: RECOVERY_SUCCESS
+    RECOVERING --> FAILED: RECOVERY_FAILED
+    
+    RUNNING --> COMPLETED: ALL_TASKS_COMPLETED
+    RUNNING --> FAILED: FAILURE
+    WAITING --> FAILED: DEPENDENCY_TIMEOUT
+    
+    COMPLETED --> [*]
+    FAILED --> [*]
+    ABORTED --> [*]
+```
+
+### Sub-State Hierarchy (within RUNNING)
+
+While in the **RUNNING** primary state, a lane cycles through various sub-states for fine-grained monitoring.
+
+```mermaid
+stateDiagram-v2
+    state RUNNING {
+        direction LR
+        PREPARING_GIT --> MERGING_DEPENDENCIES
+        MERGING_DEPENDENCIES --> CREATING_TASK_BRANCH
+        CREATING_TASK_BRANCH --> PREPARING_TASK
+        PREPARING_TASK --> EXECUTING_AGENT
+        EXECUTING_AGENT --> FINALIZING_TASK
+        FINALIZING_TASK --> COMMITTING
+        COMMITTING --> PUSHING
+        PUSHING --> MERGING
+        MERGING --> PREPARING_GIT: Next Task
+    }
 ```
 
 ---
@@ -201,17 +299,17 @@ The `FailurePolicy` acts as a **Taxonomy Engine** and **Circuit Breaker**:
 ### Failure Handling Logic
 
 ```mermaid
-flowchart TD
+graph TD
     Error["Error / Exit Code"] --> Analyze["analyzeFailure()"]
     Analyze --> Type{"Failure Type?"}
     
-    Type -- Transient --> Retry["Retry with Backoff"]
-    Type -- Logic --> Guidance["Intervention: Send Guidance"]
-    Type -- Fatal --> Abort["Abort Lane"]
+    Type -- "Transient" --> Retry["Retry with Backoff"]
+    Type -- "Logic" --> Guidance["Intervention: Send Guidance"]
+    Type -- "Fatal" --> Abort["Abort Lane"]
     
     Retry --> CB{"Circuit Breaker Open?"}
-    CB -- Yes --> Pause["Pause Lane"]
-    CB -- No --> Exec["Re-execute"]
+    CB -- "Yes" --> Pause["Pause Lane"]
+    CB -- "No" --> Exec["Re-execute"]
 ```
 
 ---
@@ -230,7 +328,7 @@ CursorFlow uses a **Preflight Gate** pattern. Before any lanes are spawned, the 
 ### Preflight Gate Logic
 
 ```mermaid
-flowchart TD
+graph TD
     Start["Run Command"] --> Health["runHealthCheck()"]
     
     subgraph Probes
@@ -244,11 +342,11 @@ flowchart TD
     Probes --> Report["Aggregate PreflightResult"]
     
     Report --> Blockers{"Any Blockers?"}
-    Blockers -- Yes --> Fail["Exit with Error"]
-    Blockers -- No --> Warn{"Any Warnings?"}
+    Blockers -- "Yes" --> Fail["Exit with Error"]
+    Blockers -- "No" --> Warn{"Any Warnings?"}
     
-    Warn -- Yes --> Recommend["Show Recommendations"]
-    Warn -- No --> Proceed["Spawn Orchestrator"]
+    Warn -- "Yes" --> Recommend["Show Recommendations"]
+    Warn -- "No" --> Proceed["Spawn Orchestrator"]
     Recommend --> Proceed
 ```
 
@@ -306,7 +404,7 @@ CursorFlow implements an **Enhanced Log Manager** for each lane:
 ### Log Distribution Flow
 
 ```mermaid
-flowchart LR
+graph LR
     ProcA["Lane A Process"] --> StreamA["Stream Buffer A"]
     ProcB["Lane B Process"] --> StreamB["Stream Buffer B"]
     
@@ -321,3 +419,46 @@ flowchart LR
     Global --> Main["cursorflow.log"]
 ```
 
+---
+
+## 10. Flow Auto-Completion & Resource Cleanup
+
+### Architectural Problem
+When all lanes complete successfully, the user faces a manual burden: merging each lane's pipeline branch into a unified feature branch, deleting temporary branches, and removing worktree directories. This manual process is error-prone and creates resource accumulation if forgotten.
+
+### Why it is Non-trivial
+Automatic completion must handle merge conflicts gracefully, maintain audit trails (which branches were merged), and ensure atomic cleanup (if the merge fails, don't delete resources). The state of the Flow must be persisted so that users can see the final result even after the orchestrator exits.
+
+### Chosen Structure and Rationale
+CursorFlow implements **Automatic Flow Completion** in the Orchestrator:
+- **Automatic Integration**: When all lanes succeed, the system creates a `feature/{FlowName}-integrated` branch from the base branch and merges all lane pipeline branches sequentially.
+- **State Persistence**: The `FlowMeta` (stored in `flow.meta.json`) tracks the flow status (`pending` → `running` → `integrating` → `completed`) and the final integrated branch name.
+- **Atomic Cleanup**: Only after successful merge and push, temporary resources (lane branches, worktrees) are deleted.
+- **Fallback**: If auto-completion fails (e.g., merge conflict), the flow is marked as `failed` and `cursorflow complete` can be used manually after resolving issues.
+
+### Flow Completion Sequence
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant FM as FlowMeta
+    participant G as Git
+    participant FS as FileSystem
+
+    O->>O: All lanes completed successfully
+    O->>FM: Update status='integrating'
+    O->>G: checkout baseBranch
+    O->>G: checkout -B feature/{name}-integrated
+    loop Each Lane Branch
+        O->>G: fetch origin/{lane-branch}
+        O->>G: merge --no-ff {lane-branch}
+    end
+    O->>G: push -u origin feature/{name}-integrated
+    O->>G: delete lane branches (local + remote)
+    O->>FS: remove worktrees
+    O->>FM: Update status='completed', integratedBranch, integratedAt
+    O-->>O: Log success
+```
+
+### Related ADR
+- [ADR-0006: Flow 완료 시 자동 통합 및 정리](./ADR/0006-auto-flow-completion-on-success.md)

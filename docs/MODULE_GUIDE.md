@@ -580,6 +580,7 @@ console.log(`Last 10 Git events:`, gitEvents);
 
 ## 13. 관련 문서
 
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - 핵심 아키텍처 원칙, 워크플로우 및 상태 다이어그램
 - [CURSOR_AGENT_GUIDE.md](./CURSOR_AGENT_GUIDE.md) - cursor-agent CLI 사용법
 - [TEST_ARCHITECTURE.md](./TEST_ARCHITECTURE.md) - 테스트 아키텍처
 - [HOOKS_GUIDE.md](./HOOKS_GUIDE.md) - Hook 시스템 사용법

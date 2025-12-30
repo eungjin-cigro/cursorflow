@@ -157,6 +157,7 @@ mobile:                           └─→ [app]
 | `new` | Flow와 Lane 생성 | `cursorflow new Feature --lanes "api,web"` |
 | `add` | Lane에 Task 추가 | `cursorflow add Feature api --task "..."` |
 | `run` | Flow 실행 | `cursorflow run Feature` |
+| `complete` | Flow 통합 및 마무리 | `cursorflow complete Feature` |
 
 ## 🎮 Dashboard Controls
 
@@ -391,7 +392,7 @@ module.exports = {
 ## 📖 Documentation
 
 ### Core Guides
-- [🏛️ Architecture](docs/ARCHITECTURE.md) - Core principles, isolation, and recovery mechanisms
+- [🏛️ Architecture](docs/ARCHITECTURE.md) - Core principles, isolation, and recovery mechanisms (includes Workflow & States)
 - [📘 Module Guide](docs/MODULE_GUIDE.md) - Architecture and module structure
 - [🤖 cursor-agent Guide](docs/CURSOR_AGENT_GUIDE.md) - CLI usage and output parsing
 - [🧪 Test Architecture](docs/TEST_ARCHITECTURE.md) - Test layers and strategies
