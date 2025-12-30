@@ -24,6 +24,12 @@ export interface FlowMeta {
   status: FlowStatus;
   /** List of lane names in this flow */
   lanes: string[];
+  /** Final integrated branch name (set when completed) */
+  integratedBranch?: string;
+  /** Timestamp when flow was integrated (ISO 8601) */
+  integratedAt?: string;
+  /** Error message if flow failed */
+  error?: string;
 }
 
 /**
