@@ -592,6 +592,173 @@ async function resolveAllDependencies(
 }
 
 /**
+ * Finalize flow: merge all lane branches into integrated branch and cleanup
+ */
+async function finalizeFlow(params: {
+  tasksDir: string;
+  runId: string;
+  runRoot: string;
+  laneRunDirs: Record<string, string>;
+  laneWorktreeDirs: Record<string, string>;
+  pipelineBranch: string;
+  repoRoot: string;
+  noCleanup?: boolean;
+}): Promise<void> {
+  const { tasksDir, runId, runRoot, laneRunDirs, laneWorktreeDirs, pipelineBranch, repoRoot, noCleanup } = params;
+  
+  // 1. Load FlowMeta
+  const metaPath = safeJoin(tasksDir, 'flow.meta.json');
+  let meta: any = null;
+  let flowName = path.basename(tasksDir).replace(/^\d+_/, '');
+  let baseBranch = 'main';
+  
+  if (fs.existsSync(metaPath)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      flowName = meta.name || flowName;
+      baseBranch = meta.baseBranch || 'main';
+      
+      // Update status to integrating
+      meta.status = 'integrating';
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    } catch (e) {
+      logger.warn(`Failed to read flow.meta.json: ${e}`);
+    }
+  }
+  
+  logger.section(`🏁 Finalizing Flow: ${flowName}`);
+  
+  // 2. Collect lane branches
+  const laneBranches: string[] = [];
+  for (const [laneName, laneDir] of Object.entries(laneRunDirs)) {
+    const statePath = safeJoin(laneDir, 'state.json');
+    if (fs.existsSync(statePath)) {
+      try {
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        if (state.pipelineBranch) {
+          laneBranches.push(state.pipelineBranch);
+        }
+      } catch (e) {
+        logger.warn(`Failed to read lane state for ${laneName}: ${e}`);
+      }
+    }
+  }
+  
+  if (laneBranches.length === 0) {
+    logger.warn('No lane branches found to integrate');
+    return;
+  }
+  
+  // 3. Create integrated branch
+  const targetBranch = `feature/${flowName}-integrated`;
+  logger.info(`Target Branch: ${targetBranch}`);
+  logger.info(`Base Branch: ${baseBranch}`);
+  logger.info(`Lanes to merge: ${laneBranches.length}`);
+  
+  // Ensure we are on a clean state
+  if (git.hasUncommittedChanges(repoRoot)) {
+    logger.warn('Main repository has uncommitted changes. Stashing...');
+    git.stash('auto-stash before flow completion', { cwd: repoRoot });
+  }
+  
+  // Checkout base branch and create target branch
+  logger.info(`Creating target branch '${targetBranch}' from '${baseBranch}'...`);
+  git.runGit(['checkout', baseBranch], { cwd: repoRoot });
+  git.runGit(['checkout', '-B', targetBranch], { cwd: repoRoot });
+  
+  // 4. Merge each lane branch
+  for (const branch of laneBranches) {
+    logger.info(`Merging ${branch}...`);
+    
+    // Fetch remote branch if needed
+    if (!git.branchExists(branch, { cwd: repoRoot })) {
+      try {
+        git.runGit(['fetch', 'origin', branch], { cwd: repoRoot });
+      } catch (e) {
+        logger.warn(`Failed to fetch ${branch}: ${e}`);
+      }
+    }
+    
+    const branchRef = git.branchExists(branch, { cwd: repoRoot }) ? branch : `origin/${branch}`;
+    
+    const mergeResult = git.safeMerge(branchRef, {
+      cwd: repoRoot,
+      noFf: true,
+      message: `chore: merge lane ${branch} into flow integration`,
+      abortOnConflict: true,
+    });
+    
+    if (!mergeResult.success) {
+      if (mergeResult.conflict) {
+        logger.error(`❌ Merge conflict with '${branch}': ${mergeResult.conflictingFiles.join(', ')}`);
+        
+        // Update meta with error
+        if (meta) {
+          meta.status = 'failed';
+          meta.error = `Merge conflict: ${mergeResult.conflictingFiles.join(', ')}`;
+          fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        }
+        
+        throw new Error(`Merge conflict during integration: ${mergeResult.conflictingFiles.join(', ')}`);
+      }
+      throw new Error(`Merge failed for ${branch}: ${mergeResult.error}`);
+    }
+    logger.success(`✓ Merged ${branch}`);
+  }
+  
+  // 5. Push final branch
+  logger.info(`Pushing '${targetBranch}' to remote...`);
+  git.push(targetBranch, { cwd: repoRoot, setUpstream: true });
+  logger.success(`✓ Pushed ${targetBranch}`);
+  
+  // 6. Cleanup (if not disabled)
+  if (!noCleanup) {
+    logger.info('🧹 Cleaning up temporary resources...');
+    
+    // Delete local and remote lane branches
+    for (const branch of laneBranches) {
+      try {
+        git.deleteBranch(branch, { cwd: repoRoot, force: true });
+        try {
+          git.deleteBranch(branch, { cwd: repoRoot, remote: true });
+        } catch {
+          // Remote branch might not exist or no permission
+        }
+      } catch (e) {
+        logger.warn(`Failed to delete branch ${branch}: ${e}`);
+      }
+    }
+    
+    // Remove worktrees
+    for (const wtPath of Object.values(laneWorktreeDirs)) {
+      if (fs.existsSync(wtPath)) {
+        try {
+          git.removeWorktree(wtPath, { cwd: repoRoot, force: true });
+          if (fs.existsSync(wtPath)) {
+            fs.rmSync(wtPath, { recursive: true, force: true });
+          }
+        } catch (e) {
+          logger.warn(`Failed to remove worktree ${wtPath}: ${e}`);
+        }
+      }
+    }
+  }
+  
+  // 7. Update FlowMeta with completion info
+  if (meta) {
+    meta.status = 'completed';
+    meta.integratedBranch = targetBranch;
+    meta.integratedAt = new Date().toISOString();
+    delete meta.error;
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  }
+  
+  logger.section(`🎉 Flow Completed!`);
+  logger.info(`Integrated branch: ${targetBranch}`);
+  logger.success(`All ${laneBranches.length} lanes merged successfully.`);
+}
+
+/**
  * Run orchestration with dependency management
  */
 export async function orchestrate(tasksDir: string, options: { 
@@ -606,6 +773,10 @@ export async function orchestrate(tasksDir: string, options: {
   skipPreflight?: boolean;
   stallConfig?: Partial<StallDetectionConfig>;
   browser?: boolean;
+  /** Auto-complete flow when all lanes succeed (merge branches, cleanup) */
+  autoComplete?: boolean;
+  /** Skip cleanup even if autoComplete is true */
+  noCleanup?: boolean;
 } = {}): Promise<{ lanes: LaneInfo[]; exitCodes: Record<string, number>; runRoot: string }> {
   const lanes = listLaneFiles(tasksDir);
   
@@ -1119,6 +1290,27 @@ export async function orchestrate(tasksDir: string, options: {
   }
   
   logger.success('All lanes completed successfully!');
+  
+  // Auto-complete flow: merge all lane branches and cleanup
+  const autoComplete = options.autoComplete !== false && !options.noGit;
+  if (autoComplete && completedLanes.size === lanes.length) {
+    try {
+      await finalizeFlow({
+        tasksDir,
+        runId,
+        runRoot,
+        laneRunDirs,
+        laneWorktreeDirs,
+        pipelineBranch,
+        repoRoot,
+        noCleanup: options.noCleanup,
+      });
+    } catch (error: any) {
+      logger.error(`Flow auto-completion failed: ${error.message}`);
+      logger.info('You can manually complete the flow with: cursorflow complete');
+    }
+  }
+  
   events.emit('orchestration.completed', {
     runId,
     laneCount: lanes.length,
