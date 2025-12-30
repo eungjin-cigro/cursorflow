@@ -22,6 +22,7 @@ const COMMANDS: Record<string, CommandFn> = {
   run: require('./run'),
   monitor: require('./monitor'),
   clean: require('./clean'),
+  complete: require('./complete'),
   resume: require('./resume'),
   doctor: require('./doctor'),
   signal: require('./signal'),
@@ -47,6 +48,7 @@ function printHelp(): void {
 \x1b[1mEXECUTION\x1b[0m
   \x1b[33mrun\x1b[0m <flow> [options]         Run orchestration (DAG-based)
   \x1b[33mmonitor\x1b[0m [run-dir] [options]  \x1b[36mInteractive\x1b[0m lane dashboard
+  \x1b[33mcomplete\x1b[0m <flow> [options]     Consolidate all lanes into one branch
   \x1b[33mstop\x1b[0m [run-id] [options]      Stop running workflows
   \x1b[33mresume\x1b[0m [lane] [options]      Resume lane(s)
 
