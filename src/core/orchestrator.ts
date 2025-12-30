@@ -594,7 +594,7 @@ async function resolveAllDependencies(
 /**
  * Finalize flow: merge all lane branches into integrated branch and cleanup
  */
-async function finalizeFlow(params: {
+export async function finalizeFlow(params: {
   tasksDir: string;
   runId: string;
   runRoot: string;
