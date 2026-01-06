@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] - 2026-01-06
+
+### Added
+- **Git Push Fallback**: New `pushWithFallbackBranchName` function that automatically renames branch and retries when push is rejected due to remote conflicts.
+- **Unit Tests**: Comprehensive test coverage for push fallback functionality.
+
+### Fixed
+- **Final Consolidation**: Fixed push rejection errors when merged lane branches already exist on remote with different history.
+- **Flow Integration**: Push errors no longer fail the entire flow - branches are automatically renamed with `-merged-{timestamp}` suffix.
+
 ## [0.2.6] - 2025-12-30
 
 ### Added
