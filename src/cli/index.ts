@@ -30,6 +30,7 @@ const COMMANDS: Record<string, CommandFn> = {
   logs: require('./logs'),
   tasks: require('./tasks'),
   stop: require('./stop'),
+  status: require('./status'),
   setup: require('./setup-commands').main,
 };
 
@@ -53,6 +54,7 @@ function printHelp(): void {
   \x1b[33mresume\x1b[0m [lane] [options]      Resume lane(s)
 
 \x1b[1mINSPECTION\x1b[0m
+  \x1b[33mstatus\x1b[0m [run-id] [options]    View lane status for a run
   \x1b[33mtasks\x1b[0m [name] [options]       Browse and validate prepared tasks
   \x1b[33mlogs\x1b[0m [run-dir] [options]     View, export, and follow logs
   \x1b[33mdoctor\x1b[0m [options]             Check environment and preflight

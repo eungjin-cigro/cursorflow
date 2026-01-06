@@ -11,6 +11,67 @@ import { loadConfig, findProjectRoot } from '../utils/config';
 import { FlowMeta, LaneConfig, FlowTask, ParsedTaskSpec } from '../types/flow';
 import { safeJoin } from '../utils/path';
 
+interface TaskNode {
+  id: string;
+  dependsOn: string[];
+}
+
+/**
+ * Detect cyclic dependencies in task graph using DFS
+ * Returns the cycle path if found, empty array otherwise
+ */
+function detectCyclicDependencies(tasks: TaskNode[]): string[] {
+  const graph = new Map<string, string[]>();
+  
+  for (const task of tasks) {
+    graph.set(task.id, task.dependsOn);
+    // Also add dependency nodes to graph if they don't exist
+    for (const dep of task.dependsOn) {
+      if (!graph.has(dep)) {
+        graph.set(dep, []);
+      }
+    }
+  }
+  
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+  const cycle: string[] = [];
+  
+  function dfs(node: string): boolean {
+    if (recursionStack.has(node)) {
+      cycle.push(node);
+      return true;
+    }
+    if (visited.has(node)) {
+      return false;
+    }
+    
+    visited.add(node);
+    recursionStack.add(node);
+    
+    const deps = graph.get(node) || [];
+    for (const dep of deps) {
+      if (dfs(dep)) {
+        cycle.unshift(node);
+        return true;
+      }
+    }
+    
+    recursionStack.delete(node);
+    return false;
+  }
+  
+  for (const node of graph.keys()) {
+    if (!visited.has(node)) {
+      if (dfs(node)) {
+        return cycle;
+      }
+    }
+  }
+  
+  return [];
+}
+
 interface AddOptions {
   flowName: string;
   laneName: string;
@@ -202,6 +263,77 @@ function findLaneFile(flowDir: string, laneName: string): string | null {
 }
 
 /**
+ * Extract lane name from file path (handles both "backend.json" and "01-backend.json" formats)
+ */
+function getLaneNameFromFile(laneFile: string): string {
+  const fileName = path.basename(laneFile);
+  const baseName = fileName.replace('.json', '');
+  
+  // Remove numeric prefix if present (e.g., "01-backend" -> "backend")
+  const match = baseName.match(/^\d+-(.+)$/);
+  return match ? match[1] : baseName;
+}
+
+/**
+ * Collect all tasks from all lanes in a flow for cycle detection
+ * Includes existing tasks and new tasks to be added
+ */
+function collectAllTasksFromFlow(
+  flowDir: string,
+  currentLaneName: string,
+  currentLaneConfig: LaneConfig,
+  newTasks: FlowTask[]
+): TaskNode[] {
+  const allTasks: TaskNode[] = [];
+  
+  // Get all lane files in the flow
+  const laneFiles = fs.readdirSync(flowDir)
+    .filter(name => name.endsWith('.json') && name !== 'flow.meta.json');
+  
+  for (const fileName of laneFiles) {
+    const filePath = safeJoin(flowDir, fileName);
+    const baseName = fileName.replace('.json', '');
+    
+    // Extract lane name (handles "01-backend.json" -> "backend")
+    const match = baseName.match(/^\d+-(.+)$/);
+    const laneName = match ? match[1] : baseName;
+    
+    try {
+      // For current lane, use the config with new tasks
+      if (laneName === currentLaneName) {
+        // Add existing tasks
+        for (const task of currentLaneConfig.tasks) {
+          allTasks.push({
+            id: `${laneName}:${task.name}`,
+            dependsOn: task.dependsOn || [],
+          });
+        }
+        // Add new tasks
+        for (const task of newTasks) {
+          allTasks.push({
+            id: `${laneName}:${task.name}`,
+            dependsOn: task.dependsOn || [],
+          });
+        }
+      } else {
+        // For other lanes, read from file
+        const config: LaneConfig = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        for (const task of config.tasks || []) {
+          allTasks.push({
+            id: `${laneName}:${task.name}`,
+            dependsOn: task.dependsOn || [],
+          });
+        }
+      }
+    } catch {
+      // Skip invalid files
+    }
+  }
+  
+  return allTasks;
+}
+
+/**
  * Resolve --after dependencies to dependsOn format
  */
 function resolveAfterDependencies(
@@ -360,6 +492,19 @@ async function addTasks(args: string[]): Promise<void> {
 
     return task;
   });
+
+  // Validate cyclic dependencies before adding tasks
+  const currentLaneName = getLaneNameFromFile(laneFile);
+  const allTasks = collectAllTasksFromFlow(flowDir, currentLaneName, laneConfig, newTasks);
+  const cyclePath = detectCyclicDependencies(allTasks);
+  
+  if (cyclePath.length > 0) {
+    logger.error(`순환 참조가 감지되었습니다: ${cyclePath.join(' → ')}`);
+    console.log('\n의존성 설정을 확인하세요:');
+    console.log('  - 동일 lane 내 태스크 간 순환 참조');
+    console.log('  - 다른 lane의 태스크와 순환 참조');
+    process.exit(1);
+  }
 
   // Add tasks to lane
   laneConfig.tasks.push(...newTasks);

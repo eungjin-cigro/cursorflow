@@ -287,7 +287,8 @@ export class TaskService {
       try {
         const filePath = path.join(taskInfo.path, lane.fileName);
         const content = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        const laneName = lane.fileName.replace('.json', '');
+        // Use the extracted laneName which already handles numeric prefix removal
+        const laneName = lane.laneName;
         
         if (Array.isArray(content.tasks)) {
           for (const task of content.tasks) {

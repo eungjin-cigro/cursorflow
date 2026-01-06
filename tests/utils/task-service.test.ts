@@ -160,4 +160,153 @@ describe('TaskService', () => {
       expect(res.ok).toBe(true);
     });
   });
+
+  describe('validateTaskDir - circular dependencies', () => {
+    it('should detect circular dependencies between tasks in the same lane', () => {
+      const taskName = '2412221530_CyclicTask';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Create a lane with circular dependency: task1 -> task2 -> task1
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1', dependsOn: ['lane1:task2'] },
+          { name: 'task2', prompt: 'p2', dependsOn: ['lane1:task1'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('errors');
+      expect(result.errors.some(e => e.includes('Circular'))).toBe(true);
+    });
+
+    it('should detect self-referencing task dependency', () => {
+      const taskName = '2412221530_SelfRefTask';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Create a lane with self-reference: task1 -> task1
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1', dependsOn: ['lane1:task1'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('errors');
+      expect(result.errors.some(e => e.includes('Circular'))).toBe(true);
+    });
+
+    it('should detect circular dependencies across different lanes', () => {
+      const taskName = '2412221530_CrossLaneCycle';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Create two lanes with circular dependency
+      // lane1:task1 -> lane2:task1 -> lane1:task1
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1', dependsOn: ['lane2:task1'] }
+        ]
+      }));
+      fs.writeFileSync(path.join(taskPath, 'lane2.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1', dependsOn: ['lane1:task1'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('errors');
+      expect(result.errors.some(e => e.includes('Circular'))).toBe(true);
+    });
+
+    it('should detect longer circular dependency chains (A -> B -> C -> A)', () => {
+      const taskName = '2412221530_LongCycle';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Create a lane with 3-node cycle: taskA -> taskB -> taskC -> taskA
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'taskA', prompt: 'pA', dependsOn: ['lane1:taskC'] },
+          { name: 'taskB', prompt: 'pB', dependsOn: ['lane1:taskA'] },
+          { name: 'taskC', prompt: 'pC', dependsOn: ['lane1:taskB'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('errors');
+      expect(result.errors.some(e => e.includes('Circular'))).toBe(true);
+    });
+
+    it('should pass validation for valid non-cyclic dependencies', () => {
+      const taskName = '2412221530_ValidDeps';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Create valid DAG: task1 -> task2 -> task3 (no cycles)
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1' },
+          { name: 'task2', prompt: 'p2', dependsOn: ['lane1:task1'] },
+          { name: 'task3', prompt: 'p3', dependsOn: ['lane1:task2'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('valid');
+      expect(result.errors.length).toBe(0);
+    });
+
+    it('should pass validation for multiple lanes with valid dependencies', () => {
+      const taskName = '2412221530_ValidMultiLane';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // lane1: task1 -> task2
+      // lane2: taskA (depends on lane1:task2) -> taskB
+      fs.writeFileSync(path.join(taskPath, 'lane1.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1' },
+          { name: 'task2', prompt: 'p2', dependsOn: ['lane1:task1'] }
+        ]
+      }));
+      fs.writeFileSync(path.join(taskPath, 'lane2.json'), JSON.stringify({
+        tasks: [
+          { name: 'taskA', prompt: 'pA', dependsOn: ['lane1:task2'] },
+          { name: 'taskB', prompt: 'pB', dependsOn: ['lane2:taskA'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('valid');
+      expect(result.errors.length).toBe(0);
+    });
+
+    it('should detect cycle with numeric prefix in lane files (01-lane1.json)', () => {
+      const taskName = '2412221530_NumericPrefixCycle';
+      const taskPath = path.join(tasksDir, taskName);
+      fs.mkdirSync(taskPath, { recursive: true });
+      
+      // Test with numeric prefix file names
+      // The dependencies use the extracted lane name (without prefix)
+      fs.writeFileSync(path.join(taskPath, '01-backend.json'), JSON.stringify({
+        tasks: [
+          { name: 'task1', prompt: 'p1', dependsOn: ['backend:task2'] },
+          { name: 'task2', prompt: 'p2', dependsOn: ['backend:task1'] }
+        ]
+      }));
+
+      const result = taskService.validateTaskDir(taskName);
+      
+      expect(result.status).toBe('errors');
+      expect(result.errors.some(e => e.includes('Circular'))).toBe(true);
+    });
+  });
 });
