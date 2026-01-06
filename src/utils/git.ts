@@ -1272,3 +1272,55 @@ export function syncWithRemote(branch: string, options: {
   
   return { success: true };
 }
+
+/**
+ * Check if the repository is a shallow clone
+ */
+export function isShallowRepository(options: { cwd?: string } = {}): boolean {
+  const result = runGitResult(['rev-parse', '--is-shallow-repository'], { cwd: options.cwd });
+  return result.success && result.stdout.trim() === 'true';
+}
+
+/**
+ * Unshallow a shallow clone repository
+ * This fetches the full git history which is required for proper worktree and branch operations
+ * 
+ * @returns true if unshallow was performed, false if already full clone
+ */
+export function ensureUnshallow(options: { cwd?: string; silent?: boolean } = {}): boolean {
+  if (!isShallowRepository(options)) {
+    return false;
+  }
+  
+  if (!options.silent) {
+    logger.info('🔄 Detected shallow clone, fetching full history for proper worktree support...');
+  }
+  
+  try {
+    // Unshallow the repository to get full history
+    runGit(['fetch', '--unshallow'], { cwd: options.cwd, silent: options.silent });
+    
+    if (!options.silent) {
+      logger.info('✅ Repository unshallowed successfully');
+    }
+    
+    return true;
+  } catch (e: any) {
+    // If already unshallowed or remote doesn't support it, try alternative approach
+    if (e.message?.includes('unshallow') || e.message?.includes('shallow')) {
+      try {
+        // Alternative: fetch full history
+        runGit(['fetch', '--depth=2147483647'], { cwd: options.cwd, silent: options.silent });
+        return true;
+      } catch {
+        // Ignore, already have enough history
+      }
+    }
+    
+    if (!options.silent) {
+      logger.warn(`⚠️ Could not unshallow repository: ${e.message}`);
+    }
+    
+    return false;
+  }
+}

@@ -17,6 +17,14 @@ export interface WorktreeSetupOptions {
 export class GitPipelineCoordinator {
   async ensureWorktree(options: WorktreeSetupOptions): Promise<void> {
     const { worktreeDir, pipelineBranch, repoRoot, baseBranch } = options;
+    
+    // Ensure repository is not shallow before creating worktrees
+    // Shallow clones have incomplete history which can cause issues with:
+    // - Worktree creation (missing parent commits)
+    // - Branch push (rejected due to incomplete history)
+    // - Dependency merging (branches not found on remote)
+    git.ensureUnshallow({ cwd: repoRoot });
+    
     const worktreeNeedsCreation = !fs.existsSync(worktreeDir);
     const worktreeIsInvalid = !worktreeNeedsCreation && !git.isValidWorktree(worktreeDir);
 

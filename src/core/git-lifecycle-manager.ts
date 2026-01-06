@@ -304,6 +304,13 @@ export class GitLifecycleManager {
     });
     
     try {
+      // 0. Ensure repository is not shallow before creating worktrees
+      // Shallow clones have incomplete history which can cause issues with:
+      // - Worktree creation (missing parent commits)
+      // - Branch push (rejected due to incomplete history)
+      // - Dependency merging (branches not found on remote)
+      git.ensureUnshallow({ cwd: repoRoot });
+      
       // 1. 워크트리 확인/생성
       const worktreeResult = await this.ensureWorktree(worktreeDir, branchName, baseBranch, repoRoot, laneName);
       if (!worktreeResult.success) {
