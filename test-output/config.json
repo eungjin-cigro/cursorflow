@@ -1,0 +1,23 @@
+{
+  "projectName": "CursorFlow Test Project",
+  "version": "1.0.0",
+  "environment": "test",
+  "settings": {
+    "debug": false,
+    "logLevel": "info",
+    "timeout": 30000,
+    "retries": 3
+  },
+  "features": {
+    "parallelExecution": true,
+    "autoRetry": true,
+    "checkpointing": true
+  },
+  "paths": {
+    "workspaceRoot": "/repos/cursorflow/_cursorflow/worktrees/cursorflow-run-mk2am6fy-lgyfw-01-setup",
+    "outputDir": "./test-output",
+    "logsDir": "./test-output/logs"
+  },
+  "initialized": true,
+  "timestamp": "2026-01-06T00:00:00.000Z"
+}
