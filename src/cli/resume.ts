@@ -68,8 +68,17 @@ function parseArgs(args: string[]): ResumeOptions {
   const maxConcurrentIdx = args.indexOf('--max-concurrent');
   const executorIdx = args.indexOf('--executor');
   
+  // Collect indices that are used as flag values (not lane names)
+  const flagValueIndices = new Set<number>();
+  if (runDirIdx >= 0) flagValueIndices.add(runDirIdx + 1);
+  if (maxConcurrentIdx >= 0) flagValueIndices.add(maxConcurrentIdx + 1);
+  if (executorIdx >= 0) flagValueIndices.add(executorIdx + 1);
+  
+  // Find lane: must not start with '--' AND must not be a flag value
+  const laneArg = args.find((a, i) => !a.startsWith('--') && !flagValueIndices.has(i)) || null;
+  
   return {
-    lane: args.find(a => !a.startsWith('--')) || null,
+    lane: laneArg,
     runDir: runDirIdx >= 0 ? args[runDirIdx + 1] || null : null,
     clean: args.includes('--clean'),
     restart: args.includes('--restart'),
