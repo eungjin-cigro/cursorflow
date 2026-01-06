@@ -1,0 +1,28 @@
+{
+  "projectName": "cursorflow",
+  "version": "1.0.0",
+  "environment": "test",
+  "settings": {
+    "debug": false,
+    "logLevel": "info",
+    "maxConcurrentTasks": 4,
+    "timeout": 30000
+  },
+  "features": {
+    "gitWorktree": true,
+    "parallelExecution": true,
+    "autoRecovery": true
+  },
+  "paths": {
+    "worktreeRoot": "/repos/cursorflow/_cursorflow/worktrees",
+    "logsDir": ".cursorflow/logs",
+    "stateDir": ".cursorflow/state"
+  },
+  "git": {
+    "defaultBranch": "main",
+    "autoCommit": true,
+    "commitPrefix": "feat:"
+  },
+  "createdAt": "2026-01-06T00:00:00.000Z",
+  "updatedAt": "2026-01-06T00:00:00.000Z"
+}
