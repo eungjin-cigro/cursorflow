@@ -1,0 +1,31 @@
+{
+  "projectName": "cursorflow",
+  "version": "1.0.0",
+  "environment": "test",
+  "features": {
+    "parallelExecution": true,
+    "gitWorktrees": true,
+    "aiOrchestration": true
+  },
+  "settings": {
+    "maxConcurrentLanes": 5,
+    "defaultTimeout": 300000,
+    "logLevel": "info",
+    "outputFormat": "json"
+  },
+  "paths": {
+    "worktreeRoot": "/repos/cursorflow/_cursorflow/worktrees",
+    "logsDirectory": "./logs",
+    "stateDirectory": "./.cursorflow"
+  },
+  "git": {
+    "baseBranch": "main",
+    "autoCommit": true,
+    "pushOnComplete": true
+  },
+  "initialization": {
+    "timestamp": "2026-01-06T00:00:00.000Z",
+    "configuredBy": "cursorflow-agent",
+    "status": "initialized"
+  }
+}
