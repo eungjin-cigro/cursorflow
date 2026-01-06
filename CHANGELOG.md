@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.12] - 2026-01-06
+
+### Fixed
+- **Git Fetch Refspec**: Fixed dependency branch merge failures by using proper refspec to update remote tracking refs (`origin/<branch>`). Previously `git fetch origin <branch>` only updated `FETCH_HEAD`, causing "not something we can merge" errors when dependent lanes tried to merge.
+- **Shallow Clone Support**: Added automatic detection and unshallow of shallow clones before worktree creation. Shallow clones (`--depth 1`) caused issues with worktree creation, branch push, and dependency merging.
+
+### Added
+- **Git Utilities**: New `isShallowRepository()` and `ensureUnshallow()` functions in `git.ts` for shallow clone handling.
+
 ## [0.2.9] - 2026-01-06
 
 ### Added
