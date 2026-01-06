@@ -1,0 +1,32 @@
+{
+  "project": {
+    "name": "cursorflow-test-project",
+    "version": "1.0.0",
+    "description": "Test project configuration for CursorFlow"
+  },
+  "settings": {
+    "parallelLanes": 3,
+    "timeout": 300000,
+    "retryOnFailure": true,
+    "maxRetries": 2
+  },
+  "paths": {
+    "workspaceRoot": "/repos/cursorflow",
+    "worktreeBase": "/repos/cursorflow/_cursorflow/worktrees",
+    "logsDir": ".cursorflow/logs"
+  },
+  "agent": {
+    "outputFormat": "stream-json",
+    "autoApprove": true,
+    "printOutput": true
+  },
+  "git": {
+    "mainBranch": "main",
+    "worktreePrefix": "cursorflow/run"
+  },
+  "features": {
+    "enableHooks": true,
+    "enableCheckpoints": true,
+    "enableLogging": true
+  }
+}
