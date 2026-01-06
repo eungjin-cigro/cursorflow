@@ -732,15 +732,22 @@ export async function finalizeFlow(params: {
     
     // Delete local and remote lane branches
     for (const branch of laneBranches) {
-      try {
-        git.deleteBranch(branch, { cwd: repoRoot, force: true });
+      // Delete local branch (if exists - lane runner may have already deleted it)
+      if (git.branchExists(branch, { cwd: repoRoot })) {
         try {
-          git.deleteBranch(branch, { cwd: repoRoot, remote: true });
-        } catch {
-          // Remote branch might not exist or no permission
+          git.deleteBranch(branch, { cwd: repoRoot, force: true });
+          logger.info(`  Deleted local branch: ${branch}`);
+        } catch (e) {
+          logger.warn(`Failed to delete local branch ${branch}: ${e}`);
         }
-      } catch (e) {
-        logger.warn(`Failed to delete branch ${branch}: ${e}`);
+      }
+      
+      // Delete remote branch (always try - it should exist)
+      try {
+        git.deleteBranch(branch, { cwd: repoRoot, remote: true });
+        logger.info(`  Deleted remote branch: ${branch}`);
+      } catch {
+        // Remote branch might not exist or no permission - this is OK
       }
     }
     

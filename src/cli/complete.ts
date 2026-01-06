@@ -259,17 +259,22 @@ async function complete(args: string[]): Promise<void> {
       
       // Delete local and remote lane branches
       for (const branch of laneBranches) {
-        logger.info(`Deleting branch: ${branch}`);
-        try {
-          git.deleteBranch(branch, { cwd: repoRoot, force: true });
-          // Try deleting remote branch too
+        // Delete local branch (if exists - lane runner may have already deleted it)
+        if (git.branchExists(branch, { cwd: repoRoot })) {
+          logger.info(`Deleting local branch: ${branch}`);
           try {
-            git.deleteBranch(branch, { cwd: repoRoot, remote: true });
-          } catch {
-            // Might not exist on remote or no permission
+            git.deleteBranch(branch, { cwd: repoRoot, force: true });
+          } catch (e) {
+            logger.warn(`  Failed to delete local branch ${branch}: ${e}`);
           }
-        } catch (e) {
-          logger.warn(`  Failed to delete branch ${branch}: ${e}`);
+        }
+        
+        // Delete remote branch (always try - it should exist)
+        logger.info(`Deleting remote branch: ${branch}`);
+        try {
+          git.deleteBranch(branch, { cwd: repoRoot, remote: true });
+        } catch {
+          // Might not exist on remote or no permission - this is OK
         }
       }
 
