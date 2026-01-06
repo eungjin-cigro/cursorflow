@@ -670,16 +670,31 @@ export async function finalizeFlow(params: {
   for (const branch of laneBranches) {
     logger.info(`Merging ${branch}...`);
     
-    // Fetch remote branch if needed
-    if (!git.branchExists(branch, { cwd: repoRoot })) {
+    // Determine what ref to use for merge
+    let branchRef: string;
+    
+    if (git.branchExists(branch, { cwd: repoRoot })) {
+      // Local branch exists, use it directly
+      branchRef = branch;
+    } else {
+      // Local branch doesn't exist - fetch from remote with proper refspec
+      // Note: `git fetch origin <branch>` only updates FETCH_HEAD, not origin/<branch>
+      // We must use refspec to update the remote tracking ref
       try {
-        git.runGit(['fetch', 'origin', branch], { cwd: repoRoot });
+        git.runGit(['fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`], { cwd: repoRoot });
+        branchRef = `origin/${branch}`;
       } catch (e) {
-        logger.warn(`Failed to fetch ${branch}: ${e}`);
+        // Fallback: try fetching and use FETCH_HEAD directly
+        logger.warn(`Failed to fetch with refspec, trying FETCH_HEAD: ${e}`);
+        try {
+          git.runGit(['fetch', 'origin', branch], { cwd: repoRoot });
+          branchRef = 'FETCH_HEAD';
+        } catch (e2) {
+          logger.warn(`Failed to fetch ${branch}: ${e2}`);
+          throw new Error(`Cannot fetch branch ${branch} from remote`);
+        }
       }
     }
-    
-    const branchRef = git.branchExists(branch, { cwd: repoRoot }) ? branch : `origin/${branch}`;
     
     const mergeResult = git.safeMerge(branchRef, {
       cwd: repoRoot,
