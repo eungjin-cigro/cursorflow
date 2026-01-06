@@ -445,10 +445,32 @@ export class GitLifecycleManager {
     laneName: string
   ): Promise<GitOperationResult> {
     try {
-      // 원격에서 fetch
-      git.runGit(['fetch', 'origin', depBranch], { cwd: worktreeDir, silent: true });
+      // Determine what ref to use for merge
+      let branchRef: string;
       
-      const remoteBranch = `origin/${depBranch}`;
+      if (git.branchExists(depBranch, { cwd: worktreeDir })) {
+        // Local branch exists, use it directly
+        branchRef = depBranch;
+      } else {
+        // Local branch doesn't exist - fetch from remote with proper refspec
+        // Note: `git fetch origin <branch>` only updates FETCH_HEAD, not origin/<branch>
+        // We must use refspec to update the remote tracking ref
+        try {
+          git.runGit(['fetch', 'origin', `${depBranch}:refs/remotes/origin/${depBranch}`], { cwd: worktreeDir, silent: true });
+          branchRef = `origin/${depBranch}`;
+        } catch {
+          // Fallback: try fetching and use FETCH_HEAD directly
+          this.log(`[${laneName}] Failed to fetch with refspec, trying FETCH_HEAD`);
+          try {
+            git.runGit(['fetch', 'origin', depBranch], { cwd: worktreeDir, silent: true });
+            branchRef = 'FETCH_HEAD';
+          } catch (e2: any) {
+            return { success: false, error: `Cannot fetch branch ${depBranch} from remote: ${e2.message}` };
+          }
+        }
+      }
+      
+      const remoteBranch = branchRef;
       
       // 충돌 사전 체크
       const conflictCheck = git.checkMergeConflict(remoteBranch, { cwd: worktreeDir });

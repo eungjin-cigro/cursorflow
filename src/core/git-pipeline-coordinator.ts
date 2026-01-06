@@ -94,9 +94,34 @@ export class GitPipelineCoordinator {
         if (!state?.pipelineBranch) continue;
 
         logger.info(`Merging branch from ${laneName}: ${state.pipelineBranch}`);
-        git.runGit(['fetch', 'origin', state.pipelineBranch], { cwd: worktreeDir, silent: true });
+        
+        // Determine what ref to use for merge
+        let branchRef: string;
+        const depBranch = state.pipelineBranch;
+        
+        if (git.branchExists(depBranch, { cwd: worktreeDir })) {
+          // Local branch exists, use it directly
+          branchRef = depBranch;
+        } else {
+          // Local branch doesn't exist - fetch from remote with proper refspec
+          // Note: `git fetch origin <branch>` only updates FETCH_HEAD, not origin/<branch>
+          // We must use refspec to update the remote tracking ref
+          try {
+            git.runGit(['fetch', 'origin', `${depBranch}:refs/remotes/origin/${depBranch}`], { cwd: worktreeDir, silent: true });
+            branchRef = `origin/${depBranch}`;
+          } catch {
+            // Fallback: try fetching and use FETCH_HEAD directly
+            logger.warn(`Failed to fetch with refspec, trying FETCH_HEAD`);
+            try {
+              git.runGit(['fetch', 'origin', depBranch], { cwd: worktreeDir, silent: true });
+              branchRef = 'FETCH_HEAD';
+            } catch (e2: any) {
+              throw new Error(`Cannot fetch branch ${depBranch} from remote: ${e2.message}`);
+            }
+          }
+        }
 
-        const remoteBranchRef = `origin/${state.pipelineBranch}`;
+        const remoteBranchRef = branchRef;
         const conflictCheck = git.checkMergeConflict(remoteBranchRef, { cwd: worktreeDir });
 
         if (conflictCheck.willConflict) {
