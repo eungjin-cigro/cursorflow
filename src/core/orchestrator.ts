@@ -977,23 +977,60 @@ export async function orchestrate(tasksDir: string, options: {
     printLaneStatus(lanes, laneRunDirs);
   }, options.pollInterval || 60000);
   
-  // Handle process interruption
-  const sigIntHandler = () => {
-    logger.warn('\n⚠️  Orchestration interrupted! Stopping all lanes...');
+  // Handle process interruption - ensure proper state cleanup
+  const handleGracefulShutdown = async (signal: string) => {
+    logger.warn(`\n⚠️  Orchestration interrupted by ${signal}! Stopping all lanes...`);
+    
+    // 1. Stop running lanes and update their state to 'paused'
     for (const [name, info] of running.entries()) {
       logger.info(`Stopping lane: ${name}`);
       try {
+        // Update state to 'paused' (not 'completed'!) before killing
+        const state = loadState<LaneState>(info.statePath);
+        if (state && state.status === 'running') {
+          state.status = 'paused';
+          state.error = `Orchestration interrupted by ${signal}`;
+          state.endTime = Date.now();
+          saveState(info.statePath, state);
+        }
+        
         info.child.kill('SIGTERM');
-      } catch {
-        // Ignore kill errors
+      } catch (e) {
+        // Ignore kill errors but log them for debugging
+        logger.debug(`Error stopping lane ${name}: ${e}`);
       }
     }
+    
+    // 2. Update any pending (not started) lanes to 'pending' with clear status
+    for (const lane of lanes) {
+      if (!completedLanes.has(lane.name) && !failedLanes.has(lane.name) && !running.has(lane.name)) {
+        const statePath = safeJoin(laneRunDirs[lane.name]!, 'state.json');
+        try {
+          const state = loadState<LaneState>(statePath);
+          if (state) {
+            // Only update if not already completed/failed
+            if (state.status !== 'completed' && state.status !== 'failed') {
+              state.status = 'pending';
+              state.error = `Orchestration interrupted before lane started`;
+              saveState(statePath, state);
+            }
+          }
+        } catch {
+          // State file might not exist yet
+        }
+      }
+    }
+    
     printLaneStatus(lanes, laneRunDirs);
+    logger.info('\n💡 To resume: cursorflow resume --all');
     process.exit(130);
   };
   
+  const sigIntHandler = () => handleGracefulShutdown('SIGINT');
+  const sigTermHandler = () => handleGracefulShutdown('SIGTERM');
+  
   process.on('SIGINT', sigIntHandler);
-  process.on('SIGTERM', sigIntHandler);
+  process.on('SIGTERM', sigTermHandler);
   
   let lastStallCheck = Date.now();
   
@@ -1313,7 +1350,7 @@ export async function orchestrate(tasksDir: string, options: {
   } finally {
     clearInterval(monitorInterval);
     process.removeListener('SIGINT', sigIntHandler);
-    process.removeListener('SIGTERM', sigIntHandler);
+    process.removeListener('SIGTERM', sigTermHandler);
   }
   
   printLaneStatus(lanes, laneRunDirs);

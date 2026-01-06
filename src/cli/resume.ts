@@ -690,7 +690,18 @@ async function resume(args: string[]): Promise<void> {
   logger.setDefaultContext('MAIN');
   logger.setLogFile(safeJoin(runDir, MAIN_LOG_FILENAME));
   
-  const allLanes = getAllLaneStatuses(runDir);
+  // IMPORTANT: Check for zombie lanes FIRST, before reading lane statuses
+  // This ensures that zombie lanes (status="running" but process dead) are 
+  // properly marked as "failed" before we determine which lanes need resume
+  const zombieCheck = checkAndFixZombieLanes(runDir);
+  if (zombieCheck.fixed.length > 0) {
+    logger.section('🔧 Zombie Lane Recovery');
+    logger.info(`Fixed ${zombieCheck.fixed.length} zombie lane(s): ${zombieCheck.fixed.join(', ')}`);
+    console.log('');
+  }
+  
+  // Now read lane statuses AFTER zombie fix - this ensures we get the corrected states
+  let allLanes = getAllLaneStatuses(runDir);
   let lanesToResume: LaneInfo[] = [];
 
   // Check if the lane argument is actually a tasks directory or a flow name
@@ -698,7 +709,37 @@ async function resume(args: string[]): Promise<void> {
     let tasksDir = '';
     const lanePathAbs = path.resolve(originalCwd, options.lane);
     
-    if (fs.existsSync(lanePathAbs) && fs.statSync(lanePathAbs).isDirectory()) {
+    // Validate: Check if user accidentally passed a runs directory instead of a flow directory
+    // This is a common mistake that leads to "No incomplete lanes found" errors
+    const runsDir = safeJoin(logsDir, 'runs');
+    if (lanePathAbs.startsWith(runsDir)) {
+      logger.warn(`⚠️ The path appears to be a run directory, not a flow/tasks directory.`);
+      logger.warn(`   Run directory: ${lanePathAbs}`);
+      logger.info(`   Did you mean to use --run-dir instead?`);
+      logger.info(`   Example: cursorflow resume --all --run-dir ${lanePathAbs}`);
+      
+      // Auto-correct: treat as run directory if it looks like one
+      if (!options.runDir) {
+        logger.info(`   Auto-correcting: using as run directory...`);
+        runDir = lanePathAbs;
+        
+        // Re-check zombies and re-read lanes from the corrected run directory
+        const zombieCheck2 = checkAndFixZombieLanes(runDir);
+        if (zombieCheck2.fixed.length > 0) {
+          logger.info(`Fixed ${zombieCheck2.fixed.length} additional zombie lane(s)`);
+        }
+        allLanes = getAllLaneStatuses(runDir);
+        
+        // Fall through to --all behavior
+        lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
+      } else {
+        // User specified --run-dir AND a run path as lane, this is confusing
+        throw new Error(
+          `Invalid usage: '${options.lane}' looks like a run directory path.\n` +
+          `Use --run-dir to specify the run directory, or provide a flow/lane name.`
+        );
+      }
+    } else if (fs.existsSync(lanePathAbs) && fs.statSync(lanePathAbs).isDirectory()) {
       tasksDir = lanePathAbs;
     } else {
       // Try finding in flowsDir
@@ -709,17 +750,31 @@ async function resume(args: string[]): Promise<void> {
       }
     }
 
-    if (tasksDir) {
+    // Only do tasksDir-based filtering if we identified a tasksDir (and didn't auto-correct to --all)
+    if (tasksDir && lanesToResume.length === 0) {
       lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile && path.resolve(l.state.tasksFile).startsWith(tasksDir));
       
       if (lanesToResume.length > 0) {
         logger.info(`📂 Flow/Task directory detected: ${options.lane}`);
         logger.info(`Resuming ${lanesToResume.length} lane(s) from this directory.`);
       } else {
-        logger.warn(`No incomplete lanes found using tasks from directory: ${options.lane}`);
+        // More helpful error message with diagnostic info
+        const allTasksFiles = allLanes
+          .filter(l => l.state?.tasksFile)
+          .map(l => l.state!.tasksFile!);
+        
+        logger.warn(`No incomplete lanes found using tasks from directory: ${tasksDir}`);
+        if (allTasksFiles.length > 0) {
+          logger.debug(`Available task files in this run:`);
+          for (const tf of allTasksFiles) {
+            logger.debug(`  - ${tf}`);
+          }
+          logger.info(`Hint: Make sure the flow directory matches where the run was started from.`);
+        }
         return;
       }
-    } else {
+    } else if (!tasksDir && lanesToResume.length === 0) {
+      // Not a directory path, try as lane name
       const lane = allLanes.find(l => l.name === options.lane);
       if (!lane) {
         throw new Error(`Lane '${options.lane}' not found in run directory.`);
@@ -733,14 +788,6 @@ async function resume(args: string[]): Promise<void> {
   } else if (options.all) {
     lanesToResume = allLanes.filter(l => l.needsResume && l.state?.tasksFile);
   }
-
-  // Check for zombie lanes
-  const zombieCheck = checkAndFixZombieLanes(runDir);
-  if (zombieCheck.fixed.length > 0) {
-    logger.section('🔧 Zombie Lane Recovery');
-    logger.info(`Fixed ${zombieCheck.fixed.length} zombie lane(s): ${zombieCheck.fixed.join(', ')}`);
-    console.log('');
-  }
   
   if (options.status) {
     printAllLaneStatus(runDir);
@@ -749,7 +796,16 @@ async function resume(args: string[]): Promise<void> {
   
   if (lanesToResume.length === 0) {
     if (options.lane || options.all) {
-      logger.success('No lanes need to be resumed.');
+      // Provide more context about why no lanes need resume
+      const allCompleted = allLanes.every(l => l.isCompleted);
+      if (allCompleted && allLanes.length > 0) {
+        logger.success(`All ${allLanes.length} lanes are already completed!`);
+      } else if (allLanes.length === 0) {
+        logger.warn(`No lanes found in run directory: ${runDir}`);
+        logger.info(`The run may not have started yet or the state files are missing.`);
+      } else {
+        logger.success('No lanes need to be resumed.');
+      }
     } else {
       printAllLaneStatus(runDir);
     }
