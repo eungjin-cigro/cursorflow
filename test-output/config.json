@@ -1,0 +1,28 @@
+{
+  "name": "cursorflow-test-project",
+  "version": "1.0.0",
+  "description": "Test configuration for CursorFlow orchestration",
+  "settings": {
+    "maxConcurrentLanes": 3,
+    "worktreeBasePath": "./_cursorflow/worktrees",
+    "logLevel": "info",
+    "timeout": 3600000
+  },
+  "lanes": {
+    "enabled": true,
+    "defaultTemplate": "basic"
+  },
+  "git": {
+    "autoCommit": true,
+    "branchPrefix": "cursorflow"
+  },
+  "agent": {
+    "type": "cursor-agent",
+    "outputFormat": "stream-json",
+    "flags": ["--print", "--force", "--approve-mcps"]
+  },
+  "monitoring": {
+    "enabled": true,
+    "interval": 5000
+  }
+}
