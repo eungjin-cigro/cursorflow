@@ -1,0 +1,23 @@
+{
+  "projectName": "CursorFlow",
+  "version": "1.0.0",
+  "environment": "test",
+  "settings": {
+    "enableLogging": true,
+    "logLevel": "info",
+    "maxConcurrentLanes": 3,
+    "timeoutMinutes": 30
+  },
+  "features": {
+    "parallelExecution": true,
+    "autoRecovery": true,
+    "webhookNotifications": false
+  },
+  "paths": {
+    "workTreeRoot": "/repos/cursorflow/_cursorflow/worktrees",
+    "logsDirectory": ".cursorflow/logs",
+    "stateDirectory": ".cursorflow/state"
+  },
+  "createdAt": "2026-01-06T08:20:00Z",
+  "createdBy": "cursorflow-init"
+}
