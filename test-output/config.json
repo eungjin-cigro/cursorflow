@@ -1,0 +1,48 @@
+{
+  "project": {
+    "name": "cursorflow-test-project",
+    "version": "1.0.0",
+    "description": "Test configuration for CursorFlow initialization"
+  },
+  "settings": {
+    "logLevel": "info",
+    "maxConcurrentLanes": 3,
+    "defaultTimeout": 300000,
+    "retryAttempts": 2
+  },
+  "git": {
+    "baseBranch": "main",
+    "worktreeBasePath": ".cursorflow/worktrees",
+    "autoCommit": true,
+    "commitMessagePrefix": "cursorflow:"
+  },
+  "agent": {
+    "outputFormat": "stream-json",
+    "printOutput": true,
+    "forceExecution": true,
+    "approveMcps": true
+  },
+  "orchestration": {
+    "stallDetection": {
+      "enabled": true,
+      "timeout": 60000
+    },
+    "autoRecovery": {
+      "enabled": true,
+      "maxRetries": 3
+    },
+    "checkpointInterval": 30000
+  },
+  "hooks": {
+    "enabled": true,
+    "customHooksPath": "./hooks"
+  },
+  "logging": {
+    "enableBuffer": true,
+    "bufferSize": 1000,
+    "logDirectory": "./logs",
+    "keepLogs": true
+  },
+  "created": "2026-01-06T00:00:00.000Z",
+  "initialized": true
+}
