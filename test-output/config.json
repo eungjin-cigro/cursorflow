@@ -1,0 +1,52 @@
+{
+  "project": {
+    "name": "cursorflow",
+    "version": "0.1.0",
+    "description": "Parallel AI agent orchestration system built on Git worktrees"
+  },
+  "environment": {
+    "nodeVersion": ">=18.0.0",
+    "runtime": "node",
+    "testFramework": "jest"
+  },
+  "paths": {
+    "src": "./src",
+    "tests": "./tests",
+    "docs": "./docs",
+    "scripts": "./scripts",
+    "templates": "./templates"
+  },
+  "build": {
+    "outputDir": "./dist",
+    "tsconfig": "./tsconfig.json",
+    "strict": true
+  },
+  "testing": {
+    "unitTests": "tests/unit/**/*.test.ts",
+    "integrationTests": "tests/integration/**/*.test.ts",
+    "e2eTests": "tests/e2e/**/*.test.ts",
+    "coverage": {
+      "enabled": true,
+      "threshold": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
+  },
+  "orchestration": {
+    "maxParallelLanes": 5,
+    "worktreeBase": "./_cursorflow/worktrees",
+    "logLevel": "info",
+    "cleanupOnExit": true
+  },
+  "git": {
+    "mainBranch": "main",
+    "branchPrefix": "cursorflow/",
+    "autoCommit": true,
+    "commitMessageFormat": "semantic"
+  },
+  "createdAt": "2026-01-06T08:41:00.000Z",
+  "lastModified": "2026-01-06T08:41:00.000Z"
+}
