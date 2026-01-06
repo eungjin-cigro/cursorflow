@@ -193,6 +193,13 @@ export class GitPipelineCoordinator {
     }
   }
 
+  /**
+   * Finalize flow branch by creating it from pipeline branch and pushing to remote.
+   * If push is rejected (e.g., branch exists on remote with different history),
+   * the branch will be renamed with a suffix and retried.
+   * 
+   * @returns The final branch name that was successfully pushed (may differ from flowBranch if renamed)
+   */
   finalizeFlowBranch({
     flowBranch,
     pipelineBranch,
@@ -201,21 +208,38 @@ export class GitPipelineCoordinator {
     flowBranch: string;
     pipelineBranch: string;
     worktreeDir: string;
-  }): void {
-    if (flowBranch === pipelineBranch) return;
+  }): string {
+    if (flowBranch === pipelineBranch) return flowBranch;
 
     logger.info(`🌿 Creating final flow branch: ${flowBranch}`);
     try {
       git.runGit(['checkout', '-B', flowBranch, pipelineBranch], { cwd: worktreeDir });
-      git.push(flowBranch, { cwd: worktreeDir, setUpstream: true });
+      
+      // Push with fallback branch name if rejected
+      const pushResult = git.pushWithFallbackBranchName(flowBranch, { cwd: worktreeDir, setUpstream: true });
+      
+      if (!pushResult.success) {
+        throw new Error(pushResult.error || 'Push failed');
+      }
+      
+      const finalBranchName = pushResult.finalBranchName;
+      
+      // If branch was renamed, update the local branch reference
+      if (pushResult.renamed && finalBranchName !== flowBranch) {
+        logger.info(`📝 Branch was renamed from '${flowBranch}' to '${finalBranchName}' due to remote conflict`);
+        // The local branch has already been renamed by pushWithFallbackBranchName
+      }
 
       logger.info(`🗑️ Deleting local pipeline branch: ${pipelineBranch}`);
-      git.runGit(['checkout', flowBranch], { cwd: worktreeDir });
+      git.runGit(['checkout', finalBranchName], { cwd: worktreeDir });
       git.deleteBranch(pipelineBranch, { cwd: worktreeDir, force: true });
 
-      logger.success(`✓ Flow branch '${flowBranch}' created. Remote pipeline branch preserved for dependencies.`);
+      logger.success(`✓ Flow branch '${finalBranchName}' created. Remote pipeline branch preserved for dependencies.`);
+      
+      return finalBranchName;
     } catch (e) {
       logger.error(`❌ Failed during final consolidation: ${e}`);
+      throw e;
     }
   }
 }

@@ -721,10 +721,25 @@ export async function finalizeFlow(params: {
     logger.success(`✓ Merged ${branch}`);
   }
   
-  // 5. Push final branch
+  // 5. Push final branch (with fallback if remote branch exists with different history)
   logger.info(`Pushing '${targetBranch}' to remote...`);
-  git.push(targetBranch, { cwd: repoRoot, setUpstream: true });
-  logger.success(`✓ Pushed ${targetBranch}`);
+  const pushResult = git.pushWithFallbackBranchName(targetBranch, { cwd: repoRoot, setUpstream: true });
+  
+  if (!pushResult.success) {
+    logger.error(`❌ Failed to push integrated branch: ${pushResult.error}`);
+    if (meta) {
+      meta.status = 'failed';
+      meta.error = `Push failed: ${pushResult.error}`;
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    }
+    throw new Error(`Failed to push integrated branch: ${pushResult.error}`);
+  }
+  
+  const finalIntegratedBranch = pushResult.finalBranchName;
+  if (pushResult.renamed) {
+    logger.info(`📝 Branch was renamed from '${targetBranch}' to '${finalIntegratedBranch}' due to remote conflict`);
+  }
+  logger.success(`✓ Pushed ${finalIntegratedBranch}`);
   
   // 6. Cleanup (if not disabled)
   if (!noCleanup) {
@@ -769,14 +784,14 @@ export async function finalizeFlow(params: {
   // 7. Update FlowMeta with completion info
   if (meta) {
     meta.status = 'completed';
-    meta.integratedBranch = targetBranch;
+    meta.integratedBranch = finalIntegratedBranch;
     meta.integratedAt = new Date().toISOString();
     delete meta.error;
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   }
   
   logger.section(`🎉 Flow Completed!`);
-  logger.info(`Integrated branch: ${targetBranch}`);
+  logger.info(`Integrated branch: ${finalIntegratedBranch}`);
   logger.success(`All ${laneBranches.length} lanes merged successfully.`);
 }
 
@@ -901,6 +916,10 @@ export async function orchestrate(tasksDir: string, options: {
   const laneRunDirs: Record<string, string> = {};
   const laneWorktreeDirs: Record<string, string> = {};
   const repoRoot = git.getRepoRoot();
+  
+  // Track waitChild promises outside the loop to avoid listener leak
+  // Each lane gets exactly one promise that is reused across poll cycles
+  const laneExitPromises: Map<string, Promise<{ name: string; code: number }>> = new Map();
   
   for (const lane of lanes) {
     laneRunDirs[lane.name] = safeJoin(runRoot, 'lanes', lane.name);
@@ -1087,10 +1106,18 @@ export async function orchestrate(tasksDir: string, options: {
         pollTimeout = setTimeout(() => resolve({ name: '__poll__', code: 0 }), 10000);
       });
 
-      const promises = Array.from(running.entries()).map(async ([name, { child }]) => {
-        const code = await waitChild(child);
-        return { name, code };
-      });
+      // Create exit promises only for lanes that don't have one yet
+      // This prevents listener leak by reusing the same promise across poll cycles
+      for (const [name, { child }] of running.entries()) {
+        if (!laneExitPromises.has(name)) {
+          laneExitPromises.set(name, waitChild(child).then(code => ({ name, code })));
+        }
+      }
+      
+      // Use existing promises instead of creating new ones
+      const promises = Array.from(running.keys())
+        .map(name => laneExitPromises.get(name)!)
+        .filter(Boolean);
       
       const result = await Promise.race([...promises, pollPromise]);
       if (pollTimeout) clearTimeout(pollTimeout);
@@ -1154,6 +1181,7 @@ export async function orchestrate(tasksDir: string, options: {
         const finished = result;
         const info = running.get(finished.name)!;
         running.delete(finished.name);
+        laneExitPromises.delete(finished.name); // Clean up promise to avoid memory leak
         exitCodes[finished.name] = finished.code;
         
         // Get stall state before unregistering

@@ -1082,6 +1082,96 @@ export function pushBranchSafe(branchName: string, options: { cwd?: string; forc
 }
 
 /**
+ * Push branch to remote with fallback branch name if push is rejected.
+ * 
+ * If the remote branch already exists and push is rejected (e.g., fetch first error),
+ * this function will rename the local branch with a suffix and retry the push.
+ * 
+ * @returns Object with success status, the final branch name used, and optional error
+ */
+export function pushWithFallbackBranchName(
+  branchName: string, 
+  options: { 
+    cwd?: string; 
+    setUpstream?: boolean;
+    maxRetries?: number;
+  } = {}
+): { success: boolean; finalBranchName: string; error?: string; renamed?: boolean } {
+  const { cwd, setUpstream = true, maxRetries = 3 } = options;
+  
+  // Check if origin exists
+  if (!remoteExists('origin', { cwd })) {
+    // If no origin, just skip pushing (useful for local tests)
+    return { success: true, finalBranchName: branchName };
+  }
+  
+  let currentBranchName = branchName;
+  let retryCount = 0;
+  let renamed = false;
+  
+  while (retryCount < maxRetries) {
+    const args = ['push'];
+    if (setUpstream) {
+      args.push('-u', 'origin', currentBranchName);
+    } else {
+      args.push('origin', currentBranchName);
+    }
+    
+    const result = runGitResult(args, { cwd });
+    
+    if (result.success) {
+      return { success: true, finalBranchName: currentBranchName, renamed };
+    }
+    
+    // Check if the error is "rejected" (remote has newer commits or branch exists with different history)
+    const isRejected = result.stderr.includes('[rejected]') || 
+                       result.stderr.includes('fetch first') ||
+                       result.stderr.includes('non-fast-forward');
+    
+    if (!isRejected) {
+      // Other error, don't retry
+      return { success: false, finalBranchName: currentBranchName, error: result.stderr };
+    }
+    
+    // Generate new branch name with suffix
+    retryCount++;
+    const timestamp = Date.now();
+    const newBranchName = `${branchName}-merged-${timestamp}`;
+    
+    logger.warn(`⚠️ Push rejected for '${currentBranchName}', renaming to '${newBranchName}'`);
+    
+    // Rename local branch
+    const renameResult = runGitResult(['branch', '-m', currentBranchName, newBranchName], { cwd });
+    if (!renameResult.success) {
+      return { 
+        success: false, 
+        finalBranchName: currentBranchName, 
+        error: `Failed to rename branch: ${renameResult.stderr}` 
+      };
+    }
+    
+    currentBranchName = newBranchName;
+    renamed = true;
+    
+    // Small delay to avoid timestamp collision
+    if (retryCount < maxRetries) {
+      // Synchronous delay
+      const start = Date.now();
+      while (Date.now() - start < 100) {
+        // busy wait
+      }
+    }
+  }
+  
+  return { 
+    success: false, 
+    finalBranchName: currentBranchName, 
+    error: `Push failed after ${maxRetries} retries`,
+    renamed,
+  };
+}
+
+/**
  * Auto-commit any uncommitted changes and push to remote
  * Used for checkpoint before destructive operations
  */

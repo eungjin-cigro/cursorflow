@@ -607,7 +607,11 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
       process.exit(1);
     }
 
-    git.push(pipelineBranch, { cwd: worktreeDir });
+    // Push pipeline branch with fallback if rejected
+    const pushResult = git.pushWithFallbackBranchName(pipelineBranch, { cwd: worktreeDir, setUpstream: true });
+    if (!pushResult.success) {
+      logger.warn(`⚠️ Failed to push pipeline branch: ${pushResult.error}`);
+    }
     
     // Set previousTaskBranch for cleanup in the next iteration
     previousTaskBranch = taskBranch;
@@ -628,11 +632,18 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   }
 
   // 2. Create flow branch from pipelineBranch and cleanup
-  gitCoordinator.finalizeFlowBranch({
+  // finalizeFlowBranch returns the actual branch name (may be renamed if push was rejected)
+  const finalFlowBranch = gitCoordinator.finalizeFlowBranch({
     flowBranch,
     pipelineBranch,
     worktreeDir,
   });
+  
+  // Update state with the final branch name (in case it was renamed)
+  if (finalFlowBranch !== flowBranch) {
+    state.pipelineBranch = finalFlowBranch;
+    logger.info(`📝 Updated state with renamed branch: ${finalFlowBranch}`);
+  }
 
   // Complete
   state.status = 'completed';
@@ -642,7 +653,7 @@ export async function runTasks(tasksFile: string, config: RunnerConfig, runDir: 
   // Log final file summary
   try {
     // Always use current branch for comparison (already captured at start)
-    const finalStats = git.runGit(['diff', '--stat', currentBranch, pipelineBranch], { cwd: repoRoot, silent: true });
+    const finalStats = git.runGit(['diff', '--stat', currentBranch, finalFlowBranch], { cwd: repoRoot, silent: true });
     if (finalStats) {
       logger.info('Final Workspace Summary:\n' + finalStats);
     }
