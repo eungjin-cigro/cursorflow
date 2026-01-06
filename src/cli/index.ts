@@ -15,6 +15,7 @@ type CommandFn = (args: string[]) => Promise<void>;
  */
 const COMMANDS: Record<string, CommandFn> = {
   init: require('./init'),
+  api: require('./api'),
   // New Flow architecture commands
   new: require('./new'),
   add: require('./add'),
@@ -63,6 +64,7 @@ function printHelp(): void {
   \x1b[33mclean\x1b[0m <type> [options]       Clean branches/worktrees/logs/tasks
   \x1b[33msignal\x1b[0m <lane> <msg>          Directly intervene in a running lane
   \x1b[33mmodels\x1b[0m [options]             List available AI models
+  \x1b[33mapi\x1b[0m [port]                Start a simple REST API server (default: 3000)
 
 \x1b[1mQUICK START\x1b[0m
   $ \x1b[32mcursorflow new MyFeature --lanes "backend,frontend"\x1b[0m
