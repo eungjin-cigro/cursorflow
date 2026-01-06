@@ -1,0 +1,28 @@
+{
+  "project": {
+    "name": "cursorflow-test",
+    "version": "1.0.0",
+    "description": "Test configuration for CursorFlow initialization"
+  },
+  "environment": {
+    "nodeVersion": ">=18.0.0",
+    "workingDirectory": "/repos/cursorflow/_cursorflow/worktrees/cursorflow-run-mk2fij5d-sem0x-01-setup"
+  },
+  "orchestration": {
+    "maxLanes": 3,
+    "enabled": true,
+    "logLevel": "info"
+  },
+  "git": {
+    "useWorktrees": true,
+    "baseBranch": "cursorflow/run-mk2fij5d-sem0x/01-setup",
+    "currentBranch": "cursorflow/run-mk2fij5d-sem0x/01-setup--01-init-config"
+  },
+  "testing": {
+    "framework": "jest",
+    "coverage": true,
+    "testMatch": ["**/*.test.ts", "**/*.spec.ts"]
+  },
+  "initialized": true,
+  "timestamp": "2026-01-06T10:10:00.000Z"
+}
